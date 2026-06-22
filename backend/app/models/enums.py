@@ -1,0 +1,35 @@
+from enum import StrEnum
+
+
+class LocationType(StrEnum):
+    RECEIVING = "RECEIVING"
+    STORAGE = "STORAGE"
+    PICKING = "PICKING"
+    PACKING = "PACKING"
+    PICKUP_STAGING = "PICKUP_STAGING"
+    QUARANTINE = "QUARANTINE"
+    DAMAGED = "DAMAGED"
+    RETURNS = "RETURNS"
+
+
+class ReservationStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    CONSUMED = "CONSUMED"
+    RELEASED = "RELEASED"
+    EXPIRED = "EXPIRED"
+
+
+class InventoryMovementType(StrEnum):
+    RECEIVE = "RECEIVE"
+    PUTAWAY = "PUTAWAY"
+    RESERVE = "RESERVE"
+    RELEASE = "RELEASE"
+    PICK = "PICK"
+    PACK = "PACK"
+    MOVE_IN = "MOVE_IN"
+    MOVE_OUT = "MOVE_OUT"
+    BLOCK = "BLOCK"
+    UNBLOCK = "UNBLOCK"
+    DAMAGE = "DAMAGE"
+    RESTOCK = "RESTOCK"
+    ADJUSTMENT = "ADJUSTMENT"
