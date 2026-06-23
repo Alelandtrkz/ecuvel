@@ -10,6 +10,7 @@ from app.services.fulfillment import (
     FulfillmentServiceError,
     create_packages_for_order,
     pack_order_package,
+    stage_order_package_for_pickup,
 )
 
 
@@ -103,6 +104,70 @@ def pack_demo_package(
     click.echo(f"Cantidad: {result.quantity}")
     click.echo(f"Estado: {result.status.value}")
     click.echo(f"Empacado: {result.packed_at.isoformat()}")
+    click.echo(
+        "Operación repetida: "
+        f"{'sí' if result.replayed else 'no'}"
+    )
+
+
+@click.command("stage-demo-package")
+@click.option(
+    "--package-code",
+    required=True,
+    help="Código del paquete que será preparado para retiro.",
+)
+@click.option(
+    "--location-code",
+    default="PICKUP-01",
+    show_default=True,
+    help="Código de la ubicación de retiro.",
+)
+@click.option(
+    "--notes",
+    default=None,
+    help="Notas opcionales del traslado al área de retiro.",
+)
+@with_appcontext
+def stage_demo_package(
+    package_code: str,
+    location_code: str,
+    notes: str | None,
+) -> None:
+    """Prepara un paquete empacado para su retiro."""
+
+    session = db.session()
+
+    try:
+        with session.begin():
+            actor = session.scalar(
+                select(User).where(
+                    User.email == "admin@ecuvel.local"
+                )
+            )
+
+            if actor is None:
+                raise click.ClickException(
+                    "No existe el usuario de demostración."
+                )
+
+            result = stage_order_package_for_pickup(
+                session=session,
+                package_code=package_code,
+                pickup_location_code=location_code,
+                actor_user_id=actor.id,
+                notes=notes,
+            )
+
+    except FulfillmentServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("Paquete preparado para retiro.")
+    click.echo(f"Código: {result.package_code}")
+    click.echo(f"Producto: {result.product_name}")
+    click.echo(f"Cantidad: {result.quantity}")
+    click.echo(f"Estado: {result.status.value}")
+    click.echo(f"Ubicación: {result.pickup_location_code}")
+    click.echo(f"Preparado: {result.ready_at.isoformat()}")
     click.echo(
         "Operación repetida: "
         f"{'sí' if result.replayed else 'no'}"

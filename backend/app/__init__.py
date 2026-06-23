@@ -16,6 +16,7 @@ def create_app() -> Flask:
     from app.commands.fulfillment import (
         create_demo_packages,
         pack_demo_package,
+        stage_demo_package,
     )
     from app.commands.inventory import (
         consume_demo_reservation,
@@ -38,6 +39,7 @@ def create_app() -> Flask:
     app.cli.add_command(pick_demo_order)
     app.cli.add_command(create_demo_packages)
     app.cli.add_command(pack_demo_package)
+    app.cli.add_command(stage_demo_package)
 
     @app.get("/health")
     def health() -> dict[str, str]:

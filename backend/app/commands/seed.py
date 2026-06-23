@@ -221,6 +221,26 @@ def seed_demo() -> None:
             db.session.add(storage_location)
             db.session.flush()
 
+        pickup_location = db.session.scalar(
+            select(WarehouseLocation).where(
+                WarehouseLocation.warehouse_id == warehouse.id,
+                WarehouseLocation.code == "PICKUP-01",
+            )
+        )
+
+        if pickup_location is None:
+            pickup_location = WarehouseLocation(
+                warehouse_id=warehouse.id,
+                code="PICKUP-01",
+                barcode="LOC-PICKUP-01",
+                name="Área principal de retiro",
+                location_type=LocationType.PICKUP_STAGING,
+                capacity_units=100,
+                allows_mixed_offers=True,
+                is_active=True,
+            )
+            db.session.add(pickup_location)
+
         balance = db.session.scalar(
             select(InventoryBalance).where(
                 InventoryBalance.offer_id == offer.id,

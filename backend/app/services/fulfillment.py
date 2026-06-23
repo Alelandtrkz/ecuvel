@@ -9,15 +9,18 @@ from sqlalchemy.orm import Session
 
 from app.models.enums import (
     InventoryMovementType,
+    LocationType,
     PackageStatus,
     ReservationStatus,
 )
 from app.models.fulfillment import OrderPackage
 from app.models.inventory import (
+    InventoryBalance,
     InventoryMovement,
     InventoryReservation,
 )
 from app.models.order import Order, OrderItem, SellerOrder
+from app.models.warehouse import WarehouseLocation
 
 
 class FulfillmentServiceError(Exception):
@@ -42,6 +45,14 @@ class PackageIntegrityError(FulfillmentServiceError):
 
 class InvalidPackageTransitionError(FulfillmentServiceError):
     """El paquete no permite la transición solicitada."""
+
+
+class PickupLocationNotFoundError(FulfillmentServiceError):
+    """No existe la ubicación de retiro solicitada."""
+
+
+class InvalidPickupLocationError(FulfillmentServiceError):
+    """La ubicación no es válida para preparar paquetes."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +92,21 @@ class PackPackageResult:
     quantity: int
     status: PackageStatus
     packed_at: datetime
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class StagePackageForPickupResult:
+    package_id: uuid.UUID
+    package_code: str
+    barcode: str
+    order_item_id: uuid.UUID
+    product_name: str
+    quantity: int
+    status: PackageStatus
+    pickup_location_id: uuid.UUID
+    pickup_location_code: str
+    ready_at: datetime
     replayed: bool
 
 
@@ -191,6 +217,45 @@ def _validate_order_item_fully_picked(
 
         if not represents_valid_pick:
             raise _order_not_ready()
+
+
+def _get_order_item_warehouse_id(
+    *,
+    session: Session,
+    order_item: OrderItem,
+) -> uuid.UUID:
+    warehouse_ids = set(
+        session.scalars(
+            select(WarehouseLocation.warehouse_id)
+            .join(
+                InventoryBalance,
+                InventoryBalance.location_id
+                == WarehouseLocation.id,
+            )
+            .join(
+                InventoryReservation,
+                InventoryReservation.balance_id
+                == InventoryBalance.id,
+            )
+            .where(
+                InventoryReservation.order_item_id
+                == order_item.id
+            )
+        )
+    )
+
+    if not warehouse_ids:
+        raise PackageIntegrityError(
+            "No fue posible determinar el almacén del paquete."
+        )
+
+    if len(warehouse_ids) != 1:
+        raise PackageIntegrityError(
+            "Las reservas del paquete pertenecen "
+            "a varios almacenes."
+        )
+
+    return next(iter(warehouse_ids))
 
 
 def create_packages_for_order(
@@ -421,5 +486,169 @@ def pack_order_package(
         quantity=package.quantity,
         status=package.status,
         packed_at=package.packed_at,
+        replayed=False,
+    )
+
+
+def stage_order_package_for_pickup(
+    *,
+    session: Session,
+    package_code: str,
+    pickup_location_code: str,
+    actor_user_id: uuid.UUID | None = None,
+    notes: str | None = None,
+) -> StagePackageForPickupResult:
+    normalized_package_code = package_code.strip()
+    normalized_location_code = pickup_location_code.strip()
+
+    if not normalized_package_code:
+        raise ValueError("package_code es obligatorio.")
+
+    if not normalized_location_code:
+        raise ValueError("pickup_location_code es obligatorio.")
+
+    if notes is not None and len(notes) > 500:
+        raise ValueError(
+            "notes no puede superar 500 caracteres."
+        )
+
+    package = session.scalar(
+        select(OrderPackage)
+        .where(
+            OrderPackage.package_code
+            == normalized_package_code
+        )
+        .with_for_update()
+    )
+
+    if package is None:
+        raise PackageNotFoundError(
+            f"No existe el paquete {normalized_package_code}."
+        )
+
+    order_item = session.get(
+        OrderItem,
+        package.order_item_id,
+    )
+
+    if order_item is None:
+        raise PackageIntegrityError(
+            "El paquete no tiene un artículo válido."
+        )
+
+    _validate_order_item_fully_picked(
+        session=session,
+        order_item=order_item,
+    )
+
+    pickup_location = session.scalar(
+        select(WarehouseLocation)
+        .where(
+            WarehouseLocation.code
+            == normalized_location_code
+        )
+        .with_for_update()
+    )
+
+    if pickup_location is None:
+        raise PickupLocationNotFoundError(
+            f"No existe la ubicación {normalized_location_code}."
+        )
+
+    if not pickup_location.is_active:
+        raise InvalidPickupLocationError(
+            "La ubicación de retiro está inactiva."
+        )
+
+    if pickup_location.location_type != LocationType.PICKUP_STAGING:
+        raise InvalidPickupLocationError(
+            "La ubicación indicada no es un área de retiro."
+        )
+
+    package_warehouse_id = _get_order_item_warehouse_id(
+        session=session,
+        order_item=order_item,
+    )
+
+    if pickup_location.warehouse_id != package_warehouse_id:
+        raise InvalidPickupLocationError(
+            "La ubicación de retiro pertenece a otro almacén."
+        )
+
+    if package.status == PackageStatus.READY_FOR_PICKUP:
+        if (
+            package.pickup_location_id is None
+            or package.ready_at is None
+        ):
+            raise PackageIntegrityError(
+                "El paquete preparado tiene datos incompletos."
+            )
+
+        if package.pickup_location_id != pickup_location.id:
+            raise InvalidPackageTransitionError(
+                "El paquete ya está preparado "
+                "en otra ubicación."
+            )
+
+        return StagePackageForPickupResult(
+            package_id=package.id,
+            package_code=package.package_code,
+            barcode=package.barcode,
+            order_item_id=order_item.id,
+            product_name=order_item.product_name_snapshot,
+            quantity=package.quantity,
+            status=package.status,
+            pickup_location_id=pickup_location.id,
+            pickup_location_code=pickup_location.code,
+            ready_at=package.ready_at,
+            replayed=True,
+        )
+
+    if package.status == PackageStatus.CREATED:
+        raise InvalidPackageTransitionError(
+            "El paquete debe estar empacado antes "
+            "de prepararlo para retiro."
+        )
+
+    if package.status == PackageStatus.HANDED_OVER:
+        raise InvalidPackageTransitionError(
+            "El paquete ya fue entregado."
+        )
+
+    if package.status == PackageStatus.CANCELLED:
+        raise InvalidPackageTransitionError(
+            "Un paquete cancelado no puede prepararse para retiro."
+        )
+
+    if package.status != PackageStatus.PACKED:
+        raise InvalidPackageTransitionError(
+            f"No puede prepararse un paquete en estado "
+            f"{package.status.value}."
+        )
+
+    if package.packed_at is None:
+        raise PackageIntegrityError(
+            "El paquete figura como PACKED pero no tiene packed_at."
+        )
+
+    package.status = PackageStatus.READY_FOR_PICKUP
+    package.pickup_location_id = pickup_location.id
+    package.ready_at = datetime.now(timezone.utc)
+    package.ready_by_user_id = actor_user_id
+    package.ready_notes = notes
+
+    session.flush()
+
+    return StagePackageForPickupResult(
+        package_id=package.id,
+        package_code=package.package_code,
+        barcode=package.barcode,
+        order_item_id=order_item.id,
+        product_name=order_item.product_name_snapshot,
+        quantity=package.quantity,
+        status=package.status,
+        pickup_location_id=pickup_location.id,
+        pickup_location_code=pickup_location.code,
+        ready_at=package.ready_at,
         replayed=False,
     )

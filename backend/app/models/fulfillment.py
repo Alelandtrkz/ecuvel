@@ -89,6 +89,36 @@ class OrderPackage(
         nullable=True,
     )
 
+    pickup_location_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "warehouse_locations.id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    ready_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    ready_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    ready_notes: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
     order_item: Mapped["OrderItem"] = relationship(
         "OrderItem",
         back_populates="package",
@@ -96,6 +126,16 @@ class OrderPackage(
 
     packed_by: Mapped["User | None"] = relationship(
         "User",
+        foreign_keys=[packed_by_user_id],
+    )
+
+    pickup_location: Mapped["WarehouseLocation | None"] = relationship(
+        "WarehouseLocation",
+    )
+
+    ready_by: Mapped["User | None"] = relationship(
+        "User",
+        foreign_keys=[ready_by_user_id],
     )
 
     __table_args__ = (
