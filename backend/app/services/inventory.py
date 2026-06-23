@@ -1378,7 +1378,10 @@ def expire_inventory_reservations(
             reference_id=reservation.id,
             idempotency_key=movement_key,
             actor_user_id=None,
-            notes="Reserva liberada por vencimiento.",
+            notes=(
+                "Reserva liberada automáticamente "
+                "por vencimiento."
+            ),
         )
 
         session.add(movement)

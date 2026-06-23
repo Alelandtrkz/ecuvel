@@ -23,6 +23,7 @@ from app.models import (
 from app.services.inventory import (
     InventoryServiceError,
     consume_inventory_reservation,
+    expire_inventory_reservations,
     putaway_inventory,
     receive_inventory,
     release_inventory_reservation,
@@ -599,3 +600,43 @@ def consume_demo_reservation(
         "Operación repetida: "
         f"{'sí' if result.replayed else 'no'}"
     )
+
+
+@click.command("expire-demo-reservations")
+@click.option(
+    "--batch-size",
+    type=click.IntRange(min=1, max=1000),
+    default=100,
+    show_default=True,
+    help="Máximo de reservas que se procesarán.",
+)
+@with_appcontext
+def expire_demo_reservations(
+    batch_size: int,
+) -> None:
+    """Libera reservas cuyo plazo haya vencido."""
+
+    session = db.session()
+
+    try:
+        with session.begin():
+            result = expire_inventory_reservations(
+                session=session,
+                batch_size=batch_size,
+            )
+
+    except InventoryServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(
+        f"Reservas expiradas: {result.expired_count}"
+    )
+
+    for reservation in result.reservations:
+        click.echo(
+            "Reserva: "
+            f"{reservation.reservation_id} | "
+            f"cantidad: {reservation.quantity} | "
+            f"estado: {reservation.status.value} | "
+            f"disponible: {reservation.available_quantity}"
+        )

@@ -15,6 +15,7 @@ def create_app() -> Flask:
     from app import models  # noqa: F401
     from app.commands.inventory import (
         consume_demo_reservation,
+        expire_demo_reservations,
         putaway_demo_stock,
         receive_demo_stock,
         release_demo_reservation,
@@ -28,6 +29,7 @@ def create_app() -> Flask:
     app.cli.add_command(reserve_demo_stock)
     app.cli.add_command(release_demo_reservation)
     app.cli.add_command(consume_demo_reservation)
+    app.cli.add_command(expire_demo_reservations)
 
     @app.get("/health")
     def health() -> dict[str, str]:
