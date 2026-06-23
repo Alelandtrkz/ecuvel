@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.catalog import SellerOffer
-from app.models.enums import InventoryMovementType, LocationType
-from app.models.inventory import InventoryBalance, InventoryMovement
+from app.models.enums import (
+    InventoryMovementType,
+    LocationType,
+    ReservationStatus,
+)
+from app.models.inventory import (
+    InventoryBalance,
+    InventoryMovement,
+    InventoryReservation,
+)
+from app.models.order import OrderItem
 from app.models.warehouse import WarehouseLocation
 
 
@@ -54,6 +65,20 @@ class DestinationCapacityExceededError(InventoryServiceError):
 class DestinationMixingNotAllowedError(InventoryServiceError):
     """La ubicación no permite mezclar ofertas diferentes."""
 
+class OrderItemNotFoundError(InventoryServiceError):
+    """No se encontró el artículo del pedido."""
+
+
+class InvalidReservationExpiryError(InventoryServiceError):
+    """La fecha de expiración de la reserva no es válida."""
+
+
+class InsufficientSellableStockError(InventoryServiceError):
+    """No existe suficiente inventario vendible."""
+
+
+class ActiveReservationConflictError(InventoryServiceError):
+    """El artículo ya tiene una reserva activa."""
 
 @dataclass(frozen=True, slots=True)
 class InventoryReceiptResult:
@@ -78,6 +103,23 @@ class InventoryPutawayResult:
     destination_available_quantity: int
     replayed: bool
 
+@dataclass(frozen=True, slots=True)
+class ReservationAllocation:
+    reservation_id: uuid.UUID
+    balance_id: uuid.UUID
+    location_id: uuid.UUID
+    location_code: str
+    quantity: int
+
+
+@dataclass(frozen=True, slots=True)
+class InventoryReservationResult:
+    order_item_id: uuid.UUID
+    offer_id: uuid.UUID
+    total_reserved: int
+    expires_at: datetime
+    allocations: tuple[ReservationAllocation, ...]
+    replayed: bool
 
 def _receipt_result(
     *,
@@ -642,5 +684,367 @@ def putaway_inventory(
         move_out=move_out,
         move_in=move_in,
         quantity=quantity,
+        replayed=False,
+    )
+
+def _reservation_key_prefix(
+    idempotency_key: str,
+) -> str:
+    digest = hashlib.sha256(
+        idempotency_key.encode("utf-8")
+    ).hexdigest()[:32]
+
+    return f"reserve:{digest}:"
+
+
+def reserve_inventory(
+    *,
+    session: Session,
+    order_item_id: uuid.UUID,
+    warehouse_id: uuid.UUID,
+    expires_at: datetime,
+    idempotency_key: str,
+    actor_user_id: uuid.UUID | None = None,
+    notes: str | None = None,
+) -> InventoryReservationResult:
+    """
+    Reserva la cantidad completa de un OrderItem.
+
+    Solo utiliza inventario de ubicaciones STORAGE o PICKING.
+    El llamador debe abrir la transacción.
+    """
+
+    normalized_key = idempotency_key.strip()
+
+    if not normalized_key:
+        raise ValueError("idempotency_key es obligatoria.")
+
+    if len(normalized_key) > 150:
+        raise ValueError(
+            "idempotency_key no puede superar 150 caracteres."
+        )
+
+    if notes is not None and len(notes) > 500:
+        raise ValueError("notes no puede superar 500 caracteres.")
+
+    if (
+        expires_at.tzinfo is None
+        or expires_at.utcoffset() is None
+    ):
+        raise InvalidReservationExpiryError(
+            "expires_at debe incluir zona horaria."
+        )
+
+    now = datetime.now(expires_at.tzinfo)
+
+    if expires_at <= now:
+        raise InvalidReservationExpiryError(
+            "La reserva debe expirar en una fecha futura."
+        )
+
+    # El bloqueo del artículo serializa reservas concurrentes
+    # para la misma línea del pedido.
+    order_item = session.scalar(
+        select(OrderItem)
+        .where(OrderItem.id == order_item_id)
+        .with_for_update()
+    )
+
+    if order_item is None:
+        raise OrderItemNotFoundError(
+            f"No existe el artículo {order_item_id}."
+        )
+
+    required_quantity = order_item.quantity
+    key_prefix = _reservation_key_prefix(normalized_key)
+
+    # Primero comprobamos si esta operación ya fue procesada.
+    existing_movements = list(
+        session.scalars(
+            select(InventoryMovement)
+            .where(
+                InventoryMovement.idempotency_key.like(
+                    f"{key_prefix}%"
+                )
+            )
+            .order_by(
+                InventoryMovement.idempotency_key
+            )
+        )
+    )
+
+    if existing_movements:
+        movement_balance_ids = [
+            movement.balance_id
+            for movement in existing_movements
+        ]
+
+        balance_rows = session.execute(
+            select(
+                InventoryBalance,
+                WarehouseLocation,
+            )
+            .join(
+                WarehouseLocation,
+                WarehouseLocation.id
+                == InventoryBalance.location_id,
+            )
+            .where(
+                InventoryBalance.id.in_(
+                    movement_balance_ids
+                )
+            )
+        ).all()
+
+        balances_by_id = {
+            balance.id: (balance, location)
+            for balance, location in balance_rows
+        }
+
+        active_reservations = list(
+            session.scalars(
+                select(InventoryReservation)
+                .where(
+                    InventoryReservation.order_item_id
+                    == order_item.id,
+                    InventoryReservation.balance_id.in_(
+                        movement_balance_ids
+                    ),
+                    InventoryReservation.status
+                    == ReservationStatus.ACTIVE,
+                )
+                .with_for_update()
+            )
+        )
+
+        reservations_by_balance = {
+            reservation.balance_id: reservation
+            for reservation in active_reservations
+        }
+
+        allocations: list[ReservationAllocation] = []
+        total_reserved = 0
+
+        for movement in existing_movements:
+            balance_row = balances_by_id.get(
+                movement.balance_id
+            )
+            reservation = reservations_by_balance.get(
+                movement.balance_id
+            )
+
+            if balance_row is None or reservation is None:
+                raise IdempotencyConflictError(
+                    "La operación ya existe, pero su reserva "
+                    "ya no está activa o está incompleta."
+                )
+
+            balance, location = balance_row
+
+            represents_same_operation = all(
+                (
+                    movement.movement_type
+                    == InventoryMovementType.RESERVE,
+                    movement.delta_on_hand == 0,
+                    movement.delta_reserved
+                    == reservation.quantity,
+                    movement.delta_blocked == 0,
+                    movement.reference_type
+                    == "ORDER_ITEM",
+                    movement.reference_id
+                    == order_item.id,
+                    balance.offer_id
+                    == order_item.offer_id,
+                    location.warehouse_id
+                    == warehouse_id,
+                    location.location_type
+                    in {
+                        LocationType.STORAGE,
+                        LocationType.PICKING,
+                    },
+                )
+            )
+
+            if not represents_same_operation:
+                raise IdempotencyConflictError(
+                    "La clave de idempotencia pertenece "
+                    "a una operación diferente."
+                )
+
+            total_reserved += reservation.quantity
+
+            allocations.append(
+                ReservationAllocation(
+                    reservation_id=reservation.id,
+                    balance_id=balance.id,
+                    location_id=location.id,
+                    location_code=location.code,
+                    quantity=reservation.quantity,
+                )
+            )
+
+        if total_reserved != required_quantity:
+            raise IdempotencyConflictError(
+                "La operación existente no coincide con "
+                "la cantidad del artículo."
+            )
+
+        reservation_expiry = min(
+            reservation.expires_at
+            for reservation in active_reservations
+        )
+
+        return InventoryReservationResult(
+            order_item_id=order_item.id,
+            offer_id=order_item.offer_id,
+            total_reserved=total_reserved,
+            expires_at=reservation_expiry,
+            allocations=tuple(allocations),
+            replayed=True,
+        )
+
+    # Un OrderItem solo puede tener un conjunto activo
+    # de reservas.
+    existing_active = list(
+        session.scalars(
+            select(InventoryReservation)
+            .where(
+                InventoryReservation.order_item_id
+                == order_item.id,
+                InventoryReservation.status
+                == ReservationStatus.ACTIVE,
+            )
+            .with_for_update()
+        )
+    )
+
+    if existing_active:
+        raise ActiveReservationConflictError(
+            "El artículo ya tiene una reserva activa "
+            "creada por otra operación."
+        )
+
+    # Solo consultamos ubicaciones vendibles.
+    candidate_rows = session.execute(
+        select(
+            InventoryBalance,
+            WarehouseLocation,
+        )
+        .join(
+            WarehouseLocation,
+            WarehouseLocation.id
+            == InventoryBalance.location_id,
+        )
+        .where(
+            InventoryBalance.offer_id
+            == order_item.offer_id,
+            WarehouseLocation.warehouse_id
+            == warehouse_id,
+            WarehouseLocation.is_active.is_(True),
+            WarehouseLocation.location_type.in_(
+                [
+                    LocationType.PICKING,
+                    LocationType.STORAGE,
+                ]
+            ),
+            (
+                InventoryBalance.on_hand_quantity
+                - InventoryBalance.reserved_quantity
+                - InventoryBalance.blocked_quantity
+            )
+            > 0,
+        )
+        .order_by(
+            WarehouseLocation.code,
+            InventoryBalance.id,
+        )
+        .with_for_update(of=InventoryBalance)
+    ).all()
+
+    total_available = sum(
+        balance.available_quantity
+        for balance, _location in candidate_rows
+    )
+
+    if total_available < required_quantity:
+        raise InsufficientSellableStockError(
+            "Stock vendible insuficiente. "
+            f"Disponible: {total_available}; "
+            f"solicitado: {required_quantity}."
+        )
+
+    remaining = required_quantity
+    allocations: list[ReservationAllocation] = []
+
+    for balance, location in candidate_rows:
+        if remaining == 0:
+            break
+
+        available = balance.available_quantity
+
+        if available <= 0:
+            continue
+
+        allocation_quantity = min(
+            available,
+            remaining,
+        )
+
+        balance.reserved_quantity += allocation_quantity
+
+        reservation = InventoryReservation(
+            order_item_id=order_item.id,
+            balance_id=balance.id,
+            quantity=allocation_quantity,
+            status=ReservationStatus.ACTIVE,
+            expires_at=expires_at,
+        )
+
+        movement = InventoryMovement(
+            balance_id=balance.id,
+            movement_type=InventoryMovementType.RESERVE,
+            delta_on_hand=0,
+            delta_reserved=allocation_quantity,
+            delta_blocked=0,
+            reference_type="ORDER_ITEM",
+            reference_id=order_item.id,
+            idempotency_key=(
+                f"{key_prefix}{balance.id.hex}"
+            ),
+            actor_user_id=actor_user_id,
+            notes=notes,
+        )
+
+        session.add(reservation)
+        session.add(movement)
+        session.flush()
+
+        allocations.append(
+            ReservationAllocation(
+                reservation_id=reservation.id,
+                balance_id=balance.id,
+                location_id=location.id,
+                location_code=location.code,
+                quantity=allocation_quantity,
+            )
+        )
+
+        remaining -= allocation_quantity
+
+    if remaining != 0:
+        # Esta condición no debería ocurrir después de calcular
+        # total_available, pero se conserva como defensa.
+        raise InsufficientSellableStockError(
+            "No fue posible completar la reserva."
+        )
+
+    session.flush()
+
+    return InventoryReservationResult(
+        order_item_id=order_item.id,
+        offer_id=order_item.offer_id,
+        total_reserved=required_quantity,
+        expires_at=expires_at,
+        allocations=tuple(allocations),
         replayed=False,
     )
