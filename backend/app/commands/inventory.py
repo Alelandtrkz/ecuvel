@@ -24,6 +24,7 @@ from app.services.inventory import (
     InventoryServiceError,
     consume_inventory_reservation,
     expire_inventory_reservations,
+    pick_inventory_reservation,
     putaway_inventory,
     receive_inventory,
     release_inventory_reservation,
@@ -56,6 +57,39 @@ def _find_reservation_by_order_number(
         )
         .order_by(
             InventoryReservation.created_at.desc()
+        )
+    )
+
+
+def _find_reservations_by_order_number(
+    *,
+    session,
+    order_number: str,
+) -> list[InventoryReservation]:
+    return list(
+        session.scalars(
+            select(InventoryReservation)
+            .join(
+                OrderItem,
+                OrderItem.id
+                == InventoryReservation.order_item_id,
+            )
+            .join(
+                SellerOrder,
+                SellerOrder.id
+                == OrderItem.seller_order_id,
+            )
+            .join(
+                Order,
+                Order.id == SellerOrder.order_id,
+            )
+            .where(
+                Order.order_number == order_number
+            )
+            .order_by(
+                InventoryReservation.balance_id,
+                InventoryReservation.id,
+            )
         )
     )
 
@@ -639,4 +673,85 @@ def expire_demo_reservations(
             f"cantidad: {reservation.quantity} | "
             f"estado: {reservation.status.value} | "
             f"disponible: {reservation.available_quantity}"
+        )
+
+
+@click.command("pick-demo-order")
+@click.option(
+    "--order-number",
+    required=True,
+    help="Número del pedido pagado que será recogido.",
+)
+@with_appcontext
+def pick_demo_order(
+    order_number: str,
+) -> None:
+    """Retira físicamente del almacén un pedido pagado."""
+
+    session = db.session()
+
+    try:
+        with session.begin():
+            reservations = _find_reservations_by_order_number(
+                session=session,
+                order_number=order_number,
+            )
+
+            if not reservations:
+                raise click.ClickException(
+                    "No se encontraron reservas "
+                    "para el pedido indicado."
+                )
+
+            actor = session.scalar(
+                select(User).where(
+                    User.email == "admin@ecuvel.local"
+                )
+            )
+
+            if actor is None:
+                raise click.ClickException(
+                    "No existe el usuario de demostración."
+                )
+
+            results = []
+
+            for reservation in reservations:
+                result = pick_inventory_reservation(
+                    session=session,
+                    reservation_id=reservation.id,
+                    actor_user_id=actor.id,
+                    notes=(
+                        "Picking de inventario para "
+                        "pedido de demostración."
+                    ),
+                )
+                results.append(result)
+
+    except InventoryServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("Picking procesado correctamente.")
+    click.echo(f"Pedido: {order_number}")
+
+    total_picked = sum(
+        result.quantity
+        for result in results
+    )
+
+    click.echo(
+        f"Cantidad total recogida: {total_picked}"
+    )
+
+    for result in results:
+        click.echo(
+            "Ubicación: "
+            f"{result.location_code} | "
+            f"cantidad: {result.quantity} | "
+            f"existencia restante: "
+            f"{result.on_hand_quantity} | "
+            f"reservado restante: "
+            f"{result.reserved_quantity} | "
+            f"repetida: "
+            f"{'sí' if result.replayed else 'no'}"
         )

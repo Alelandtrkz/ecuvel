@@ -149,6 +149,22 @@ class ExpirationBatchResult:
     expired_count: int
     reservations: tuple[ReservationTransitionResult, ...]
 
+
+@dataclass(frozen=True, slots=True)
+class InventoryPickResult:
+    reservation_id: uuid.UUID
+    order_item_id: uuid.UUID
+    balance_id: uuid.UUID
+    location_id: uuid.UUID
+    location_code: str
+    quantity: int
+    movement_id: uuid.UUID
+    on_hand_quantity: int
+    reserved_quantity: int
+    available_quantity: int
+    replayed: bool
+
+
 def _receipt_result(
     *,
     balance: InventoryBalance,
@@ -1398,4 +1414,155 @@ def expire_inventory_reservations(
     return ExpirationBatchResult(
         expired_count=len(results),
         reservations=tuple(results),
+    )
+
+
+def pick_inventory_reservation(
+    *,
+    session: Session,
+    reservation_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None = None,
+    notes: str | None = None,
+) -> InventoryPickResult:
+    if notes is not None and len(notes) > 500:
+        raise ValueError(
+            "notes no puede superar 500 caracteres."
+        )
+
+    reservation, balance = _lock_reservation(
+        session=session,
+        reservation_id=reservation_id,
+    )
+
+    location = session.get(
+        WarehouseLocation,
+        balance.location_id,
+    )
+
+    if location is None:
+        raise ReservationBalanceIntegrityError(
+            "El saldo no tiene una ubicación válida."
+        )
+
+    if location.location_type not in {
+        LocationType.STORAGE,
+        LocationType.PICKING,
+    }:
+        raise InvalidReservationTransitionError(
+            "Solo puede hacerse picking desde una ubicación "
+            "STORAGE o PICKING."
+        )
+
+    movement_key = f"pick:{reservation.id.hex}"
+
+    existing_movement = session.scalar(
+        select(InventoryMovement).where(
+            InventoryMovement.idempotency_key
+            == movement_key
+        )
+    )
+
+    if existing_movement is not None:
+        represents_same_operation = all(
+            (
+                existing_movement.movement_type
+                == InventoryMovementType.PICK,
+                existing_movement.balance_id
+                == balance.id,
+                existing_movement.delta_on_hand
+                == -reservation.quantity,
+                existing_movement.delta_reserved
+                == -reservation.quantity,
+                existing_movement.delta_blocked == 0,
+                existing_movement.reference_type
+                == "INVENTORY_RESERVATION",
+                existing_movement.reference_id
+                == reservation.id,
+            )
+        )
+
+        if not represents_same_operation:
+            raise IdempotencyConflictError(
+                "La clave de picking pertenece "
+                "a una operación diferente."
+            )
+
+        return InventoryPickResult(
+            reservation_id=reservation.id,
+            order_item_id=reservation.order_item_id,
+            balance_id=balance.id,
+            location_id=location.id,
+            location_code=location.code,
+            quantity=reservation.quantity,
+            movement_id=existing_movement.id,
+            on_hand_quantity=balance.on_hand_quantity,
+            reserved_quantity=balance.reserved_quantity,
+            available_quantity=balance.available_quantity,
+            replayed=True,
+        )
+
+    if reservation.status == ReservationStatus.ACTIVE:
+        raise InvalidReservationTransitionError(
+            "No puede hacerse picking de una reserva "
+            "sin pago confirmado."
+        )
+
+    if reservation.status == ReservationStatus.RELEASED:
+        raise InvalidReservationTransitionError(
+            "No puede hacerse picking de una reserva liberada."
+        )
+
+    if reservation.status == ReservationStatus.EXPIRED:
+        raise InvalidReservationTransitionError(
+            "No puede hacerse picking de una reserva expirada."
+        )
+
+    if reservation.status != ReservationStatus.CONSUMED:
+        raise InvalidReservationTransitionError(
+            "La reserva no permite realizar picking."
+        )
+
+    if balance.on_hand_quantity < reservation.quantity:
+        raise ReservationBalanceIntegrityError(
+            "La existencia física es menor que "
+            "la cantidad reservada."
+        )
+
+    if balance.reserved_quantity < reservation.quantity:
+        raise ReservationBalanceIntegrityError(
+            "El saldo reservado es menor que "
+            "la cantidad de la reserva."
+        )
+
+    balance.on_hand_quantity -= reservation.quantity
+    balance.reserved_quantity -= reservation.quantity
+
+    movement = InventoryMovement(
+        balance_id=balance.id,
+        movement_type=InventoryMovementType.PICK,
+        delta_on_hand=-reservation.quantity,
+        delta_reserved=-reservation.quantity,
+        delta_blocked=0,
+        reference_type="INVENTORY_RESERVATION",
+        reference_id=reservation.id,
+        idempotency_key=movement_key,
+        actor_user_id=actor_user_id,
+        notes=notes,
+    )
+
+    session.add(movement)
+    session.flush()
+
+    return InventoryPickResult(
+        reservation_id=reservation.id,
+        order_item_id=reservation.order_item_id,
+        balance_id=balance.id,
+        location_id=location.id,
+        location_code=location.code,
+        quantity=reservation.quantity,
+        movement_id=movement.id,
+        on_hand_quantity=balance.on_hand_quantity,
+        reserved_quantity=balance.reserved_quantity,
+        available_quantity=balance.available_quantity,
+        replayed=False,
     )
