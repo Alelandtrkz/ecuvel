@@ -56,6 +56,14 @@ class SellerOrderStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class PackageStatus(StrEnum):
+    CREATED = "CREATED"
+    PACKED = "PACKED"
+    READY_FOR_PICKUP = "READY_FOR_PICKUP"
+    HANDED_OVER = "HANDED_OVER"
+    CANCELLED = "CANCELLED"
+
+
 class LocationType(StrEnum):
     RECEIVING = "RECEIVING"
     STORAGE = "STORAGE"

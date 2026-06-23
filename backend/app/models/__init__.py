@@ -9,6 +9,7 @@ from app.models.inventory import (
     InventoryMovement,
     InventoryReservation,
 )
+from app.models.fulfillment import OrderPackage
 from app.models.order import (
     Order,
     OrderItem,
@@ -35,4 +36,5 @@ __all__ = [
     "InventoryBalance",
     "InventoryReservation",
     "InventoryMovement",
+    "OrderPackage",
 ]

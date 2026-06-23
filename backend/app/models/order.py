@@ -364,6 +364,12 @@ class OrderItem(
         "SellerOffer",
     )
 
+    package: Mapped["OrderPackage | None"] = relationship(
+        "OrderPackage",
+        back_populates="order_item",
+        uselist=False,
+    )
+
     __table_args__ = (
         CheckConstraint(
             "quantity > 0",

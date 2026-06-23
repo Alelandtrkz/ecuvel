@@ -13,6 +13,10 @@ def create_app() -> Flask:
 
     # Registra todos los modelos en SQLAlchemy.
     from app import models  # noqa: F401
+    from app.commands.fulfillment import (
+        create_demo_packages,
+        pack_demo_package,
+    )
     from app.commands.inventory import (
         consume_demo_reservation,
         expire_demo_reservations,
@@ -32,6 +36,8 @@ def create_app() -> Flask:
     app.cli.add_command(consume_demo_reservation)
     app.cli.add_command(expire_demo_reservations)
     app.cli.add_command(pick_demo_order)
+    app.cli.add_command(create_demo_packages)
+    app.cli.add_command(pack_demo_package)
 
     @app.get("/health")
     def health() -> dict[str, str]:
