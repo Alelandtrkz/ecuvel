@@ -119,6 +119,26 @@ class OrderPackage(
         nullable=True,
     )
 
+    handed_over_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    handed_over_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    handover_notes: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
     order_item: Mapped["OrderItem"] = relationship(
         "OrderItem",
         back_populates="package",
@@ -136,6 +156,11 @@ class OrderPackage(
     ready_by: Mapped["User | None"] = relationship(
         "User",
         foreign_keys=[ready_by_user_id],
+    )
+
+    handed_over_by: Mapped["User | None"] = relationship(
+        "User",
+        foreign_keys=[handed_over_by_user_id],
     )
 
     __table_args__ = (

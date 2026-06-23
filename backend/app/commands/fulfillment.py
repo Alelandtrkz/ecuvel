@@ -9,6 +9,7 @@ from app.models import User
 from app.services.fulfillment import (
     FulfillmentServiceError,
     create_packages_for_order,
+    handover_order_packages,
     pack_order_package,
     stage_order_package_for_pickup,
 )
@@ -172,3 +173,81 @@ def stage_demo_package(
         "Operación repetida: "
         f"{'sí' if result.replayed else 'no'}"
     )
+
+
+@click.command("handover-demo-order")
+@click.option(
+    "--order-number",
+    required=True,
+    help="Número del pedido que será entregado.",
+)
+@click.option(
+    "--scan",
+    "scanned_codes",
+    multiple=True,
+    required=True,
+    help=(
+        "Código o barcode de un paquete. "
+        "Repita --scan una vez por cada paquete."
+    ),
+)
+@click.option(
+    "--notes",
+    default=None,
+    help="Notas opcionales de entrega.",
+)
+@with_appcontext
+def handover_demo_order(
+    order_number: str,
+    scanned_codes: tuple[str, ...],
+    notes: str | None,
+) -> None:
+    """Entrega un pedido tras escanear todos sus paquetes."""
+
+    session = db.session()
+
+    try:
+        with session.begin():
+            actor = session.scalar(
+                select(User).where(
+                    User.email == "admin@ecuvel.local"
+                )
+            )
+
+            if actor is None:
+                raise click.ClickException(
+                    "No existe el usuario de demostración."
+                )
+
+            result = handover_order_packages(
+                session=session,
+                order_number=order_number,
+                scanned_codes=scanned_codes,
+                actor_user_id=actor.id,
+                notes=notes,
+            )
+
+    except FulfillmentServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("Entrega procesada correctamente.")
+    click.echo(f"Pedido: {result.order_number}")
+    click.echo(
+        f"Paquetes esperados: {result.expected_package_count}"
+    )
+    click.echo(
+        f"Paquetes escaneados: {result.scanned_package_count}"
+    )
+    click.echo(
+        "Operación repetida: "
+        f"{'sí' if result.replayed else 'no'}"
+    )
+
+    for package in result.packages:
+        click.echo(
+            f"{package.package_code} | "
+            f"{package.product_name} | "
+            f"cantidad: {package.quantity} | "
+            f"ubicación: {package.pickup_location_code} | "
+            f"estado: {package.status.value}"
+        )

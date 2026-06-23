@@ -15,6 +15,7 @@ def create_app() -> Flask:
     from app import models  # noqa: F401
     from app.commands.fulfillment import (
         create_demo_packages,
+        handover_demo_order,
         pack_demo_package,
         stage_demo_package,
     )
@@ -40,6 +41,7 @@ def create_app() -> Flask:
     app.cli.add_command(create_demo_packages)
     app.cli.add_command(pack_demo_package)
     app.cli.add_command(stage_demo_package)
+    app.cli.add_command(handover_demo_order)
 
     @app.get("/health")
     def health() -> dict[str, str]:

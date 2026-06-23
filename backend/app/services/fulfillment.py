@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -55,6 +56,22 @@ class InvalidPickupLocationError(FulfillmentServiceError):
     """La ubicación no es válida para preparar paquetes."""
 
 
+class EmptyPackageScanError(FulfillmentServiceError):
+    """No se recibió ningún código de paquete."""
+
+
+class DuplicatePackageScanError(FulfillmentServiceError):
+    """El mismo paquete fue escaneado más de una vez."""
+
+
+class UnexpectedPackageScanError(FulfillmentServiceError):
+    """Se escaneó un paquete que no pertenece al pedido."""
+
+
+class IncompletePackageScanError(FulfillmentServiceError):
+    """No fueron escaneados todos los paquetes del pedido."""
+
+
 @dataclass(frozen=True, slots=True)
 class PackageCreationItem:
     package_id: uuid.UUID
@@ -107,6 +124,29 @@ class StagePackageForPickupResult:
     pickup_location_id: uuid.UUID
     pickup_location_code: str
     ready_at: datetime
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class HandedOverPackageItem:
+    package_id: uuid.UUID
+    package_code: str
+    barcode: str
+    order_item_id: uuid.UUID
+    product_name: str
+    quantity: int
+    status: PackageStatus
+    pickup_location_code: str
+    handed_over_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class HandoverOrderResult:
+    order_id: uuid.UUID
+    order_number: str
+    expected_package_count: int
+    scanned_package_count: int
+    packages: tuple[HandedOverPackageItem, ...]
     replayed: bool
 
 
@@ -651,4 +691,287 @@ def stage_order_package_for_pickup(
         pickup_location_code=pickup_location.code,
         ready_at=package.ready_at,
         replayed=False,
+    )
+
+
+def handover_order_packages(
+    *,
+    session: Session,
+    order_number: str,
+    scanned_codes: Sequence[str],
+    actor_user_id: uuid.UUID | None = None,
+    notes: str | None = None,
+) -> HandoverOrderResult:
+    normalized_order_number = order_number.strip()
+    normalized_scans = tuple(
+        code.strip()
+        for code in scanned_codes
+    )
+
+    if not normalized_order_number:
+        raise ValueError("order_number es obligatorio.")
+
+    if not normalized_scans:
+        raise EmptyPackageScanError(
+            "Debe escanear al menos un paquete."
+        )
+
+    if any(not scan_code for scan_code in normalized_scans):
+        raise ValueError(
+            "Los códigos escaneados no pueden estar vacíos."
+        )
+
+    if notes is not None and len(notes) > 500:
+        raise ValueError(
+            "notes no puede superar 500 caracteres."
+        )
+
+    order = session.scalar(
+        select(Order)
+        .where(
+            Order.order_number == normalized_order_number
+        )
+        .with_for_update()
+    )
+
+    if order is None:
+        raise FulfillmentOrderNotFoundError(
+            f"No existe el pedido {normalized_order_number}."
+        )
+
+    order_items = list(
+        session.scalars(
+            select(OrderItem)
+            .join(
+                SellerOrder,
+                SellerOrder.id == OrderItem.seller_order_id,
+            )
+            .where(
+                SellerOrder.order_id == order.id
+            )
+            .order_by(
+                SellerOrder.id,
+                OrderItem.id,
+            )
+            .with_for_update(of=OrderItem)
+        )
+    )
+
+    if not order_items:
+        raise PackageIntegrityError(
+            "El pedido no contiene artículos."
+        )
+
+    order_items_by_id = {
+        order_item.id: order_item
+        for order_item in order_items
+    }
+
+    packages = list(
+        session.scalars(
+            select(OrderPackage)
+            .where(
+                OrderPackage.order_item_id.in_(
+                    list(order_items_by_id)
+                )
+            )
+            .order_by(OrderPackage.id)
+            .with_for_update()
+        )
+    )
+
+    if (
+        len(packages) != len(order_items)
+        or {
+            package.order_item_id
+            for package in packages
+        }
+        != set(order_items_by_id)
+    ):
+        raise PackageIntegrityError(
+            "El pedido no tiene exactamente un paquete "
+            "por artículo."
+        )
+
+    for package in packages:
+        order_item = order_items_by_id[package.order_item_id]
+
+        if package.quantity != order_item.quantity:
+            raise PackageIntegrityError(
+                "La cantidad de un paquete no coincide "
+                "con el artículo del pedido."
+            )
+
+    package_by_scan_code: dict[str, OrderPackage] = {}
+
+    for package in packages:
+        for scan_code in (
+            package.package_code,
+            package.barcode,
+        ):
+            existing = package_by_scan_code.get(scan_code)
+
+            if existing is not None and existing.id != package.id:
+                raise PackageIntegrityError(
+                    "Existen códigos de paquete ambiguos."
+                )
+
+            package_by_scan_code[scan_code] = package
+
+    scanned_package_ids: set[uuid.UUID] = set()
+
+    for scan_code in normalized_scans:
+        package = package_by_scan_code.get(scan_code)
+
+        if package is None:
+            raise UnexpectedPackageScanError(
+                f"El código {scan_code} no pertenece al pedido."
+            )
+
+        if package.id in scanned_package_ids:
+            raise DuplicatePackageScanError(
+                f"El paquete {package.package_code} "
+                "fue escaneado más de una vez."
+            )
+
+        scanned_package_ids.add(package.id)
+
+    expected_package_ids = {
+        package.id
+        for package in packages
+    }
+
+    if scanned_package_ids != expected_package_ids:
+        missing_package_codes = [
+            package.package_code
+            for package in packages
+            if package.id not in scanned_package_ids
+        ]
+
+        raise IncompletePackageScanError(
+            "Faltan paquetes por escanear: "
+            + ", ".join(missing_package_codes)
+        )
+
+    handed_over_packages = [
+        package
+        for package in packages
+        if package.status == PackageStatus.HANDED_OVER
+    ]
+
+    if handed_over_packages and len(handed_over_packages) != len(packages):
+        raise PackageIntegrityError(
+            "El pedido presenta una entrega parcial inconsistente."
+        )
+
+    replayed = len(handed_over_packages) == len(packages)
+
+    if replayed:
+        if any(
+            package.handed_over_at is None
+            for package in packages
+        ):
+            raise PackageIntegrityError(
+                "Un paquete entregado tiene datos "
+                "de entrega incompletos."
+            )
+
+    else:
+        if any(
+            package.status == PackageStatus.CANCELLED
+            for package in packages
+        ):
+            raise InvalidPackageTransitionError(
+                "Un paquete cancelado no puede entregarse."
+            )
+
+        if any(
+            package.status != PackageStatus.READY_FOR_PICKUP
+            for package in packages
+        ):
+            raise InvalidPackageTransitionError(
+                "Todos los paquetes deben estar empacados "
+                "y preparados para retiro."
+            )
+
+        if any(
+            package.pickup_location_id is None
+            or package.ready_at is None
+            for package in packages
+        ):
+            raise PackageIntegrityError(
+                "Un paquete preparado tiene datos "
+                "de retiro incompletos."
+            )
+
+    pickup_location_ids = {
+        package.pickup_location_id
+        for package in packages
+        if package.pickup_location_id is not None
+    }
+    pickup_locations = list(
+        session.scalars(
+            select(WarehouseLocation)
+            .where(
+                WarehouseLocation.id.in_(pickup_location_ids)
+            )
+            .order_by(WarehouseLocation.id)
+        )
+    )
+    pickup_locations_by_id = {
+        location.id: location
+        for location in pickup_locations
+    }
+
+    if any(
+        package.pickup_location_id
+        not in pickup_locations_by_id
+        for package in packages
+    ):
+        raise PackageIntegrityError(
+            "Un paquete no tiene una ubicación "
+            "de retiro válida."
+        )
+
+    if not replayed:
+        handover_time = datetime.now(timezone.utc)
+
+        for package in packages:
+            package.status = PackageStatus.HANDED_OVER
+            package.handed_over_at = handover_time
+            package.handed_over_by_user_id = actor_user_id
+            package.handover_notes = notes
+
+        session.flush()
+
+    result_items = tuple(
+        HandedOverPackageItem(
+            package_id=package.id,
+            package_code=package.package_code,
+            barcode=package.barcode,
+            order_item_id=package.order_item_id,
+            product_name=(
+                order_items_by_id[
+                    package.order_item_id
+                ].product_name_snapshot
+            ),
+            quantity=package.quantity,
+            status=package.status,
+            pickup_location_code=(
+                pickup_locations_by_id[
+                    package.pickup_location_id
+                ].code
+            ),
+            handed_over_at=package.handed_over_at,
+        )
+        for package in packages
+    )
+
+    return HandoverOrderResult(
+        order_id=order.id,
+        order_number=order.order_number,
+        expected_package_count=len(packages),
+        scanned_package_count=len(scanned_package_ids),
+        packages=result_items,
+        replayed=replayed,
     )
