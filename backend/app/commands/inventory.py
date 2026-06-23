@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.extensions import db
 from app.models import (
+    InventoryReservation,
     Order,
     OrderItem,
     SellerOffer,
@@ -21,11 +22,41 @@ from app.models import (
 )
 from app.services.inventory import (
     InventoryServiceError,
+    consume_inventory_reservation,
     putaway_inventory,
     receive_inventory,
+    release_inventory_reservation,
     reserve_inventory,
 )
 
+def _find_reservation_by_order_number(
+    *,
+    session,
+    order_number: str,
+) -> InventoryReservation | None:
+    return session.scalar(
+        select(InventoryReservation)
+        .join(
+            OrderItem,
+            OrderItem.id
+            == InventoryReservation.order_item_id,
+        )
+        .join(
+            SellerOrder,
+            SellerOrder.id
+            == OrderItem.seller_order_id,
+        )
+        .join(
+            Order,
+            Order.id == SellerOrder.order_id,
+        )
+        .where(
+            Order.order_number == order_number
+        )
+        .order_by(
+            InventoryReservation.created_at.desc()
+        )
+    )
 
 @click.command("receive-demo-stock")
 @click.option(
@@ -247,10 +278,18 @@ def putaway_demo_stock(
     show_default=True,
     help="Identificador único del checkout.",
 )
+@click.option(
+    "--expires-in-seconds",
+    type=click.IntRange(min=1, max=86400),
+    default=1800,
+    show_default=True,
+    help="Duración de la reserva en segundos.",
+)
 @with_appcontext
 def reserve_demo_stock(
     quantity: int,
     idempotency_key: str,
+    expires_in_seconds: int,
 ) -> None:
     """Crea un pedido de prueba y reserva inventario."""
 
@@ -409,7 +448,7 @@ def reserve_demo_stock(
 
             expires_at = (
                 datetime.now(timezone.utc)
-                + timedelta(minutes=30)
+                + timedelta(seconds=expires_in_seconds)
             )
 
             result = reserve_inventory(
@@ -445,6 +484,117 @@ def reserve_demo_stock(
             f"{allocation.quantity} unidades"
         )
 
+    click.echo(
+        "Operación repetida: "
+        f"{'sí' if result.replayed else 'no'}"
+    )
+
+@click.command("release-demo-reservation")
+@click.option(
+    "--order-number",
+    required=True,
+    help="Número del pedido cuya reserva será liberada.",
+)
+@with_appcontext
+def release_demo_reservation(
+    order_number: str,
+) -> None:
+    """Libera la reserva de un pedido de demostración."""
+
+    session = db.session()
+
+    try:
+        with session.begin():
+            reservation = _find_reservation_by_order_number(
+                session=session,
+                order_number=order_number,
+            )
+
+            if reservation is None:
+                raise click.ClickException(
+                    "No se encontró una reserva "
+                    "para el pedido indicado."
+                )
+
+            result = release_inventory_reservation(
+                session=session,
+                reservation_id=reservation.id,
+                notes=(
+                    "Liberación manual de una reserva "
+                    "de demostración."
+                ),
+            )
+
+    except InventoryServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("Reserva liberada correctamente.")
+    click.echo(f"Estado: {result.status.value}")
+    click.echo(
+        "Cantidad liberada: "
+        f"{result.quantity}"
+    )
+    click.echo(
+        "Reservado restante en el saldo: "
+        f"{result.balance_reserved_quantity}"
+    )
+    click.echo(
+        f"Disponible: {result.available_quantity}"
+    )
+    click.echo(
+        "Operación repetida: "
+        f"{'sí' if result.replayed else 'no'}"
+    )
+
+@click.command("consume-demo-reservation")
+@click.option(
+    "--order-number",
+    required=True,
+    help="Número del pedido cuyo pago será confirmado.",
+)
+@with_appcontext
+def consume_demo_reservation(
+    order_number: str,
+) -> None:
+    """Confirma una reserva después de aprobar el pago."""
+
+    session = db.session()
+
+    try:
+        with session.begin():
+            reservation = _find_reservation_by_order_number(
+                session=session,
+                order_number=order_number,
+            )
+
+            if reservation is None:
+                raise click.ClickException(
+                    "No se encontró una reserva "
+                    "para el pedido indicado."
+                )
+
+            result = consume_inventory_reservation(
+                session=session,
+                reservation_id=reservation.id,
+            )
+
+    except InventoryServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("Reserva confirmada por pago.")
+    click.echo(f"Estado: {result.status.value}")
+    click.echo(
+        "Cantidad comprometida: "
+        f"{result.quantity}"
+    )
+    click.echo(
+        "Reservado en el saldo: "
+        f"{result.balance_reserved_quantity}"
+    )
+    click.echo(
+        "Disponible: "
+        f"{result.available_quantity}"
+    )
     click.echo(
         "Operación repetida: "
         f"{'sí' if result.replayed else 'no'}"
