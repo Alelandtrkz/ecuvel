@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -80,6 +80,17 @@ class InsufficientSellableStockError(InventoryServiceError):
 class ActiveReservationConflictError(InventoryServiceError):
     """El artículo ya tiene una reserva activa."""
 
+class InventoryReservationNotFoundError(InventoryServiceError):
+    """No se encontró la reserva solicitada."""
+
+
+class InvalidReservationTransitionError(InventoryServiceError):
+    """La reserva no permite la transición solicitada."""
+
+
+class ReservationBalanceIntegrityError(InventoryServiceError):
+    """El saldo reservado no coincide con la reserva."""
+
 @dataclass(frozen=True, slots=True)
 class InventoryReceiptResult:
     balance_id: uuid.UUID
@@ -120,6 +131,23 @@ class InventoryReservationResult:
     expires_at: datetime
     allocations: tuple[ReservationAllocation, ...]
     replayed: bool
+
+@dataclass(frozen=True, slots=True)
+class ReservationTransitionResult:
+    reservation_id: uuid.UUID
+    order_item_id: uuid.UUID
+    balance_id: uuid.UUID
+    quantity: int
+    status: ReservationStatus
+    balance_reserved_quantity: int
+    available_quantity: int
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ExpirationBatchResult:
+    expired_count: int
+    reservations: tuple[ReservationTransitionResult, ...]
 
 def _receipt_result(
     *,
@@ -1047,4 +1075,324 @@ def reserve_inventory(
         expires_at=expires_at,
         allocations=tuple(allocations),
         replayed=False,
+    )
+
+def _reservation_transition_result(
+    *,
+    reservation: InventoryReservation,
+    balance: InventoryBalance,
+    replayed: bool,
+) -> ReservationTransitionResult:
+    return ReservationTransitionResult(
+        reservation_id=reservation.id,
+        order_item_id=reservation.order_item_id,
+        balance_id=balance.id,
+        quantity=reservation.quantity,
+        status=reservation.status,
+        balance_reserved_quantity=balance.reserved_quantity,
+        available_quantity=balance.available_quantity,
+        replayed=replayed,
+    )
+
+
+def _lock_reservation(
+    *,
+    session: Session,
+    reservation_id: uuid.UUID,
+) -> tuple[InventoryReservation, InventoryBalance]:
+    reservation = session.scalar(
+        select(InventoryReservation)
+        .where(InventoryReservation.id == reservation_id)
+        .with_for_update()
+    )
+
+    if reservation is None:
+        raise InventoryReservationNotFoundError(
+            f"No existe la reserva {reservation_id}."
+        )
+
+    balance = session.scalar(
+        select(InventoryBalance)
+        .where(
+            InventoryBalance.id == reservation.balance_id
+        )
+        .with_for_update()
+    )
+
+    if balance is None:
+        raise ReservationBalanceIntegrityError(
+            "La reserva no tiene un saldo de inventario válido."
+        )
+
+    return reservation, balance
+
+
+def release_inventory_reservation(
+    *,
+    session: Session,
+    reservation_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None = None,
+    notes: str | None = None,
+) -> ReservationTransitionResult:
+    """
+    Libera una reserva temporal.
+
+    Se utiliza cuando el pago falla, el cliente cancela
+    o el checkout es abandonado explícitamente.
+    """
+
+    if notes is not None and len(notes) > 500:
+        raise ValueError("notes no puede superar 500 caracteres.")
+
+    reservation, balance = _lock_reservation(
+        session=session,
+        reservation_id=reservation_id,
+    )
+
+    if reservation.status in {
+        ReservationStatus.RELEASED,
+        ReservationStatus.EXPIRED,
+    }:
+        return _reservation_transition_result(
+            reservation=reservation,
+            balance=balance,
+            replayed=True,
+        )
+
+    if reservation.status == ReservationStatus.CONSUMED:
+        raise InvalidReservationTransitionError(
+            "Una reserva confirmada por pago no puede "
+            "liberarse mediante esta operación."
+        )
+
+    if reservation.status != ReservationStatus.ACTIVE:
+        raise InvalidReservationTransitionError(
+            f"No se puede liberar una reserva en estado "
+            f"{reservation.status.value}."
+        )
+
+    if balance.reserved_quantity < reservation.quantity:
+        raise ReservationBalanceIntegrityError(
+            "El saldo reservado es menor que la cantidad "
+            "registrada en la reserva."
+        )
+
+    movement_key = f"release:{reservation.id.hex}"
+
+    existing_movement = session.scalar(
+        select(InventoryMovement).where(
+            InventoryMovement.idempotency_key
+            == movement_key
+        )
+    )
+
+    if existing_movement is not None:
+        raise ReservationBalanceIntegrityError(
+            "Existe un movimiento de liberación, pero "
+            "la reserva continúa activa."
+        )
+
+    balance.reserved_quantity -= reservation.quantity
+
+    reservation.status = ReservationStatus.RELEASED
+    reservation.released_at = datetime.now(timezone.utc)
+
+    movement = InventoryMovement(
+        balance_id=balance.id,
+        movement_type=InventoryMovementType.RELEASE,
+        delta_on_hand=0,
+        delta_reserved=-reservation.quantity,
+        delta_blocked=0,
+        reference_type="INVENTORY_RESERVATION",
+        reference_id=reservation.id,
+        idempotency_key=movement_key,
+        actor_user_id=actor_user_id,
+        notes=notes,
+    )
+
+    session.add(movement)
+    session.flush()
+
+    return _reservation_transition_result(
+        reservation=reservation,
+        balance=balance,
+        replayed=False,
+    )
+
+
+def consume_inventory_reservation(
+    *,
+    session: Session,
+    reservation_id: uuid.UUID,
+) -> ReservationTransitionResult:
+    """
+    Confirma la reserva cuando el pago ha sido aprobado.
+
+    No libera las unidades y no disminuye on_hand.
+    Las cantidades se mantienen reservadas hasta el picking.
+    """
+
+    reservation, balance = _lock_reservation(
+        session=session,
+        reservation_id=reservation_id,
+    )
+
+    if reservation.status == ReservationStatus.CONSUMED:
+        return _reservation_transition_result(
+            reservation=reservation,
+            balance=balance,
+            replayed=True,
+        )
+
+    if reservation.status in {
+        ReservationStatus.RELEASED,
+        ReservationStatus.EXPIRED,
+    }:
+        raise InvalidReservationTransitionError(
+            "No puede confirmarse una reserva liberada "
+            "o expirada."
+        )
+
+    if reservation.status != ReservationStatus.ACTIVE:
+        raise InvalidReservationTransitionError(
+            f"No se puede consumir una reserva en estado "
+            f"{reservation.status.value}."
+        )
+
+    if balance.reserved_quantity < reservation.quantity:
+        raise ReservationBalanceIntegrityError(
+            "El saldo reservado es menor que la cantidad "
+            "registrada en la reserva."
+        )
+
+    reservation.status = ReservationStatus.CONSUMED
+    reservation.consumed_at = datetime.now(timezone.utc)
+
+    session.flush()
+
+    return _reservation_transition_result(
+        reservation=reservation,
+        balance=balance,
+        replayed=False,
+    )
+
+
+def expire_inventory_reservations(
+    *,
+    session: Session,
+    now: datetime | None = None,
+    batch_size: int = 100,
+) -> ExpirationBatchResult:
+    """
+    Libera reservas ACTIVE cuyo plazo haya vencido.
+
+    Procesa un lote limitado para que posteriormente pueda
+    ejecutarse periódicamente mediante Celery.
+    """
+
+    effective_now = now or datetime.now(timezone.utc)
+
+    if (
+        effective_now.tzinfo is None
+        or effective_now.utcoffset() is None
+    ):
+        raise InvalidReservationExpiryError(
+            "now debe incluir zona horaria."
+        )
+
+    if batch_size <= 0 or batch_size > 1000:
+        raise ValueError(
+            "batch_size debe estar entre 1 y 1000."
+        )
+
+    reservations = list(
+        session.scalars(
+            select(InventoryReservation)
+            .where(
+                InventoryReservation.status
+                == ReservationStatus.ACTIVE,
+                InventoryReservation.expires_at
+                <= effective_now,
+            )
+            .order_by(
+                InventoryReservation.balance_id,
+                InventoryReservation.expires_at,
+                InventoryReservation.id,
+            )
+            .limit(batch_size)
+            .with_for_update(skip_locked=True)
+        )
+    )
+
+    results: list[ReservationTransitionResult] = []
+
+    for reservation in reservations:
+        balance = session.scalar(
+            select(InventoryBalance)
+            .where(
+                InventoryBalance.id
+                == reservation.balance_id
+            )
+            .with_for_update()
+        )
+
+        if balance is None:
+            raise ReservationBalanceIntegrityError(
+                f"La reserva {reservation.id} no tiene "
+                "un saldo válido."
+            )
+
+        if balance.reserved_quantity < reservation.quantity:
+            raise ReservationBalanceIntegrityError(
+                f"El saldo reservado no cubre la reserva "
+                f"{reservation.id}."
+            )
+
+        movement_key = f"expire:{reservation.id.hex}"
+
+        existing_movement = session.scalar(
+            select(InventoryMovement).where(
+                InventoryMovement.idempotency_key
+                == movement_key
+            )
+        )
+
+        if existing_movement is not None:
+            raise ReservationBalanceIntegrityError(
+                "Existe un movimiento de expiración, pero "
+                "la reserva continúa activa."
+            )
+
+        balance.reserved_quantity -= reservation.quantity
+
+        reservation.status = ReservationStatus.EXPIRED
+        reservation.released_at = effective_now
+
+        movement = InventoryMovement(
+            balance_id=balance.id,
+            movement_type=InventoryMovementType.RELEASE,
+            delta_on_hand=0,
+            delta_reserved=-reservation.quantity,
+            delta_blocked=0,
+            reference_type="RESERVATION_EXPIRY",
+            reference_id=reservation.id,
+            idempotency_key=movement_key,
+            actor_user_id=None,
+            notes="Reserva liberada por vencimiento.",
+        )
+
+        session.add(movement)
+        session.flush()
+
+        results.append(
+            _reservation_transition_result(
+                reservation=reservation,
+                balance=balance,
+                replayed=False,
+            )
+        )
+
+    return ExpirationBatchResult(
+        expired_count=len(results),
+        reservations=tuple(results),
     )
