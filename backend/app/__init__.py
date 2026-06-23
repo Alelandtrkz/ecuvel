@@ -13,11 +13,15 @@ def create_app() -> Flask:
 
     # Registra todos los modelos en SQLAlchemy.
     from app import models  # noqa: F401
-    from app.commands.inventory import receive_demo_stock
+    from app.commands.inventory import (
+    putaway_demo_stock,
+    receive_demo_stock,
+    )
     from app.commands.seed import seed_demo
 
     app.cli.add_command(seed_demo)
     app.cli.add_command(receive_demo_stock)
+    app.cli.add_command(putaway_demo_stock)
 
     @app.get("/health")
     def health() -> dict[str, str]:

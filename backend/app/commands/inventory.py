@@ -12,7 +12,11 @@ from app.models import (
     User,
     WarehouseLocation,
 )
-from app.services.inventory import receive_inventory
+from app.services.inventory import (
+    InventoryServiceError,
+    putaway_inventory,
+    receive_inventory,
+)
 
 
 @click.command("receive-demo-stock")
@@ -97,6 +101,125 @@ def receive_demo_stock(
     click.echo(f"Reservado: {result.reserved_quantity}")
     click.echo(f"Bloqueado: {result.blocked_quantity}")
     click.echo(f"Disponible: {result.available_quantity}")
+    click.echo(
+        "Operación repetida: "
+        f"{'sí' if result.replayed else 'no'}"
+    )
+
+@click.command("putaway-demo-stock")
+@click.option(
+    "--quantity",
+    type=click.IntRange(min=1),
+    default=4,
+    show_default=True,
+    help="Cantidad que se moverá desde recepción.",
+)
+@click.option(
+    "--idempotency-key",
+    default="demo-putaway-001",
+    show_default=True,
+    help="Identificador único del putaway.",
+)
+@with_appcontext
+def putaway_demo_stock(
+    quantity: int,
+    idempotency_key: str,
+) -> None:
+    """Mueve inventario desde REC-01 hacia almacenamiento."""
+
+    session = db.session()
+
+    try:
+        with session.begin():
+            offer = session.scalar(
+                select(SellerOffer).where(
+                    SellerOffer.seller_sku == "HIK-DEMO-001"
+                )
+            )
+
+            source_location = session.scalar(
+                select(WarehouseLocation).where(
+                    WarehouseLocation.code == "REC-01"
+                )
+            )
+
+            destination_location = session.scalar(
+                select(WarehouseLocation).where(
+                    WarehouseLocation.code
+                    == "A01-R01-N01-B01"
+                )
+            )
+
+            actor = session.scalar(
+                select(User).where(
+                    User.email == "admin@ecuvel.local"
+                )
+            )
+
+            if offer is None:
+                raise click.ClickException(
+                    "No existe la oferta HIK-DEMO-001."
+                )
+
+            if source_location is None:
+                raise click.ClickException(
+                    "No existe la ubicación REC-01."
+                )
+
+            if destination_location is None:
+                raise click.ClickException(
+                    "No existe la ubicación de almacenamiento."
+                )
+
+            if actor is None:
+                raise click.ClickException(
+                    "No existe el usuario de demostración."
+                )
+
+            reference_id = uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"ecuvel:putaway:{idempotency_key}",
+            )
+
+            result = putaway_inventory(
+                session=session,
+                offer_id=offer.id,
+                source_location_id=source_location.id,
+                destination_location_id=(
+                    destination_location.id
+                ),
+                quantity=quantity,
+                reference_type="DEMO_PUTAWAY",
+                reference_id=reference_id,
+                idempotency_key=idempotency_key,
+                actor_user_id=actor.id,
+                notes=(
+                    "Traslado de recepción hacia "
+                    "almacenamiento para pruebas."
+                ),
+            )
+
+    except InventoryServiceError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo("Putaway procesado correctamente.")
+    click.echo(f"Cantidad trasladada: {result.quantity}")
+    click.echo(
+        "Origen - existencia: "
+        f"{result.source_on_hand_quantity}"
+    )
+    click.echo(
+        "Origen - disponible: "
+        f"{result.source_available_quantity}"
+    )
+    click.echo(
+        "Destino - existencia: "
+        f"{result.destination_on_hand_quantity}"
+    )
+    click.echo(
+        "Destino - disponible: "
+        f"{result.destination_available_quantity}"
+    )
     click.echo(
         "Operación repetida: "
         f"{'sí' if result.replayed else 'no'}"
