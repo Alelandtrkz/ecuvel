@@ -11,8 +11,7 @@ def create_app() -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
 
-    # Es necesario importar los modelos para que Alembic
-    # pueda encontrarlos durante la generación de migraciones.
+    # Registra todos los modelos en SQLAlchemy.
     from app import models  # noqa: F401
 
     @app.get("/health")
