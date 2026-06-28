@@ -1,0 +1,71 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Seleccione la categoría y plantilla | ECUVEL Partners{% endblock %}
+{% block content %}
+{% set active_category_id = page.selected_category_id or (page.categories[0].id if page.categories else '') %}
+<main class="partner-page partner-page--wide">
+  <section class="partner-category-builder" aria-labelledby="category-builder-title" data-category-builder>
+    <header class="partner-category-builder__header">
+      <h1 id="category-builder-title">Seleccione la categoría y plantilla</h1>
+      <p>Para configurar su publicación, seleccione una categoría y una plantilla.</p>
+    </header>
+
+    <form method="post" action="{{ url_for('partners.save_new_product_category') }}" data-category-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <script type="application/json" data-category-json>{{ categories_json|tojson }}</script>
+      <div class="partner-category-grid">
+        <fieldset class="partner-category-column">
+          <legend>1. CATEGORÍA PRINCIPAL</legend>
+          <div class="partner-main-category-list" role="radiogroup" aria-label="Categoría principal">
+            {% for category in page.categories %}
+              {% set is_checked = category.id == active_category_id %}
+              <label class="partner-category-option{{ ' is-selected' if is_checked }}" data-main-category="{{ category.id }}">
+                <input type="radio" name="category_id" value="{{ category.id }}" {{ 'checked' if is_checked }}>
+                <i data-lucide="{{ category.icon }}" aria-hidden="true"></i>
+                <span>{{ category.name }}</span>
+                <strong aria-hidden="true"><i data-lucide="check"></i></strong>
+              </label>
+            {% endfor %}
+          </div>
+          {% if errors.category_id %}<p class="partner-error">{{ errors.category_id }}</p>{% endif %}
+        </fieldset>
+
+        <fieldset class="partner-category-column partner-category-column--subcategories">
+          <legend>2. SUB-CATEGORÍA</legend>
+          <div class="partner-subcategory-panels" aria-live="polite">
+            {% for category in page.categories %}
+              <div class="partner-subcategory-grid{{ ' is-active' if category.id == active_category_id }}" data-subcategory-panel="{{ category.id }}">
+                {% for subcategory in category.subcategories %}
+                  {% set is_checked = subcategory.id == page.selected_subcategory_id %}
+                  <label class="partner-subcategory-option{{ ' is-selected' if is_checked }}">
+                    <input type="radio" name="subcategory_id" value="{{ subcategory.id }}" data-template-key="{{ subcategory.template_key }}" {{ 'checked' if is_checked }}>
+                    <span>{{ subcategory.name }}</span>
+                    <strong aria-hidden="true"><i data-lucide="check"></i></strong>
+                  </label>
+                {% endfor %}
+              </div>
+            {% endfor %}
+          </div>
+          {% if errors.subcategory_id %}<p class="partner-error">{{ errors.subcategory_id }}</p>{% endif %}
+        </fieldset>
+      </div>
+
+      <footer class="partner-category-footer">
+        <p data-selection-help>
+          <i data-lucide="info" aria-hidden="true"></i>
+          <span>{{ "Selección lista para continuar." if page.selected_subcategory_id else "Se requiere una selección para continuar." }}</span>
+        </p>
+        <div class="partner-category-footer__actions">
+          <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Cancelar</a>
+          <button class="partner-button partner-button--primary" type="submit" data-continue-button {{ 'disabled' if not page.selected_subcategory_id }}>
+            Continuar para subir el producto
+            <i data-lucide="arrow-right" aria-hidden="true"></i>
+          </button>
+        </div>
+      </footer>
+    </form>
+  </section>
+</main>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/partner-product-category.js') }}" defer></script>
+{% endblock %}

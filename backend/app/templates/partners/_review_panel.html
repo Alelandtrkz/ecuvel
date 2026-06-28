@@ -1,0 +1,17 @@
+<form class="partner-form partner-form--summary" method="post" action="{{ url_for('partners.submit_review') }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div>
+    <h2>Enviar una solicitud de verificación</h2>
+    <p>Verificaremos los detalles dentro de unos días. Si todo está bien, puede concluir un contrato y comenzar a vender.</p>
+  </div>
+  <dl class="partner-summary">
+    <div><dt>Tienda</dt><dd>{{ onboarding.store_name }}</dd></div>
+    <div><dt>Ciudad</dt><dd>{{ onboarding.city }}</dd></div>
+    <div><dt>Contacto</dt><dd>{{ onboarding.whatsapp_or_nickname }}</dd></div>
+    <div><dt>Documentos</dt><dd>{{ onboarding.documents|length }}</dd></div>
+  </dl>
+  <div class="partner-actions">
+    <a class="partner-button partner-button--secondary" href="{{ url_for('partners.onboarding_step', step=5) }}">Regresar</a>
+    <button class="partner-button partner-button--primary" type="submit">Enviar</button>
+  </div>
+</form>

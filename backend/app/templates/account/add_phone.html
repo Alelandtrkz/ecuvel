@@ -1,0 +1,16 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Agregar teléfono | Ecuvel{% endblock %}
+{% block auth_content %}
+<h1 id="auth-title">Añadir número telefónico</h1>
+<p class="auth-card__intro">Enviaremos un código para verificar que controlas este número.</p>
+<form method="post" action="{{ url_for('account.add_phone_post') }}" class="auth-form" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <label for="profile-phone">Número telefónico</label>
+  <input id="profile-phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="20" value="{{ form.phone|default('') }}" required>
+
+  <button class="button button--primary auth-submit" type="submit">Enviar código</button>
+</form>
+<p class="auth-card__switch"><a href="{{ url_for('account.profile') }}">Volver al perfil</a></p>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Código de verificación | Ecuvel{% endblock %}
+{% block auth_content %}
+<a class="auth-back" href="{{ url_for('auth.phone_login_form') }}" aria-label="Cambiar número">
+  <i data-lucide="chevron-left" aria-hidden="true"></i>
+</a>
+<h1 id="auth-title">Código de verificación</h1>
+<p class="auth-card__intro">Ingresa el código enviado a tu número telefónico.</p>
+<form method="post" action="{{ url_for('auth.phone_verify_post') }}" class="auth-form" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <label for="phone-code">Código de seis dígitos</label>
+  <input id="phone-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+
+  <button class="button button--primary auth-submit" type="submit">Validar código</button>
+</form>
+<form method="post" action="{{ url_for('auth.phone_resend_code') }}" class="auth-form auth-form--compact">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button class="auth-link-button" type="submit">Reenviar código</button>
+</form>
+<p class="auth-card__switch"><a href="{{ url_for('auth.phone_login_form') }}">Cambiar número</a></p>
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Mi reseña | Ecuvel{% endblock %}
+{% block body_class %}orders-shell{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/orders.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/reviews.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="orders-layout content-container">
+  {% include "components/customer_sidebar.html" %}
+
+  <article class="own-review" aria-labelledby="own-review-title">
+    <a class="orders-back" href="{{ url_for('storefront.order_detail', order_number=review.order_number) }}">
+      <i data-lucide="arrow-left" aria-hidden="true"></i>
+      Volver al pedido
+    </a>
+
+    <header>
+      <span class="review-status review-status--{{ review.status.value|lower }}">{{ review.status.value.replace('_', ' ') }}</span>
+      <h1 id="own-review-title">{{ review.product_name }}</h1>
+      <p>Pedido {{ review.order_number }}</p>
+    </header>
+
+    {% if review.status.value == "PENDING_REVIEW" %}
+      <p class="review-note">Tu comentario está en revisión. Lo publicaremos cuando sea aprobado.</p>
+    {% elif review.status.value == "REJECTED" %}
+      <p class="review-note review-note--warning">No fue publicado: {{ review.public_rejection_reason or "No cumple nuestras políticas de publicación." }}</p>
+    {% endif %}
+
+    <div class="own-review__stars" aria-label="{{ review.rating }} de 5 estrellas">
+      {% for value in range(1, 6) %}
+        <i data-lucide="star" class="{{ 'is-active' if value <= review.rating }}" aria-hidden="true"></i>
+      {% endfor %}
+    </div>
+
+    <p class="own-review__body">{{ review.body }}</p>
+
+    {% if review.images %}
+      <div class="own-review__images" aria-label="Fotos de la reseña">
+        {% for image in review.images %}
+          <img
+            src="{{ url_for('storefront.product_review_image', public_id=image.public_id) }}"
+            alt="Foto {{ loop.index }} de la reseña"
+            width="120"
+            height="120"
+            loading="lazy"
+          >
+        {% endfor %}
+      </div>
+    {% endif %}
+  </article>
+</div>
+{% endblock %}

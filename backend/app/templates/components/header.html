@@ -1,0 +1,91 @@
+<header class="site-header">
+  <div class="site-header__inner content-container">
+    <a class="brand-mark" href="{{ url_for('storefront.home') }}" aria-label="Ecuvel, inicio">
+      <span class="brand-mark__name">ECUVEL</span>
+      <span class="brand-mark__note">marca temporal</span>
+    </a>
+
+    <a class="catalog-button button button--primary" href="{{ url_for('storefront.home') }}">
+      <i data-lucide="layout-grid" aria-hidden="true"></i>
+      <span>Catálogo</span>
+    </a>
+
+    <form class="search-bar" role="search" method="get" action="{{ url_for('storefront.home') }}">
+      <label class="visually-hidden" for="storefront-search">Buscar productos</label>
+      <label class="visually-hidden" for="storefront-category">Categoría</label>
+      <select id="storefront-category" class="search-bar__category" name="category" aria-label="Categoría de búsqueda">
+        <option value="">Todos</option>
+        {% for category in categories|default([]) %}
+          <option value="{{ category.slug }}"{% if selected_category|default('') == category.slug %} selected{% endif %}>{{ category.name }}</option>
+        {% endfor %}
+      </select>
+      <input
+        id="storefront-search"
+        class="search-bar__input"
+        name="q"
+        type="search"
+        maxlength="100"
+        value="{{ query_text|default('') }}"
+        placeholder="Buscar en Ecuvel"
+        autocomplete="off"
+      >
+      <button class="search-bar__submit" type="submit" aria-label="Buscar">
+        <i data-lucide="search" aria-hidden="true"></i>
+      </button>
+    </form>
+
+    <nav class="header-actions" aria-label="Acciones de cuenta">
+      {% if current_user.is_authenticated %}
+        {% set account_label = (current_user.full_name or "Cuenta Ecuvel").split()[0] %}
+        <details class="header-account">
+          <summary class="header-action{% if current_section|default('') == 'profile' %} is-active{% endif %}">
+            <i data-lucide="user-round" aria-hidden="true"></i>
+            <span title="{{ current_user.full_name or 'Cuenta Ecuvel' }}">{{ account_label }}</span>
+          </summary>
+          <div class="header-account__menu">
+            <a href="{{ url_for('account.profile') }}">Mi perfil</a>
+            <a href="{{ url_for('storefront.orders') }}">Mis pedidos</a>
+            <a href="{{ url_for('storefront.favorites') }}">Favoritos</a>
+            <a href="{{ url_for('partners.dashboard') }}">Abre tu tienda</a>
+            <form method="post" action="{{ url_for('auth.logout') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit">Cerrar sesión</button>
+            </form>
+          </div>
+        </details>
+      {% else %}
+        <a class="header-action" href="{{ url_for('auth.login_form') }}">
+          <i data-lucide="user-round" aria-hidden="true"></i>
+          <span>Ingresar</span>
+        </a>
+      {% endif %}
+      <a
+        class="header-action{% if current_section|default('') == 'orders' %} is-active{% endif %}"
+        href="{{ url_for('storefront.orders') }}"
+        {% if current_section|default('') == 'orders' %}aria-current="page"{% endif %}
+      >
+        <i data-lucide="package" aria-hidden="true"></i>
+        <span>Pedidos</span>
+      </a>
+      <a
+        class="header-action header-action--favorites{% if current_section|default('') == 'favorites' %} is-active{% endif %}"
+        href="{{ url_for('storefront.favorites') if current_user.is_authenticated else url_for('auth.login_form', next=url_for('storefront.favorites')) }}"
+        aria-label="Favoritos{% if header_favorite_count %}, {{ header_favorite_count }} producto{{ '' if header_favorite_count == 1 else 's' }}{% endif %}"
+        {% if current_section|default('') == 'favorites' %}aria-current="page"{% endif %}
+      >
+        <i data-lucide="heart" aria-hidden="true"></i>
+        <span>Favoritos</span>
+        {% if header_favorite_count %}<strong class="header-favorite-badge" data-favorite-count>{{ '99+' if header_favorite_count > 99 else header_favorite_count }}</strong>{% endif %}
+      </a>
+      <a
+        class="header-action header-action--cart"
+        href="{{ url_for('storefront.cart') }}"
+        aria-label="Carrito, {{ header_cart_count }} producto{{ '' if header_cart_count == 1 else 's' }}"
+      >
+        <i data-lucide="shopping-cart" aria-hidden="true"></i>
+        <span>Carrito</span>
+        {% if header_cart_count %}<strong class="header-cart-badge">{{ '99+' if header_cart_count > 99 else header_cart_count }}</strong>{% endif %}
+      </a>
+    </nav>
+  </div>
+</header>

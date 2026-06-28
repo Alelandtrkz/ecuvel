@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Página no encontrada | Ecuvel{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/product-detail.css') }}">{% endblock %}
+{% block content %}
+<section class="error-page content-container" aria-labelledby="error-title">
+  <div class="error-page__icon"><i data-lucide="package-x" aria-hidden="true"></i></div>
+  <span>Error 404</span>
+  <h1 id="error-title">No encontramos este producto</h1>
+  <p>Puede que ya no esté disponible o que la dirección no sea correcta.</p>
+  <a class="button button--primary" href="{{ url_for('storefront.home') }}">Volver al inicio</a>
+</section>
+{% endblock %}

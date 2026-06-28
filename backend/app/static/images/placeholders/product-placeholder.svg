@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" role="img" aria-labelledby="title description">
+  <title id="title">Imagen de producto pendiente</title>
+  <desc id="description">Ilustración abstracta azul para un producto que aún no tiene fotografía.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f5f7fa"/>
+      <stop offset="1" stop-color="#dce7fb"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1164ff"/>
+      <stop offset="1" stop-color="#085df8"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="640" rx="48" fill="url(#background)"/>
+  <circle cx="488" cy="146" r="72" fill="#f0bc61" opacity=".55"/>
+  <circle cx="130" cy="496" r="96" fill="#085df8" opacity=".08"/>
+  <path d="M201 250 320 181l119 69v139l-119 69-119-69Z" fill="url(#box)"/>
+  <path d="m201 250 119 69 119-69M320 319v139" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="18" opacity=".9"/>
+  <text x="320" y="548" fill="#001f3f" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="700" text-anchor="middle">IMAGEN PRÓXIMAMENTE</text>
+</svg>

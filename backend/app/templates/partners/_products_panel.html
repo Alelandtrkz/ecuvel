@@ -1,0 +1,11 @@
+<section class="partner-form">
+  <h2>Tu tienda ya está habilitada para vender</h2>
+  <p>Próximamente podrás crear y gestionar tus productos desde aquí.</p>
+  <div class="partner-actions partner-actions--inline">
+    <a class="partner-button partner-button--primary" href="{{ url_for('partners.products') }}">Ir a subir productos</a>
+    <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Ir al panel de productos</a>
+  </div>
+  {% if onboarding.contract_acceptance and onboarding.contract_acceptance.pdf_storage_key %}
+    <a class="partner-link" href="{{ url_for('partners.accepted_contract_pdf') }}">Descargar contrato aceptado</a>
+  {% endif %}
+</section>

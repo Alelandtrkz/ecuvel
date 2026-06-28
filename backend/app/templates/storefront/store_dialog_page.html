@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Tienda Ecuvel | Información{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/store-public.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="store-dialog-page content-container">
+  <a class="store-dialog-page__back" href="{{ url_for('storefront.store_page', store_slug=store_slug) }}">
+    <i data-lucide="arrow-left" aria-hidden="true"></i>
+    Volver a la tienda
+  </a>
+  <section class="store-dialog-page__panel">
+    {% include content_template %}
+  </section>
+</div>
+{% endblock %}

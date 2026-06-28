@@ -1,0 +1,37 @@
+<section class="partner-form partner-contract">
+  <div>
+    <h2>Firma del contrato</h2>
+    <p class="partner-form__subtitle">Contrato y aceptación</p>
+  </div>
+
+  {% if onboarding.status.value not in ["APPROVED", "CONTRACT_PENDING"] %}
+    <p>El contrato estará disponible cuando la tienda sea aprobada.</p>
+    <a class="partner-button partner-button--secondary" href="{{ url_for('partners.status') }}">Volver al estado</a>
+  {% else %}
+    <div class="partner-contract__viewer" tabindex="0">
+      <h3>Contrato ECUVEL Partners</h3>
+      <p>El partner declara que la información proporcionada es verídica y acepta operar en ECUVEL respetando las políticas de la plataforma.</p>
+      <p>El uso de la plataforma está sujeto a tarifas, anexos comerciales y obligaciones de calidad, atención y cumplimiento.</p>
+      <p>Versión del contrato: {{ config.PARTNER_CONTRACT_VERSION }} · Anexo: {{ config.PARTNER_CONTRACT_ANNEX_VERSION }}</p>
+    </div>
+    <a class="partner-link" href="{{ url_for('partners.contract_pdf') }}">Descargar PDF</a>
+
+    <form class="partner-contract__otp" method="post" action="{{ url_for('partners.contract_otp') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="action" value="send">
+      <button class="partner-button partner-button--secondary" type="submit">Enviar código</button>
+    </form>
+
+    <form class="partner-contract__accept" method="post" action="{{ url_for('partners.contract_otp') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label><input type="checkbox" name="truthful" value="1" required> Declaro que la información proporcionada es verídica</label>
+      <label><input type="checkbox" name="terms" value="1" required> Acepto los términos y condiciones del contrato</label>
+      <label><input type="checkbox" name="fees" value="1" required> Acepto las tarifas y anexos aplicables</label>
+      <label><input type="checkbox" name="obligations" value="1" required> Comprendo las obligaciones de uso de la plataforma</label>
+      <label class="partner-field">Código OTP
+        <input name="otp_code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required>
+      </label>
+      <button class="partner-button partner-button--primary" type="submit">Validar código y aceptar contrato</button>
+    </form>
+  {% endif %}
+</section>

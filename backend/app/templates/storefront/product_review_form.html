@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Reseñar {{ target.product_name }} | Ecuvel{% endblock %}
+{% block body_class %}orders-shell{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/orders.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/reviews.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="orders-layout content-container">
+  {% include "components/customer_sidebar.html" %}
+
+  <section class="review-form-page" aria-labelledby="product-review-dialog-title-{{ target.order_item_id }}">
+    <a class="orders-back" href="{{ url_for('storefront.order_detail', order_number=target.order_number) }}">
+      <i data-lucide="arrow-left" aria-hidden="true"></i>
+      Volver al pedido
+    </a>
+    {% include "reviews/_product_review_form.html" %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/reviews.js') }}" defer></script>
+{% endblock %}

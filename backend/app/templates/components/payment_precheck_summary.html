@@ -1,0 +1,35 @@
+{% macro payment_precheck_summary(outcome, bank_name, bank_is_recognized,
+                                  expected_amount, detected_amount,
+                                  expected_account_masked,
+                                  detected_account_masked,
+                                  transaction_at, receipt_number,
+                                  receipt_is_unique, findings) -%}
+  {% set safe_outcome = outcome if outcome in ('PASSED', 'NEEDS_MANUAL_REVIEW', 'FAILED') else 'NEEDS_MANUAL_REVIEW' %}
+  <section class="precheck-summary" aria-labelledby="precheck-title">
+    <div class="precheck-summary__heading">
+      <h2 id="precheck-title">Prevalidación automática</h2>
+      <span class="precheck-badge precheck-badge--{{ safe_outcome|lower }}">
+        {{ safe_outcome|replace('_', ' ') }}
+      </span>
+    </div>
+    <dl class="precheck-summary__facts">
+      <div><dt>Banco</dt><dd>{{ bank_name or 'No detectado' }}</dd></div>
+      <div><dt>Banco reconocido</dt><dd>{{ 'Sí' if bank_is_recognized else 'No' }}</dd></div>
+      <div><dt>Monto esperado</dt><dd>{{ expected_amount }}</dd></div>
+      <div><dt>Monto detectado</dt><dd>{{ detected_amount or 'No detectado' }}</dd></div>
+      <div><dt>Cuenta esperada</dt><dd>{{ expected_account_masked or 'No configurada' }}</dd></div>
+      <div><dt>Cuenta detectada</dt><dd>{{ detected_account_masked or 'No detectada' }}</dd></div>
+      <div><dt>Fecha</dt><dd>{{ transaction_at or 'No detectada' }}</dd></div>
+      <div><dt>Comprobante</dt><dd>{{ receipt_number or 'No detectado' }}</dd></div>
+      <div><dt>Referencia única</dt><dd>{{ 'Sí' if receipt_is_unique else 'No determinada' }}</dd></div>
+    </dl>
+    {% if findings %}
+      <ul class="precheck-summary__findings">
+        {% for finding in findings %}
+          <li>{{ finding.message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    <p class="precheck-summary__warning">Aprobación manual requerida.</p>
+  </section>
+{%- endmacro %}

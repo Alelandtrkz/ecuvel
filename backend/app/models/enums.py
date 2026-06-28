@@ -8,6 +8,18 @@ class UserStatus(StrEnum):
     SUSPENDED = "SUSPENDED"
 
 
+class UserAccountTokenPurpose(StrEnum):
+    VERIFY_EMAIL = "VERIFY_EMAIL"
+    RESET_PASSWORD = "RESET_PASSWORD"
+    CHANGE_EMAIL = "CHANGE_EMAIL"
+
+
+class PhoneOtpPurpose(StrEnum):
+    LOGIN_OR_REGISTER = "LOGIN_OR_REGISTER"
+    LINK_PHONE = "LINK_PHONE"
+    CHANGE_PHONE = "CHANGE_PHONE"
+
+
 class StoreStatus(StrEnum):
     DRAFT = "DRAFT"
     PENDING_REVIEW = "PENDING_REVIEW"
@@ -24,6 +36,46 @@ class StoreMemberRole(StrEnum):
     ORDER_OPERATOR = "ORDER_OPERATOR"
     FINANCE_OPERATOR = "FINANCE_OPERATOR"
     VIEWER = "VIEWER"
+
+
+class StoreOnboardingStatus(StrEnum):
+    DRAFT = "DRAFT"
+    SUBMITTED = "SUBMITTED"
+    CORRECTIONS_REQUESTED = "CORRECTIONS_REQUESTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    CONTRACT_PENDING = "CONTRACT_PENDING"
+    COMPLETED = "COMPLETED"
+
+
+class StoreOnboardingStage(StrEnum):
+    VERIFY_DATA = "VERIFY_DATA"
+    WAITING_VERIFICATION = "WAITING_VERIFICATION"
+    CONTRACT_ACCEPTANCE = "CONTRACT_ACCEPTANCE"
+    PRODUCTS = "PRODUCTS"
+
+
+class StoreOnboardingDocumentStatus(StrEnum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class StoreVerificationDecision(StrEnum):
+    PENDING = "PENDING"
+    CORRECTIONS_REQUESTED = "CORRECTIONS_REQUESTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class StoreContractOtpChannel(StrEnum):
+    PHONE = "PHONE"
+    EMAIL = "EMAIL"
+
+
+class StoreContractAcceptanceStatus(StrEnum):
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
 
 
 class OfferStatus(StrEnum):
@@ -54,6 +106,47 @@ class SellerOrderStatus(StrEnum):
     READY_FOR_PICKUP = "READY_FOR_PICKUP"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+
+
+class PaymentMethod(StrEnum):
+    BANK_TRANSFER = "BANK_TRANSFER"
+    CARD = "CARD"
+
+
+class PaymentStatus(StrEnum):
+    AWAITING_PROOF = "AWAITING_PROOF"
+    PENDING_PROVIDER = "PENDING_PROVIDER"
+    PROCESSING = "PROCESSING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
+
+
+class PaymentProofStatus(StrEnum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class PaymentProofAnalysisStatus(StrEnum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class PaymentProofPrecheckOutcome(StrEnum):
+    PASSED = "PASSED"
+    NEEDS_MANUAL_REVIEW = "NEEDS_MANUAL_REVIEW"
+    FAILED = "FAILED"
+
+
+class ProductReviewStatus(StrEnum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    PUBLISHED = "PUBLISHED"
+    REJECTED = "REJECTED"
 
 
 class PackageStatus(StrEnum):

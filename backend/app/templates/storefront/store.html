@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% from "components/product_card.html" import product_card %}
+
+{% block title %}{{ store_page.store.display_name }} | Ecuvel{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/store-public.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="store-public content-container">
+  <section class="store-hero" aria-labelledby="store-title">
+    <div class="store-hero__logo" aria-hidden="true">{{ store_page.store.logo_initial }}</div>
+    <div class="store-hero__body">
+      <h1 id="store-title">{{ store_page.store.display_name }}</h1>
+      <div class="store-chips" aria-label="Información pública de la tienda">
+        <a
+          class="store-chip"
+          href="{{ url_for('storefront.store_information', store_slug=store_page.store.slug) }}"
+          data-store-dialog-trigger
+          data-dialog-url="{{ url_for('storefront.store_information', store_slug=store_page.store.slug, modal=1) }}"
+          aria-haspopup="dialog"
+        >
+          <i data-lucide="store" aria-hidden="true"></i>
+          <span>Tienda</span>
+        </a>
+        <a
+          class="store-chip"
+          href="{{ url_for('storefront.store_rating', store_slug=store_page.store.slug) }}"
+          data-store-dialog-trigger
+          data-dialog-url="{{ url_for('storefront.store_rating', store_slug=store_page.store.slug, modal=1) }}"
+          aria-haspopup="dialog"
+        >
+          <i data-lucide="star" aria-hidden="true"></i>
+          <span>{% if store_page.store.rating_average is not none %}{{ "%.1f"|format(store_page.store.rating_average) }}{% else %}Sin calificación{% endif %}</span>
+        </a>
+        <a
+          class="store-chip"
+          href="{{ url_for('storefront.store_products_summary', store_slug=store_page.store.slug) }}"
+          data-store-dialog-trigger
+          data-dialog-url="{{ url_for('storefront.store_products_summary', store_slug=store_page.store.slug, modal=1) }}"
+          aria-haspopup="dialog"
+        >
+          <i data-lucide="package" aria-hidden="true"></i>
+          <span>Productos</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="store-catalog" aria-labelledby="store-catalog-title">
+    <div class="section-heading">
+      <div>
+        <span class="section-heading__eyebrow">Tienda Ecuvel</span>
+        <h2 id="store-catalog-title">Catálogo de la tienda</h2>
+      </div>
+      <p>{{ store_page.total_items }} producto{{ '' if store_page.total_items == 1 else 's' }} visible{{ '' if store_page.total_items == 1 else 's' }}</p>
+    </div>
+
+    {% if products %}
+      <div class="product-grid store-catalog__grid">
+        {% for product in products %}
+          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available) }}
+        {% endfor %}
+      </div>
+    {% else %}
+      <section class="store-empty" aria-labelledby="store-empty-title">
+        <i data-lucide="package-search" aria-hidden="true"></i>
+        <h3 id="store-empty-title">Esta tienda no tiene productos publicados</h3>
+        <p>Vuelve pronto o explora el catálogo general de Ecuvel.</p>
+        <a class="button button--primary" href="{{ url_for('storefront.home') }}">Explorar productos</a>
+      </section>
+    {% endif %}
+
+    {% if store_page.total_pages > 1 %}
+      <nav class="store-pagination" aria-label="Paginación del catálogo de tienda">
+        {% if store_page.has_previous %}
+          <a class="button button--secondary" href="{{ url_for('storefront.store_page', store_slug=store_page.store.slug, page=store_page.previous_page) }}">Anterior</a>
+        {% endif %}
+        <span>Página {{ store_page.page }} de {{ store_page.total_pages }}</span>
+        {% if store_page.has_next %}
+          <a class="button button--secondary" href="{{ url_for('storefront.store_page', store_slug=store_page.store.slug, page=store_page.next_page) }}">Siguiente</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </section>
+</div>
+
+<dialog class="store-dialog" aria-modal="true" aria-labelledby="store-dialog-title" data-store-dialog>
+  <div class="store-dialog__panel">
+    <button class="store-dialog__close" type="button" aria-label="Cerrar ventana" data-store-dialog-close>
+      <i data-lucide="x" aria-hidden="true"></i>
+    </button>
+    <div class="store-dialog__body" data-store-dialog-body>
+      <h2 id="store-dialog-title">Información de la tienda</h2>
+    </div>
+  </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/cart.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/store-public.js') }}" defer></script>
+{% endblock %}

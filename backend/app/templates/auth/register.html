@@ -1,0 +1,27 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Registro | Ecuvel{% endblock %}
+{% block auth_content %}
+<h1 id="auth-title">Registro en la plataforma</h1>
+<p class="auth-card__intro">Ingrese los datos solicitados para completar el proceso de registro en la plataforma. Todos los campos son obligatorios.</p>
+<form method="post" action="{{ url_for('auth.register') }}" class="auth-form" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+
+  <label for="register-email">Correo electrónico</label>
+  <input id="register-email" name="email" type="email" autocomplete="email" maxlength="254" value="{{ form.email|default('') }}" required>
+
+  <label for="register-name">Nombre y apellido</label>
+  <input id="register-name" name="full_name" type="text" autocomplete="name" maxlength="120" value="{{ form.full_name|default('') }}" required>
+
+  <label for="register-password">Contraseña</label>
+  <input id="register-password" name="password" type="password" autocomplete="new-password" maxlength="128" required>
+
+  <label for="register-password-confirmation">Vuelva a escribir la contraseña</label>
+  <input id="register-password-confirmation" name="password_confirmation" type="password" autocomplete="new-password" maxlength="128" required>
+
+  <button class="button button--primary auth-submit" type="submit">Verificar correo electrónico</button>
+</form>
+<p class="auth-card__switch"><a href="{{ url_for('auth.phone_login_form', next=next_url) }}">Registrarme con número telefónico</a></p>
+<p class="auth-card__switch"><a href="{{ url_for('auth.login_form', next=next_url) }}">Ya tengo una cuenta</a></p>
+{% endblock %}

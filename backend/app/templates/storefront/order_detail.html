@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+
+{% block title %}Pedido {{ detail.card.order_number }} | Ecuvel{% endblock %}
+{% block body_class %}orders-shell{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/orders.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/reviews.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="orders-layout content-container">
+  {% include "components/customer_sidebar.html" %}
+
+  <article class="order-detail" aria-labelledby="order-detail-title">
+    <a class="orders-back" href="{{ url_for('storefront.orders') }}">
+      <i data-lucide="arrow-left" aria-hidden="true"></i>
+      Volver a pedidos
+    </a>
+
+    <header class="order-detail__hero">
+      <div>
+        {% with status=detail.card.display_status %}
+          {% include "components/order_status_badge.html" %}
+        {% endwith %}
+        <h1 id="order-detail-title">Pedido {{ detail.card.order_number }}</h1>
+        <p>{{ detail.card.display_status.description }}</p>
+      </div>
+      <div class="order-detail__total">
+        <span>Total</span>
+        <strong>{{ detail.card.total|money(detail.card.currency) }}</strong>
+      </div>
+    </header>
+
+    <div class="order-detail__grid">
+      <section class="order-detail__panel" aria-labelledby="order-products-title">
+        <h2 id="order-products-title">Productos</h2>
+        <div class="order-detail__stores">
+          {% for group in detail.seller_groups %}
+            <section class="order-store-group" aria-labelledby="store-{{ loop.index }}">
+              <header>
+                <div>
+                  <h3 id="store-{{ loop.index }}">{{ group.store_name }}</h3>
+                  <p>{{ group.seller_order_number }} · {{ group.status }}</p>
+                </div>
+                <strong>{{ group.subtotal|money(detail.card.currency) }}</strong>
+              </header>
+              <ul>
+                {% for line in group.lines %}
+                  <li class="order-detail-line">
+                    <img
+                      src="{{ line.image_url or placeholder_image }}"
+                      alt="{{ line.product_name }}"
+                      width="72"
+                      height="72"
+                      loading="lazy"
+                    >
+                    <div>
+                      <strong>{{ line.product_name }}</strong>
+                      {% if line.variant_title %}<span>{{ line.variant_title }}</span>{% endif %}
+                      <small>SKU {{ line.seller_sku }}</small>
+                    </div>
+                    <span>{{ line.quantity }} unidad{{ '' if line.quantity == 1 else 'es' }}</span>
+                    <strong>{{ line.line_total|money(detail.card.currency) }}</strong>
+                    <div class="order-detail-line__review">
+                      {% if line.can_review %}
+                        <a
+                          class="button button--primary order-review-action js-review-modal-trigger"
+                          href="{{ url_for('storefront.product_review_form', order_number=detail.card.order_number, order_item_id=line.order_item_id) }}"
+                          data-review-url="{{ url_for('storefront.product_review_form', order_number=detail.card.order_number, order_item_id=line.order_item_id, modal=1) }}"
+                          data-order-item-public-id="{{ line.order_item_id }}"
+                        >
+                          {{ line.review_label }}
+                        </a>
+                      {% elif line.review_id %}
+                        <a class="button button--secondary button--small" href="{{ url_for('storefront.my_product_review', order_number=detail.card.order_number, order_item_id=line.order_item_id) }}">
+                          {{ line.review_label }}
+                        </a>
+                        {% if line.review_rejection_reason %}
+                          <small>{{ line.review_rejection_reason }}</small>
+                        {% endif %}
+                      {% else %}
+                        <small>{{ line.review_label }}</small>
+                      {% endif %}
+                    </div>
+                  </li>
+                {% endfor %}
+              </ul>
+            </section>
+          {% endfor %}
+        </div>
+      </section>
+
+      <aside class="order-detail__side">
+        <section class="order-detail__panel">
+          <h2>Acciones</h2>
+          <div class="order-detail__actions">
+            {% set primary = detail.card.display_status.primary_action %}
+            {% set secondary = detail.card.display_status.secondary_action %}
+            {% if primary and primary.endpoint == "bank_transfer" %}
+              <a class="button button--primary" href="{{ url_for('storefront.bank_transfer', order_number=detail.card.order_number) }}">{{ primary.label }}</a>
+            {% endif %}
+            {% if secondary and secondary.endpoint == "cancel_order" %}
+              <form method="post" action="{{ url_for('storefront.cancel_order', order_number=detail.card.order_number) }}" data-expiring-action>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="button button--ghost" type="submit">{{ secondary.label }}</button>
+              </form>
+            {% elif secondary and secondary.endpoint == "private_payment_proof" and detail.card.payment_proof_id %}
+              <a class="button button--secondary" href="{{ url_for('storefront.private_payment_proof', proof_id=detail.card.payment_proof_id) }}">{{ secondary.label }}</a>
+            {% endif %}
+          </div>
+        </section>
+
+        <section class="order-detail__panel">
+          <h2>Pago</h2>
+          <dl class="order-detail__facts">
+            <div><dt>Método</dt><dd>{{ detail.payment.method }}</dd></div>
+            <div><dt>Estado</dt><dd>{{ detail.payment.status }}</dd></div>
+            <div><dt>Monto</dt><dd>{{ detail.payment.amount|money(detail.payment.currency) }}</dd></div>
+            <div><dt>Creado</dt><dd>{{ detail.card.created_at.strftime('%d/%m/%Y %H:%M') }}</dd></div>
+            {% if detail.payment.proof_id %}
+              <div><dt>Comprobante</dt><dd>{{ detail.payment.proof_status }}</dd></div>
+              <div><dt>Archivo</dt><dd><a href="{{ url_for('storefront.private_payment_proof', proof_id=detail.payment.proof_id) }}">Ver comprobante</a></dd></div>
+            {% endif %}
+            {% if detail.payment.public_rejection_reason %}
+              <div><dt>Motivo público</dt><dd>{{ detail.payment.public_rejection_reason }}</dd></div>
+            {% endif %}
+          </dl>
+        </section>
+
+        <section class="order-detail__panel">
+          <h2>Punto de entrega</h2>
+          <p><strong>{{ detail.card.pickup_point_name }}</strong></p>
+          <p>{{ detail.card.pickup_point_address }}</p>
+        </section>
+      </aside>
+    </div>
+
+    <section class="order-detail__panel" aria-labelledby="order-timeline-title">
+      <h2 id="order-timeline-title">Progreso</h2>
+      {% with timeline=detail.timeline %}
+        {% include "components/order_timeline.html" %}
+      {% endwith %}
+    </section>
+
+    <dialog class="review-dialog" aria-modal="true" aria-labelledby="product-review-dialog-title" data-review-dialog>
+      <div class="review-dialog__content">
+        <h2 id="product-review-dialog-title" class="visually-hidden">Formulario de reseña</h2>
+        <button class="review-dialog__close" type="button" aria-label="Cerrar formulario de reseña" data-review-dialog-close>
+          <i data-lucide="chevron-left" aria-hidden="true"></i>
+        </button>
+        <div class="review-dialog__body" data-review-dialog-body></div>
+      </div>
+    </dialog>
+  </article>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/payment-countdown.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/reviews.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,23 @@
+<section class="store-dialog-content" aria-labelledby="store-dialog-title">
+  <h2 id="store-dialog-title">Calificación de la tienda</h2>
+  {% if rating.average is not none and rating.count %}
+    <div class="store-dialog-metric">
+      <i data-lucide="star" aria-hidden="true"></i>
+      <strong>{{ "%.1f"|format(rating.average) }}</strong>
+      <span>de 5 · {{ rating.count }} reseña{{ '' if rating.count == 1 else 's' }} publicada{{ '' if rating.count == 1 else 's' }}</span>
+    </div>
+  {% else %}
+    <div class="store-dialog-metric store-dialog-metric--empty">
+      <i data-lucide="star" aria-hidden="true"></i>
+      <strong>Sin calificación</strong>
+      <span>Aún no hay reseñas publicadas para productos vendidos por esta tienda.</span>
+    </div>
+  {% endif %}
+  <p>{{ rating.explanation }}</p>
+  <p class="store-dialog-note">La calificación se calcula automáticamente desde reseñas públicas de productos, no desde métricas de pedidos o ventas.</p>
+  {% if is_fragment %}
+    <button class="store-dialog__accept" type="button" data-store-dialog-accept>Aceptar</button>
+  {% else %}
+    <a class="store-dialog__accept" href="{{ url_for('storefront.store_page', store_slug=store_slug) }}">Aceptar</a>
+  {% endif %}
+</section>

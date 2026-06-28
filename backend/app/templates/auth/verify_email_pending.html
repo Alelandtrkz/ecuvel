@@ -1,0 +1,17 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Verifica tu cuenta | Ecuvel{% endblock %}
+{% block auth_content %}
+<h1 id="auth-title">Verifica tu cuenta</h1>
+{% if current_user.email %}
+  <p class="auth-card__intro">Enviamos un enlace de verificación a {{ current_user.email }}. También puedes verificar un teléfono desde tu perfil.</p>
+  <form method="post" action="{{ url_for('auth.resend_verification') }}" class="auth-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button button--primary auth-submit" type="submit">Reenviar verificación</button>
+  </form>
+{% else %}
+  <p class="auth-card__intro">Añade y verifica un correo o teléfono para continuar.</p>
+  <p class="auth-card__switch"><a href="{{ url_for('account.add_phone_form') }}">Añadir número telefónico</a></p>
+{% endif %}
+<p class="auth-card__switch"><a href="{{ url_for('storefront.home') }}">Volver al inicio</a></p>
+{% endblock %}

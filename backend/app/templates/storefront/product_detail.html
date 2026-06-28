@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% from "components/breadcrumbs.html" import breadcrumbs %}
+{% from "components/product_gallery.html" import product_gallery %}
+{% from "components/purchase_card.html" import purchase_card %}
+{% from "components/store_card.html" import store_card %}
+{% from "components/product_specs.html" import product_specs %}
+{% from "components/product_card.html" import product_card %}
+
+{% block title %}{{ product.name }} | Ecuvel{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/product-detail.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/reviews.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="product-detail-page content-container">
+  {{ breadcrumbs(product) }}
+
+  <section class="product-overview" aria-labelledby="product-title">
+    {{ product_gallery(product.gallery_images, product.name, product.gallery_placeholder_url) }}
+
+    <header class="product-information">
+      <span class="product-information__category">{{ product.category_name }}</span>
+      <h1 id="product-title">{{ product.name }}</h1>
+      {% if product.variant_name %}<p class="product-information__variant">{{ product.variant_name }}</p>{% endif %}
+      <div class="product-information__meta">
+        <span class="product-information__rating">
+          <i data-lucide="star" aria-hidden="true"></i>
+          {% if product.rating is not none and product.review_count %}
+            {{ "%.1f"|format(product.rating) }} · {{ product.review_count }} reseña{{ '' if product.review_count == 1 else 's' }}
+          {% else %}
+            0.0 · Sin reseñas
+          {% endif %}
+        </span>
+        <span>SKU: {{ product.seller_sku }}</span>
+      </div>
+    </header>
+
+    {{ purchase_card(product) }}
+
+    <section class="product-summary" aria-labelledby="summary-title">
+      <h2 id="summary-title">Características principales</h2>
+      {% if product.highlights %}
+        <dl>
+          {% for highlight in product.highlights %}
+            <div><dt>{{ highlight.label }}</dt><dd>{{ highlight.value }}</dd></div>
+          {% endfor %}
+        </dl>
+      {% else %}
+        <p>La información resumida estará disponible próximamente.</p>
+      {% endif %}
+    </section>
+
+    {{ store_card(product) }}
+  </section>
+
+  {% include "components/notice_toast.html" %}
+
+  <section id="product-recommendations" class="product-detail-section product-recommendations" aria-labelledby="recommendations-title">
+    <div class="detail-section-heading">
+      <span>También puede interesarte</span>
+      <h2 id="recommendations-title">Productos recomendados</h2>
+    </div>
+    <div class="product-grid">
+      {% for recommendation in recommendations %}
+        {{ product_card(recommendation.product_url, recommendation.image_url, recommendation.title, recommendation.current_price, recommendation.compare_at_price, recommendation.rating, recommendation.review_count, recommendation.is_favorite, recommendation.delivery_label, recommendation.product_slug, recommendation.offer_id, recommendation.is_available) }}
+      {% endfor %}
+      {% for _ in range(recommendation_placeholder_count) %}
+        <article class="catalog-placeholder" aria-label="Espacio reservado para una recomendación futura">
+          <div class="catalog-placeholder__media"><i data-lucide="package-plus" aria-hidden="true"></i></div>
+          <span>Catálogo en crecimiento</span>
+          <h3>Más productos próximamente</h3>
+          <p>Este espacio no representa una oferta disponible.</p>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="product-detail-section" aria-labelledby="description-title">
+    <div class="detail-section-heading"><span>Conoce el producto</span><h2 id="description-title">Descripción</h2></div>
+    {% if product.description %}
+      <p class="product-description">{{ product.description }}</p>
+    {% else %}
+      <div class="detail-empty-state"><i data-lucide="file-text" aria-hidden="true"></i><p>La descripción completa estará disponible próximamente.</p></div>
+    {% endif %}
+  </section>
+
+  <section class="product-detail-section" aria-labelledby="specifications-title">
+    <div class="detail-section-heading"><span>Ficha técnica</span><h2 id="specifications-title">Especificaciones</h2></div>
+    {{ product_specs(product.specifications) }}
+  </section>
+
+  <section class="product-detail-section product-reviews" aria-labelledby="reviews-title">
+    <div class="detail-section-heading"><span>Opiniones</span><h2 id="reviews-title">Reseñas del producto</h2></div>
+    {% if reviews_page.summary.count %}
+      <div class="review-summary">
+        <div class="review-summary__score">
+          <strong>{{ "%.1f"|format(reviews_page.summary.average) }}</strong>
+          <span>/ 5</span>
+          <small>{{ reviews_page.summary.count }} opinión{{ '' if reviews_page.summary.count == 1 else 'es' }}</small>
+        </div>
+        <ol class="review-summary__distribution" aria-label="Distribución de calificaciones">
+          {% for value in [5, 4, 3, 2, 1] %}
+            {% set count = reviews_page.summary.distribution[value] %}
+            {% set percent = ((count / reviews_page.summary.count) * 100)|round(0, 'floor') %}
+            <li class="review-summary__row">
+              <span>{{ value }} estrella{{ '' if value == 1 else 's' }}</span>
+              <div
+                class="review-summary__track"
+                role="progressbar"
+                aria-label="{{ value }} estrella{{ '' if value == 1 else 's' }}: {{ count }} opinión{{ '' if count == 1 else 'es' }}, {{ percent|int }} %"
+                aria-valuemin="0"
+                aria-valuemax="100"
+                aria-valuenow="{{ percent|int }}"
+              >
+                <span class="review-summary__fill" style="width: {{ percent|int }}%"></span>
+              </div>
+              <strong>{{ count }}</strong>
+            </li>
+          {% endfor %}
+        </ol>
+      </div>
+
+      <div class="review-list">
+        {% for review in reviews_page.reviews %}
+          <article class="review-card" id="review-{{ review.review_public_id }}">
+            <header class="review-card__header">
+              <div class="review-card__author">
+                <span class="review-card__avatar" aria-hidden="true">{{ review.public_reviewer_initial }}</span>
+                <div class="review-card__identity">
+                  <strong class="review-card__name">{{ review.public_reviewer_name }}</strong>
+                  {% if review.verified_purchase %}
+                    <span class="review-card__verified"><i data-lucide="badge-check" aria-hidden="true"></i> Compra verificada</span>
+                  {% endif %}
+                  {% if review.variant_label %}
+                    <span class="review-card__variant">{{ review.variant_label }}</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="review-card__meta">
+                {% if review.published_date_label %}<time>{{ review.published_date_label }}</time>{% endif %}
+                <div class="review-card__rating" aria-label="{{ review.rating }} de 5 estrellas">
+                  {% for value in range(1, 6) %}
+                    <i data-lucide="star" class="{{ 'is-active' if value <= review.rating }}" aria-hidden="true"></i>
+                  {% endfor %}
+                </div>
+              </div>
+            </header>
+
+            <p class="review-card__body">{{ review.body }}</p>
+
+            {% if review.images %}
+              <div class="review-card__gallery" aria-label="Fotos de la reseña">
+                {% for image in review.images %}
+                  <button
+                    class="review-card__media"
+                    type="button"
+                    data-review-lightbox-item
+                    data-review-lightbox-group="{{ review.review_public_id }}"
+                    data-review-lightbox-index="{{ loop.index0 }}"
+                    data-review-lightbox-src="{{ image.url }}"
+                    data-review-lightbox-alt="Foto {{ loop.index }} de una reseña verificada"
+                  >
+                    <img src="{{ image.url }}" alt="Foto {{ loop.index }} de una reseña verificada" width="{{ image.width }}" height="{{ image.height }}" loading="lazy">
+                  </button>
+                {% endfor %}
+              </div>
+            {% endif %}
+          </article>
+        {% endfor %}
+      </div>
+
+      <dialog class="review-lightbox" aria-labelledby="review-lightbox-title" data-review-lightbox>
+        <div class="review-lightbox__content">
+          <h3 id="review-lightbox-title" class="visually-hidden">Foto de reseña</h3>
+          <button class="review-lightbox__close" type="button" aria-label="Cerrar foto" data-review-lightbox-close>
+            <i data-lucide="x" aria-hidden="true"></i>
+          </button>
+          <button class="review-lightbox__nav review-lightbox__nav--previous" type="button" aria-label="Foto anterior" data-review-lightbox-previous>
+            <i data-lucide="chevron-left" aria-hidden="true"></i>
+          </button>
+          <img src="" alt="" data-review-lightbox-image>
+          <button class="review-lightbox__nav review-lightbox__nav--next" type="button" aria-label="Foto siguiente" data-review-lightbox-next>
+            <i data-lucide="chevron-right" aria-hidden="true"></i>
+          </button>
+          <span class="review-lightbox__counter" data-review-lightbox-counter></span>
+        </div>
+      </dialog>
+
+      {% if reviews_page.total_pages > 1 %}
+        <nav class="pagination" aria-label="Paginación de reseñas">
+          {% if reviews_page.has_previous %}
+            <a href="{{ url_for('storefront.product_detail', product_slug=product.public_identifier, reviews_page=reviews_page.page - 1) }}">Anterior</a>
+          {% endif %}
+          <span>Página {{ reviews_page.page }} de {{ reviews_page.total_pages }}</span>
+          {% if reviews_page.has_next %}
+            <a href="{{ url_for('storefront.product_detail', product_slug=product.public_identifier, reviews_page=reviews_page.page + 1) }}">Siguiente</a>
+          {% endif %}
+        </nav>
+      {% endif %}
+    {% else %}
+      <div class="review-empty-state">
+        <div class="review-empty-state__score"><strong>0.0</strong><span>/ 5</span><small>0 opiniones</small></div>
+        <div><i data-lucide="message-square-more" aria-hidden="true"></i><h3>Este producto todavía no tiene reseñas.</h3><p>Las opiniones de compradores aparecerán aquí cuando estén disponibles.</p></div>
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/product-detail.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/product-reviews.js') }}" defer></script>
+{% endblock %}

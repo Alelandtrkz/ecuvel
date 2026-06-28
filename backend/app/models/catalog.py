@@ -159,6 +159,16 @@ class Product(
         cascade="all, delete-orphan",
     )
 
+    favorites: Mapped[list["Favorite"]] = relationship(
+        "Favorite",
+        back_populates="product",
+    )
+
+    reviews: Mapped[list["ProductReview"]] = relationship(
+        "ProductReview",
+        back_populates="product",
+    )
+
 
 class ProductVariant(
     UUIDPrimaryKeyMixin,

@@ -1,0 +1,37 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Iniciar sesión | Ecuvel{% endblock %}
+{% block auth_content %}
+<h1 id="auth-title">Iniciar sesión</h1>
+<p class="auth-card__intro">Ingresa con tu correo y contraseña para continuar.</p>
+<form method="post" action="{{ url_for('auth.login') }}" class="auth-form" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+
+  <label for="login-email">Correo electrónico</label>
+  <input id="login-email" name="email" type="email" autocomplete="email" maxlength="254" value="{{ form.email|default('') }}" required>
+
+  <label for="login-password">Contraseña</label>
+  <div class="password-field">
+    <input id="login-password" name="password" type="password" autocomplete="current-password" maxlength="128" required>
+    <button type="button" data-password-toggle aria-label="Mostrar u ocultar contraseña">
+      <i data-lucide="eye" aria-hidden="true"></i>
+    </button>
+  </div>
+
+  <label class="auth-check">
+    <input type="checkbox" name="remember" value="1">
+    <span>Recordarme</span>
+  </label>
+
+  <button class="button button--primary auth-submit" type="submit">Ingresar</button>
+</form>
+<p class="auth-card__switch"><a href="{{ url_for('auth.phone_login_form', next=next_url) }}">Usar número telefónico</a></p>
+<p class="auth-card__switch"><a href="{{ url_for('auth.forgot_password_form') }}">¿Olvidaste tu contraseña?</a></p>
+<p class="auth-card__switch"><a href="{{ url_for('auth.register_form', next=next_url) }}">Crear una cuenta</a></p>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ url_for('static', filename='js/auth.js') }}" defer></script>
+{% endblock %}

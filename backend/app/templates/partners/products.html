@@ -1,0 +1,23 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Productos | ECUVEL Partners{% endblock %}
+{% block content %}
+<main class="partner-page partner-page--wide">
+  <section class="partner-products-home" aria-labelledby="partner-products-title">
+    <div>
+      <p class="partner-eyebrow">{{ store.store_name }}</p>
+      <h1 id="partner-products-title">Productos</h1>
+      <p>Tu tienda ya está habilitada para vender. Empieza creando una publicación desde una categoría válida.</p>
+    </div>
+    <div class="partner-actions partner-actions--inline">
+      <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">Subir producto</a>
+      <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Ir al panel de productos</a>
+    </div>
+  </section>
+
+  <section class="partner-products-empty" aria-labelledby="partner-products-empty-title">
+    <h2 id="partner-products-empty-title">Aún no hay productos creados desde Partners</h2>
+    <p>La gestión completa de productos se habilitará en las siguientes fases. Por ahora puedes iniciar la selección de categoría y plantilla.</p>
+    <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">Crear producto</a>
+  </section>
+</main>
+{% endblock %}

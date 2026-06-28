@@ -1,0 +1,102 @@
+{% macro product_gallery(images, product_name, placeholder_url) -%}
+{% set has_multiple_images = images|length > 1 %}
+{% if images %}
+  {% set initial_image = images[0] %}
+  {% set initial_url = initial_image.url %}
+  {% set initial_alt = initial_image.alt %}
+  {% set initial_width = initial_image.width or 640 %}
+  {% set initial_height = initial_image.height or 640 %}
+{% else %}
+  {% set initial_url = placeholder_url %}
+  {% set initial_alt = "Imagen de " ~ product_name ~ " próximamente" %}
+  {% set initial_width = 640 %}
+  {% set initial_height = 640 %}
+{% endif %}
+
+<section
+  class="product-gallery product-gallery--{{ 'multiple' if has_multiple_images else 'single' }}"
+  data-product-gallery
+  data-gallery-count="{{ images|length if images else 1 }}"
+  data-gallery-placeholder-url="{{ placeholder_url }}"
+  data-gallery-placeholder-alt="Imagen de {{ product_name }} próximamente"
+  aria-label="Galería de imágenes de {{ product_name }}"
+>
+  <div class="product-gallery__layout">
+    {% if has_multiple_images %}
+      <div class="product-gallery__thumbnails" role="tablist" aria-label="Imágenes de {{ product_name }}">
+        {% for image in images %}
+          <button
+            class="product-gallery__thumbnail{{ ' is-active' if loop.first }}"
+            type="button"
+            role="tab"
+            aria-selected="{{ 'true' if loop.first else 'false' }}"
+            aria-label="Mostrar imagen {{ loop.index }} de {{ product_name }}"
+            tabindex="{{ '0' if loop.first else '-1' }}"
+            data-gallery-thumbnail
+            data-gallery-index="{{ loop.index0 }}"
+            data-gallery-src="{{ image.url }}"
+            data-gallery-alt="{{ image.alt }}"
+          >
+            <img
+              src="{{ image.thumbnail_url }}"
+              alt=""
+              width="{{ image.width or 84 }}"
+              height="{{ image.height or 84 }}"
+              loading="{{ 'eager' if loop.first else 'lazy' }}"
+              data-gallery-fallback-image
+            >
+          </button>
+        {% endfor %}
+      </div>
+    {% endif %}
+
+    <div class="product-gallery__stage">
+      <button class="product-gallery__open" type="button" aria-label="Ampliar imagen de {{ product_name }}" data-gallery-open>
+        <img
+          src="{{ initial_url }}"
+          alt="{{ initial_alt }}"
+          width="{{ initial_width }}"
+          height="{{ initial_height }}"
+          loading="eager"
+          fetchpriority="high"
+          data-gallery-main-image
+          data-gallery-index="0"
+          data-gallery-fallback-image
+        >
+        <span class="product-gallery__expand"><i data-lucide="maximize-2" aria-hidden="true"></i> Ampliar</span>
+      </button>
+
+      {% if not images %}<span class="product-gallery__placeholder-label">Imagen de presentación</span>{% endif %}
+
+      {% if has_multiple_images %}
+        <button class="product-gallery__navigation product-gallery__navigation--previous" type="button" aria-label="Ver imagen anterior" data-gallery-previous>
+          <i data-lucide="chevron-left" aria-hidden="true"></i>
+        </button>
+        <button class="product-gallery__navigation product-gallery__navigation--next" type="button" aria-label="Ver imagen siguiente" data-gallery-next>
+          <i data-lucide="chevron-right" aria-hidden="true"></i>
+        </button>
+        <span class="product-gallery__counter" aria-live="polite" data-gallery-counter>1 / {{ images|length }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <dialog class="product-gallery-lightbox" aria-label="Vista ampliada de {{ product_name }}" data-gallery-dialog>
+    <div class="product-gallery-lightbox__panel">
+      <header>
+        <div><span>Vista ampliada</span><h2>{{ product_name }}</h2></div>
+        {% if has_multiple_images %}<span data-gallery-dialog-counter>1 / {{ images|length }}</span>{% endif %}
+        <button type="button" aria-label="Cerrar vista ampliada" data-gallery-close><i data-lucide="x" aria-hidden="true"></i></button>
+      </header>
+      <div class="product-gallery-lightbox__stage">
+        {% if has_multiple_images %}
+          <button type="button" aria-label="Ver imagen anterior" data-gallery-dialog-previous><i data-lucide="chevron-left" aria-hidden="true"></i></button>
+        {% endif %}
+        <img src="{{ initial_url }}" alt="{{ initial_alt }}" width="1200" height="1200" loading="eager" data-gallery-dialog-image data-gallery-fallback-image>
+        {% if has_multiple_images %}
+          <button type="button" aria-label="Ver imagen siguiente" data-gallery-dialog-next><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+        {% endif %}
+      </div>
+    </div>
+  </dialog>
+</section>
+{%- endmacro %}

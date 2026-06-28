@@ -1,0 +1,19 @@
+{% extends "checkout_base.html" %}
+
+{% block title %}Pedido pendiente de pago | Ecuvel{% endblock %}
+{% block content %}
+<div class="pending-page content-container">
+  <div class="pending-page__icon"><i data-lucide="circle-check" aria-hidden="true"></i></div>
+  {% if order.proof_id %}
+    <h1>Comprobante recibido</h1><p>En revisión</p>
+    <p>El comprobante del pedido <strong>{{ order.order_number }}</strong> fue recibido correctamente. Aún no implica que el pago esté aprobado.</p>
+    <a class="button button--secondary" href="{{ url_for('storefront.private_payment_proof', proof_id=order.proof_id) }}">Ver comprobante enviado</a>
+  {% else %}
+    <h1>Pedido pendiente de pago</h1><p>Aún no recibimos el comprobante del pedido <strong>{{ order.order_number }}</strong>.</p>
+  {% endif %}
+  <div class="pending-page__actions">
+    <a class="button button--primary" href="{{ url_for('storefront.bank_transfer', order_number=order.order_number) }}">Ver instrucciones de pago</a>
+    <a class="button button--secondary" href="{{ url_for('storefront.orders') }}">Ver mis pedidos</a>
+  </div>
+</div>
+{% endblock %}

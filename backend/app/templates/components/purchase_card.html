@@ -1,0 +1,70 @@
+{% macro purchase_card(product) -%}
+<aside class="purchase-card" aria-label="Opciones de compra">
+  <div class="purchase-card__availability purchase-card__availability--{{ 'available' if product.is_available else 'unavailable' }}">
+    <i data-lucide="{{ 'circle-check' if product.is_available else 'circle-x' }}" aria-hidden="true"></i>
+    <span>{{ product.availability_label }}</span>
+  </div>
+  <div class="purchase-card__prices">
+    <strong>{{ product.current_price|money(product.currency) }}</strong>
+    {% if product.compare_at_price %}
+      <del>{{ product.compare_at_price|money(product.currency) }}</del>
+    {% endif %}
+  </div>
+  <p class="purchase-card__delivery"><i data-lucide="truck" aria-hidden="true"></i> Información de entrega próximamente</p>
+
+  <form class="purchase-card__cart-form" method="post" action="{{ url_for('storefront.add_to_cart') }}" data-cart-add-form data-max-quantity="{{ product.max_quantity }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="offer_id" value="{{ product.offer_id }}">
+    <input type="hidden" name="next" value="{{ url_for('storefront.product_detail', product_slug=product.public_identifier) }}">
+    <div class="quantity-selector" data-quantity-selector data-max-quantity="{{ product.max_quantity }}">
+      <label for="product-quantity">Cantidad</label>
+      <div class="quantity-selector__controls">
+        <button type="button" aria-label="Disminuir cantidad" data-quantity-decrease disabled aria-disabled="true">
+          <i data-lucide="minus" aria-hidden="true"></i>
+        </button>
+        <input id="product-quantity" name="quantity" type="number" value="1" min="1" max="{{ product.max_quantity if product.max_quantity > 0 else 1 }}" data-max-quantity="{{ product.max_quantity }}" inputmode="numeric" required{{ ' disabled' if not product.is_available }}>
+        <button type="button" aria-label="{{ 'Cantidad máxima disponible alcanzada' if product.quantity_limit_reached else 'Aumentar cantidad' }}" data-quantity-increase{% if not product.is_available or product.quantity_limit_reached %} disabled aria-disabled="true"{% endif %}>
+          <i data-lucide="plus" aria-hidden="true"></i>
+        </button>
+      </div>
+    </div>
+    {% if product.low_stock or not product.is_available %}
+      <p class="purchase-card__stock-message purchase-card__stock-message--{{ 'low' if product.low_stock else 'unavailable' }}" data-stock-message aria-live="polite">{{ product.availability_message }}</p>
+    {% endif %}
+    <button
+      class="button button--primary purchase-card__add"
+      type="submit"
+      {{ 'disabled' if not product.is_available }}
+    >
+      <i data-lucide="shopping-cart" aria-hidden="true"></i>
+      Añadir al carrito
+    </button>
+  </form>
+  <div class="purchase-card__actions">
+    <button
+      class="button button--secondary"
+      type="button"
+      {% if product.is_available %}data-notice="La compra directa estará disponible próximamente."{% else %}disabled{% endif %}
+    >Comprar ahora</button>
+    <form
+      class="purchase-card__favorite-form"
+      method="post"
+      action="{{ url_for('storefront.remove_favorite' if product.is_favorite else 'storefront.add_favorite', product_slug=product.public_identifier) }}"
+      data-favorite-form
+      data-product-slug="{{ product.public_identifier }}"
+    >
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ url_for('storefront.product_detail', product_slug=product.public_identifier) }}">
+      <button
+        class="purchase-card__favorite{{ ' is-active' if product.is_favorite }}"
+        type="submit"
+        aria-label="{{ 'Eliminar de favoritos' if product.is_favorite else 'Añadir a favoritos' }}"
+        aria-pressed="{{ 'true' if product.is_favorite else 'false' }}"
+      >
+        <i data-lucide="heart" aria-hidden="true"></i>
+        <span>{{ 'Guardado en favoritos' if product.is_favorite else 'Guardar en favoritos' }}</span>
+      </button>
+    </form>
+  </div>
+</aside>
+{%- endmacro %}

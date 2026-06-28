@@ -1,0 +1,18 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Completar registro | Ecuvel{% endblock %}
+{% block auth_content %}
+<h1 id="auth-title">Completar registro</h1>
+<p class="auth-card__intro">Tu número fue verificado. Completa la información para crear tu cuenta.</p>
+<form method="post" action="{{ url_for('auth.complete_phone_registration_post') }}" class="auth-form" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <label for="phone-register-name">Nombre y apellido</label>
+  <input id="phone-register-name" name="full_name" type="text" autocomplete="name" maxlength="120" value="{{ form.full_name|default('') }}" required>
+
+  <label for="phone-register-email">Correo electrónico opcional</label>
+  <input id="phone-register-email" name="email" type="email" autocomplete="email" maxlength="254" value="{{ form.email|default('') }}">
+
+  <button class="button button--primary auth-submit" type="submit">Crear cuenta</button>
+</form>
+{% endblock %}

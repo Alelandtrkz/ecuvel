@@ -1,0 +1,18 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Cambiar correo | Ecuvel{% endblock %}
+{% block auth_content %}
+<h1 id="auth-title">{{ "Cambiar correo" if current_user.email else "Añadir correo electrónico" }}</h1>
+<p class="auth-card__intro">Enviaremos una verificación al correo nuevo. No quedará verificado hasta confirmar el enlace.</p>
+<form method="post" action="{{ url_for('account.change_email_post') }}" class="auth-form" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <label for="new-email">Nuevo correo electrónico</label>
+  <input id="new-email" name="new_email" type="email" autocomplete="email" maxlength="254" required>
+  {% if current_user.password_hash %}
+    <label for="current-password">Contraseña actual</label>
+    <input id="current-password" name="current_password" type="password" autocomplete="current-password" maxlength="128" required>
+  {% endif %}
+  <button class="button button--primary auth-submit" type="submit">Enviar verificación</button>
+</form>
+<p class="auth-card__switch"><a href="{{ url_for('account.profile') }}">Volver al perfil</a></p>
+{% endblock %}

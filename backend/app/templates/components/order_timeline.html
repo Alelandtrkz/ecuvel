@@ -1,0 +1,14 @@
+<ol class="order-timeline">
+  {% for step in timeline %}
+    <li class="order-timeline__step{% if step.completed %} is-complete{% endif %}">
+      <span class="order-timeline__icon"><i data-lucide="{{ step.icon }}" aria-hidden="true"></i></span>
+      <div>
+        <strong>{{ step.label }}</strong>
+        <p>{{ step.description }}</p>
+        {% if step.timestamp %}
+          <time datetime="{{ step.timestamp.isoformat() }}">{{ step.timestamp.strftime('%d/%m/%Y %H:%M') }}</time>
+        {% endif %}
+      </div>
+    </li>
+  {% endfor %}
+</ol>

@@ -1,0 +1,8 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Onboarding | ECUVEL Partners{% endblock %}
+{% block content %}
+<main class="partner-page">
+  {% set panel_template = "partners/_wizard_panel.html" %}
+  {% include "partners/_shell.html" %}
+</main>
+{% endblock %}

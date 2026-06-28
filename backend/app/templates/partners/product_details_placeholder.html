@@ -1,0 +1,31 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Información del producto | ECUVEL Partners{% endblock %}
+{% block content %}
+<main class="partner-page partner-page--wide">
+  <section class="partner-products-home partner-product-next-step" aria-labelledby="product-next-step-title">
+    <div>
+      <p class="partner-eyebrow">Siguiente fase</p>
+      <h1 id="product-next-step-title">Información del producto</h1>
+      <p>La plantilla de esta categoría se completará en la siguiente fase.</p>
+    </div>
+    <dl class="partner-summary partner-summary--large">
+      <div>
+        <dt>Categoría</dt>
+        <dd>{{ selection.category_name }}</dd>
+      </div>
+      <div>
+        <dt>Subcategoría</dt>
+        <dd>{{ selection.subcategory_name }}</dd>
+      </div>
+      <div>
+        <dt>Template key</dt>
+        <dd><code>{{ selection.template_key }}</code></dd>
+      </div>
+    </dl>
+    <div class="partner-actions partner-actions--inline">
+      <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">Volver a categorías</a>
+      <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Cancelar</a>
+    </div>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}{% block partner_title %}ECUVEL Partners{% endblock %}{% endblock %}
+{% block header %}
+<header class="partner-header">
+  <div class="partner-header__top">
+    <a class="partner-logo" href="{{ url_for('partners.dashboard') }}" aria-label="ECUVEL Partners">
+      <span>ECUVEL</span><small>Partners</small>
+    </a>
+    <div class="partner-header__account">
+      <span>{{ (current_user.full_name or current_user.email or "ecuvel").split()[0] }}</span>
+      <i data-lucide="user-round" aria-hidden="true"></i>
+    </div>
+  </div>
+  <nav class="partner-tabs" aria-label="Navegación de partners">
+    <a class="{{ 'is-active' if current_partner_tab|default('main') == 'main' else '' }}" href="{{ url_for('partners.dashboard') }}">Main</a>
+    <a class="{{ 'is-active' if current_partner_tab|default('') == 'products' else '' }}" href="{{ url_for('partners.products') }}">Productos</a>
+    <span aria-disabled="true" title="Disponible después del onboarding">Analítica</span>
+  </nav>
+</header>
+{% endblock %}
+{% block footer %}{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/partners.css') }}">
+{% endblock %}

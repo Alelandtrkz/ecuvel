@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "components/product_card.html" import product_card %}
+
+{% block title %}Ecuvel | Tu marketplace en Ecuador{% endblock %}
+{% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">{% endblock %}
+
+{% block content %}
+<div class="home-page content-container">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero__content">
+      <span class="hero__eyebrow">Marketplace ecuatoriano</span>
+      <h1 id="hero-title">Encuentra lo que necesitas, cerca de ti</h1>
+      <p>Esta es la primera versión de Ecuvel. Estamos preparando más productos, categorías y formas de comprar.</p>
+      <a class="button button--hero" href="#productos">Explorar productos</a>
+    </div>
+    <div class="hero__art" aria-hidden="true">
+      <span class="hero__orb hero__orb--large"></span>
+      <span class="hero__orb hero__orb--small"></span>
+      <i data-lucide="shopping-bag"></i>
+    </div>
+  </section>
+
+  <section id="productos" class="product-section" aria-labelledby="products-title">
+    <div class="section-heading">
+      <div>
+        <span class="section-heading__eyebrow">Catálogo Ecuvel</span>
+        <h2 id="products-title">Productos para descubrir</h2>
+      </div>
+      <p>{{ products|length }} oferta{{ '' if products|length == 1 else 's' }} activa{{ '' if products|length == 1 else 's' }}</p>
+    </div>
+
+    {% if query_text or selected_category %}
+      <div class="active-filter" role="status">
+        <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+        <span>Resultados filtrados{% if query_text %} para “{{ query_text }}”{% endif %}.</span>
+        <a href="{{ url_for('storefront.home') }}">Limpiar filtros</a>
+      </div>
+    {% endif %}
+
+    {% if not products %}
+      <div class="empty-result" role="status">
+        <i data-lucide="search-x" aria-hidden="true"></i>
+        <div><h3>No encontramos ofertas activas</h3><p>Prueba con otra búsqueda o vuelve al catálogo completo.</p></div>
+      </div>
+    {% endif %}
+
+    <div class="product-grid">
+      {% for product in products[:5] %}
+        {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available) }}
+      {% endfor %}
+      {% for _ in range(placeholder_count) %}
+        <article class="catalog-placeholder" aria-label="Espacio reservado para un producto próximo">
+          <div class="catalog-placeholder__media"><i data-lucide="package-plus" aria-hidden="true"></i></div>
+          <span>Catálogo en crecimiento</span>
+          <h3>Más productos próximamente</h3>
+          <p>Este espacio no representa una oferta disponible.</p>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  <aside class="promo-band" aria-label="Información sobre Ecuvel">
+    <div><i data-lucide="shield-check" aria-hidden="true"></i><span><strong>Una experiencia clara</strong>Información de compra fácil de entender.</span></div>
+    <div><i data-lucide="map-pinned" aria-hidden="true"></i><span><strong>Pensado para Ecuador</strong>Catálogo y entregas locales en desarrollo.</span></div>
+    <div><i data-lucide="sparkles" aria-hidden="true"></i><span><strong>Más novedades pronto</strong>Nuevas categorías y vendedores en camino.</span></div>
+  </aside>
+
+  {% if products|length > 5 %}
+    <section class="product-section" aria-labelledby="more-products-title">
+      <div class="section-heading"><div><span class="section-heading__eyebrow">Más para ti</span><h2 id="more-products-title">Sigue explorando</h2></div></div>
+      <div class="product-grid">
+        {% for product in products[5:] %}
+          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available) }}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

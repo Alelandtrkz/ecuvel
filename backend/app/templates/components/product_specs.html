@@ -1,0 +1,17 @@
+{% macro product_specs(specifications) -%}
+{% if specifications %}
+  <dl class="product-specs">
+    {% for specification in specifications %}
+      <div>
+        <dt>{{ specification.label }}</dt>
+        <dd>{{ specification.value }}</dd>
+      </div>
+    {% endfor %}
+  </dl>
+{% else %}
+  <div class="detail-empty-state">
+    <i data-lucide="list-x" aria-hidden="true"></i>
+    <p>Las especificaciones detalladas estarán disponibles próximamente.</p>
+  </div>
+{% endif %}
+{%- endmacro %}

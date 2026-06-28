@@ -1,0 +1,11 @@
+{% macro breadcrumbs(product) -%}
+<nav class="breadcrumbs" aria-label="Migas de pan">
+  <ol>
+    <li><a href="{{ url_for('storefront.home') }}">Inicio</a></li>
+    <li aria-hidden="true"><i data-lucide="chevron-right"></i></li>
+    <li><a href="{{ product.category_url }}">{{ product.category_name }}</a></li>
+    <li aria-hidden="true"><i data-lucide="chevron-right"></i></li>
+    <li aria-current="page"><span>{{ product.name }}</span></li>
+  </ol>
+</nav>
+{%- endmacro %}

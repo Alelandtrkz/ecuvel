@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Ecuvel, tu marketplace en Ecuador.">
+  <title>{% block title %}Ecuvel{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='images/placeholders/ecuvel-favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+  {% block styles %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <a class="skip-link" href="#contenido-principal">Ir al contenido principal</a>
+  {% block header %}{% include "components/header.html" %}{% endblock %}
+  {% include "components/flash_messages.html" %}
+  <main id="contenido-principal" tabindex="-1">
+    {% block content %}{% endblock %}
+  </main>
+  {% block footer %}{% include "components/footer.html" %}{% endblock %}
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
+  <script src="{{ url_for('static', filename='js/icons.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/favorites.js') }}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,15 @@
+<section class="store-dialog-content" aria-labelledby="store-dialog-title">
+  <h2 id="store-dialog-title">Productos de la tienda</h2>
+  <div class="store-dialog-metric">
+    <i data-lucide="package" aria-hidden="true"></i>
+    <strong>{{ products_summary.count }}</strong>
+    <span>{{ products_summary.label }}</span>
+  </div>
+  <p>{{ products_summary.description }}</p>
+  <p class="store-dialog-note">Este conteo incluye productos únicos visibles en el catálogo público de la tienda.</p>
+  {% if is_fragment %}
+    <button class="store-dialog__accept" type="button" data-store-dialog-accept>Aceptar</button>
+  {% else %}
+    <a class="store-dialog__accept" href="{{ url_for('storefront.store_page', store_slug=store_slug) }}">Aceptar</a>
+  {% endif %}
+</section>

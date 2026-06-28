@@ -1,0 +1,24 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Ingresar con teléfono | Ecuvel{% endblock %}
+{% block auth_content %}
+<a class="auth-back" href="{{ url_for('auth.login_form', next=next_url) }}" aria-label="Volver">
+  <i data-lucide="chevron-left" aria-hidden="true"></i>
+</a>
+<h1 id="auth-title">Ingrese número telefónico</h1>
+<p class="auth-card__intro">Recibirás un código de verificación mediante el canal configurado.</p>
+<form method="post" action="{{ url_for('auth.phone_login_request') }}" class="auth-form" novalidate>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+
+  <label for="phone-login">Número telefónico</label>
+  <input id="phone-login" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="20" value="{{ form.phone|default('') }}" required>
+
+  <button class="button button--primary auth-submit" type="submit">Enviar código</button>
+</form>
+{% if config.PHONE_OTP_BACKEND == "console" and not config.ECUVEL_PRODUCTION|default(false) %}
+  <p class="auth-card__hint">Modo de desarrollo: revisa la terminal para obtener el código.</p>
+{% endif %}
+<p class="auth-card__switch"><a href="{{ url_for('auth.login_form', next=next_url) }}">Usar correo y contraseña</a></p>
+<p class="auth-card__switch"><a href="{{ url_for('auth.register_form', next=next_url) }}">Crear una cuenta con correo</a></p>
+{% endblock %}

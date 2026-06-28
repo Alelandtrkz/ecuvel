@@ -1,0 +1,12 @@
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    <div class="flash-messages content-container" aria-live="polite" aria-atomic="true">
+      {% for category, message in messages %}
+        <div class="flash-message flash-message--{{ category }}" role="status">
+          <i data-lucide="{{ 'circle-check' if category == 'success' else 'circle-alert' }}" aria-hidden="true"></i>
+          <span>{{ message }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endwith %}

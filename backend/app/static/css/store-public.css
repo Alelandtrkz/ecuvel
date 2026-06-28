@@ -1,0 +1,340 @@
+.store-public {
+  padding-block: var(--space-6, 48px);
+}
+
+.store-hero,
+.store-catalog,
+.store-dialog-page__panel {
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #d9e1ec);
+  border-radius: var(--radius-xl, 28px);
+  box-shadow: var(--shadow-sm, 0 10px 30px rgba(0, 31, 63, 0.06));
+}
+
+.store-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: clamp(22px, 4vw, 34px);
+  margin-bottom: 24px;
+}
+
+.store-hero__logo {
+  display: grid;
+  place-items: center;
+  width: clamp(70px, 8vw, 92px);
+  height: clamp(70px, 8vw, 92px);
+  flex: 0 0 auto;
+  border-radius: 18px;
+  color: var(--color-primary, #085df8);
+  background:
+    radial-gradient(circle at 75% 22%, #f0bc61 0 12px, transparent 13px),
+    linear-gradient(145deg, #eaf2ff, #f8fbff);
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 800;
+}
+
+.store-hero__body {
+  min-width: 0;
+}
+
+.store-hero h1 {
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.store-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.store-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  color: var(--color-text, #0c0c0c);
+  background: #eef2f7;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.store-chip:hover,
+.store-chip:focus-visible {
+  color: var(--color-primary, #085df8);
+  background: #e5eefc;
+}
+
+.store-chip svg {
+  width: 18px;
+  height: 18px;
+}
+
+.store-chip [data-lucide="star"] {
+  color: #f59f00;
+  fill: currentColor;
+}
+
+.store-catalog {
+  padding: clamp(22px, 4vw, 36px);
+}
+
+.store-catalog__grid {
+  margin-top: 20px;
+}
+
+.store-empty {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  min-height: 280px;
+  padding: 32px;
+  color: var(--color-muted, #6f8193);
+  text-align: center;
+}
+
+.store-empty svg {
+  width: 48px;
+  height: 48px;
+  color: var(--color-primary, #085df8);
+}
+
+.store-empty h3,
+.store-empty p {
+  margin: 0;
+}
+
+.store-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 28px;
+  color: var(--color-muted, #6f8193);
+}
+
+.store-dialog::backdrop {
+  background: rgba(12, 12, 12, 0.45);
+}
+
+.store-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  padding: 0;
+  border: 0;
+  border-radius: 28px;
+  color: var(--color-text, #0c0c0c);
+  background: transparent;
+}
+
+.store-dialog[open] {
+  animation: store-dialog-in 150ms ease-out;
+}
+
+.store-dialog__panel {
+  position: relative;
+  overflow: auto;
+  max-height: inherit;
+  padding: clamp(28px, 5vw, 48px);
+  border-radius: inherit;
+  background: #ffffff;
+  box-shadow: 0 22px 70px rgba(0, 31, 63, 0.22);
+}
+
+.store-dialog__close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--color-muted, #6f8193);
+  background: transparent;
+  cursor: pointer;
+}
+
+.store-dialog__close:hover,
+.store-dialog__close:focus-visible {
+  background: #f0f4fa;
+}
+
+.store-dialog-content {
+  display: grid;
+  gap: 20px;
+}
+
+.store-dialog-content h2 {
+  margin: 0;
+  padding-right: 40px;
+  font-size: clamp(1.7rem, 4vw, 2.35rem);
+  line-height: 1.1;
+}
+
+.store-dialog-content p {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.45;
+}
+
+.store-dialog-info-card {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border-radius: 20px;
+  background: #f3f6fa;
+}
+
+.store-dialog-info-card__row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.store-dialog-info-card__row svg {
+  width: 36px;
+  height: 36px;
+  color: var(--color-primary, #085df8);
+}
+
+.store-dialog-info-card__row span,
+.store-dialog-note {
+  color: var(--color-muted, #6f8193);
+}
+
+.store-dialog-info-card__row strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  font-size: 1.05rem;
+}
+
+.store-dialog-metric {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: #f3f6fa;
+}
+
+.store-dialog-metric svg {
+  width: 28px;
+  height: 28px;
+  color: #f59f00;
+  fill: currentColor;
+}
+
+.store-dialog-metric strong {
+  font-size: 1.8rem;
+}
+
+.store-dialog-metric span {
+  min-width: 0;
+  color: var(--color-muted, #6f8193);
+}
+
+.store-dialog-metric--empty svg {
+  fill: none;
+  color: var(--color-muted, #6f8193);
+}
+
+.store-dialog-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 8px 12px;
+  border-radius: 999px;
+  color: #087f5b;
+  background: #e6fcf5;
+  font-weight: 700;
+}
+
+.store-dialog__accept {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  width: 100%;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: var(--color-primary, #085df8);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.store-dialog__error {
+  display: grid;
+  gap: 12px;
+}
+
+.store-dialog-open {
+  overflow: hidden;
+}
+
+.store-dialog-page {
+  padding-block: 48px;
+}
+
+.store-dialog-page__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: var(--color-primary, #085df8);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.store-dialog-page__panel {
+  max-width: 640px;
+  padding: clamp(24px, 5vw, 42px);
+}
+
+@keyframes store-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 700px) {
+  .store-hero {
+    align-items: flex-start;
+  }
+
+  .store-chips,
+  .store-chip {
+    width: 100%;
+  }
+
+  .store-chip {
+    justify-content: center;
+  }
+
+  .store-pagination {
+    flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .store-dialog[open] {
+    animation: none;
+  }
+}

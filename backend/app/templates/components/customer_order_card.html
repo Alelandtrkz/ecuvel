@@ -1,0 +1,75 @@
+<article class="customer-order-card">
+  <div class="customer-order-card__main">
+    <header class="customer-order-card__header">
+      <div>
+        {% with status=order.display_status %}
+          {% include "components/order_status_badge.html" %}
+        {% endwith %}
+        <h2>{{ order.display_status.label }}</h2>
+        <p>{{ order.display_status.description }}</p>
+      </div>
+      <div class="customer-order-card__meta">
+        <strong>{{ order.total|money(order.currency) }}</strong>
+        <span>Pedido {{ order.order_number }}</span>
+      </div>
+    </header>
+
+    <div class="customer-order-card__pickup">
+      <i data-lucide="map-pin" aria-hidden="true"></i>
+      <span>{{ order.pickup_point_name }}</span>
+      <small>{{ order.pickup_point_address }}</small>
+    </div>
+
+    <div class="customer-order-card__summary">
+      <img
+        src="{{ order.first_item_image_url or placeholder_image }}"
+        alt="{{ order.first_item_name }}"
+        width="96"
+        height="96"
+        loading="lazy"
+      >
+      <div>
+        <strong>{{ order.first_item_name }}</strong>
+        {% if order.first_item_variant %}<span>{{ order.first_item_variant }}</span>{% endif %}
+        <small>
+          {{ order.first_item_quantity }} unidad{{ '' if order.first_item_quantity == 1 else 'es' }}
+          · {{ order.first_item_line_total|money(order.currency) }}
+        </small>
+        <small>
+          {{ order.store_count }} tienda{{ '' if order.store_count == 1 else 's' }}
+          · {{ order.item_count }} producto{{ '' if order.item_count == 1 else 's' }}
+          {% if order.additional_item_count %}· +{{ order.additional_item_count }} más{% endif %}
+        </small>
+      </div>
+    </div>
+
+    {% if order.display_status.show_countdown and order.display_status.expires_at %}
+      <div class="payment-countdown customer-order-card__countdown" role="status" data-payment-countdown data-expires-at="{{ order.display_status.expires_at.isoformat() }}">
+        <i data-lucide="timer" aria-hidden="true"></i>
+        <span>Vence en <strong data-payment-countdown-value>calculando…</strong></span>
+      </div>
+    {% endif %}
+  </div>
+
+  <footer class="customer-order-card__actions">
+    {% set primary = order.display_status.primary_action %}
+    {% set secondary = order.display_status.secondary_action %}
+    {% if primary %}
+      {% if primary.endpoint == "bank_transfer" %}
+        <a class="button button--{{ primary.tone }}" href="{{ url_for('storefront.bank_transfer', order_number=order.order_number) }}">{{ primary.label }}</a>
+      {% elif primary.endpoint == "order_detail" %}
+        <a class="button button--{{ primary.tone }}" href="{{ url_for('storefront.order_detail', order_number=order.order_number) }}">{{ primary.label }}</a>
+      {% endif %}
+    {% endif %}
+    {% if secondary %}
+      {% if secondary.endpoint == "cancel_order" %}
+        <form method="post" action="{{ url_for('storefront.cancel_order', order_number=order.order_number) }}" data-expiring-action>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="button button--{{ secondary.tone }}" type="submit">{{ secondary.label }}</button>
+        </form>
+      {% elif secondary.endpoint == "private_payment_proof" and order.payment_proof_id %}
+        <a class="button button--{{ secondary.tone }}" href="{{ url_for('storefront.private_payment_proof', proof_id=order.payment_proof_id) }}">{{ secondary.label }}</a>
+      {% endif %}
+    {% endif %}
+  </footer>
+</article>

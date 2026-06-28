@@ -1,0 +1,21 @@
+{% macro cart_summary(summary) -%}
+<aside class="cart-summary" aria-labelledby="cart-summary-title">
+  {% if summary.selected_units %}
+    <a class="button button--primary cart-summary__checkout" href="{{ url_for('storefront.checkout') }}">Proceder al pago</a>
+  {% else %}
+    <button class="button button--primary cart-summary__checkout" type="button" disabled>Proceder al pago</button>
+  {% endif %}
+  <p>Los métodos disponibles y el tiempo de entrega se elegirán al realizar el pedido.</p>
+  <div class="cart-summary__body">
+    <div class="cart-summary__heading">
+      <h2 id="cart-summary-title">Resumen del carrito</h2>
+      <span>{{ summary.selected_units }} unidad{{ '' if summary.selected_units == 1 else 'es' }}</span>
+    </div>
+    <dl>
+      <div><dt>Productos ({{ summary.selected_units }})</dt><dd>{{ summary.subtotal|money("USD") }}</dd></div>
+      <div><dt>Ahorro</dt><dd class="cart-summary__savings">-{{ summary.savings|money("USD") }}</dd></div>
+      <div class="cart-summary__total"><dt>Pago total</dt><dd>{{ summary.total|money("USD") }}</dd></div>
+    </dl>
+  </div>
+</aside>
+{%- endmacro %}

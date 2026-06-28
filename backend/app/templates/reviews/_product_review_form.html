@@ -1,0 +1,78 @@
+<form
+  class="review-form"
+  method="post"
+  enctype="multipart/form-data"
+  action="{{ url_for('storefront.submit_product_review', order_number=target.order_number, order_item_id=target.order_item_id) }}"
+  data-review-form
+  data-max-images="{{ max_images }}"
+>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+  <header class="review-form__product">
+    <img src="{{ target.image_url or placeholder_image }}" alt="{{ target.product_name }}" width="72" height="72">
+    <div>
+      <h1 id="product-review-dialog-title-{{ target.order_item_id }}">Comparte tu opinión</h1>
+      <strong>{{ target.product_name }}</strong>
+      {% if target.variant_title %}<span>{{ target.variant_title }}</span>{% endif %}
+    </div>
+  </header>
+
+  <div class="review-form__errors" role="alert" aria-live="assertive" hidden data-review-errors></div>
+
+  <fieldset class="review-rating">
+    <legend>Calificación</legend>
+    <div class="review-rating__stars" role="radiogroup" aria-label="Calificación del producto">
+      {% for value in [5, 4, 3, 2, 1] %}
+        <input
+          id="rating-{{ target.order_item_id }}-{{ value }}"
+          class="visually-hidden"
+          type="radio"
+          name="rating"
+          value="{{ value }}"
+          required
+        >
+        <label class="review-rating__star" for="rating-{{ target.order_item_id }}-{{ value }}" aria-label="{{ value }} estrellas">
+          <i data-lucide="star" aria-hidden="true"></i>
+        </label>
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <div class="review-upload-field">
+    <span class="review-form__label">Agregar fotos</span>
+    <input
+      id="review-images-{{ target.order_item_id }}"
+      class="visually-hidden"
+      type="file"
+      name="images"
+      accept="image/jpeg,image/png,image/webp"
+      multiple
+      data-review-images
+    >
+    <label for="review-images-{{ target.order_item_id }}" class="review-upload">
+      <i data-lucide="camera" aria-hidden="true"></i>
+      <span>Sube no más de {{ max_images }} fotos</span>
+      <small><span data-review-image-count>0</span>/{{ max_images }}</small>
+    </label>
+    <div class="review-upload__preview-grid" data-review-preview-grid hidden></div>
+    <p class="review-form__hint" data-review-file-hint>JPEG, PNG o WebP. No se subirán hasta enviar el formulario.</p>
+  </div>
+
+  <label class="review-form__textarea">
+    <span>Comparte tu opinión sobre el producto</span>
+    <textarea
+      name="body"
+      rows="5"
+      minlength="{{ min_body_length }}"
+      maxlength="{{ max_body_length }}"
+      placeholder="Escribe tu reseña aquí"
+      required
+      data-review-body
+    ></textarea>
+  </label>
+  <p class="review-form__counter"><span data-review-character-count>0</span>/{{ max_body_length }}</p>
+
+  <button class="button button--primary review-form__submit" type="submit" data-review-submit>
+    Enviar comentario
+  </button>
+</form>

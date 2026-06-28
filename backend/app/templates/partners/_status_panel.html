@@ -1,0 +1,33 @@
+<section class="partner-form">
+  {% if onboarding.status.value == "SUBMITTED" %}
+    <h2>A espera de verificación</h2>
+    <p>Estamos revisando la información y los documentos enviados. Este proceso puede tardar unos días.</p>
+    <div class="partner-status-pill"><i data-lucide="loader" aria-hidden="true"></i> Revisión en proceso</div>
+    <a class="partner-button partner-button--secondary" href="{{ url_for('partners.review') }}">Ver datos enviados</a>
+  {% elif onboarding.status.value == "CORRECTIONS_REQUESTED" %}
+    <h2>Se requieren correcciones</h2>
+    <p>Revisa las observaciones del equipo administrativo y vuelve a enviar la información.</p>
+    <ul class="partner-observations">
+      {% for review in onboarding.reviews if review.decision.value == "CORRECTIONS_REQUESTED" %}
+        <li>{{ review.comments or "Completa la información solicitada." }}</li>
+      {% endfor %}
+    </ul>
+    <a class="partner-button partner-button--primary" href="{{ url_for('partners.onboarding_step', step=1) }}">Corregir información</a>
+  {% elif onboarding.status.value == "APPROVED" %}
+    <h2>Su tienda ha sido aprobada</h2>
+    <p>Ya puedes continuar con la firma del contrato digital para habilitar la venta.</p>
+    <a class="partner-button partner-button--primary" href="{{ url_for('partners.contract') }}">Ir al contrato</a>
+  {% elif onboarding.status.value == "REJECTED" %}
+    <h2>Solicitud rechazada</h2>
+    <p>La solicitud no pudo aprobarse. Revisa las observaciones o contacta al equipo de ECUVEL.</p>
+    <ul class="partner-observations">
+      {% for review in onboarding.reviews if review.decision.value == "REJECTED" %}
+        <li>{{ review.comments or "Solicitud rechazada por revisión administrativa." }}</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <h2>Estado de solicitud</h2>
+    <p>Continúa el proceso desde el panel principal.</p>
+    <a class="partner-button partner-button--primary" href="{{ url_for('partners.dashboard') }}">Continuar</a>
+  {% endif %}
+</section>

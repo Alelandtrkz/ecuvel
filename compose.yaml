@@ -38,11 +38,40 @@ services:
       - --debug
     volumes:
       - ./backend:/app
+      - payment_proofs_data:/app/private/payment-proofs
+      - product_reviews_data:/app/private/product-reviews
+      - partner_documents_data:/app/private/partner-documents
+      - partner_contracts_data:/app/private/partner-contracts
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
 
+  payment_expirer:
+    build:
+      context: ./backend
+    container_name: ecuvel-payment-expirer
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - sh
+      - -c
+      - while true; do flask --app wsgi:app expire-pending-bank-transfer-payments --limit 100; sleep 60; done
+    volumes:
+      - ./backend:/app
+      - payment_proofs_data:/app/private/payment-proofs
+      - product_reviews_data:/app/private/product-reviews
+      - partner_documents_data:/app/private/partner-documents
+      - partner_contracts_data:/app/private/partner-contracts
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   ecuvel_postgres_data:
+  payment_proofs_data:
+  product_reviews_data:
+  partner_documents_data:
+  partner_contracts_data:

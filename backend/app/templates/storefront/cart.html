@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "components/cart_item.html" import cart_item %}
+{% from "components/cart_summary.html" import cart_summary %}
+{% from "components/product_card.html" import product_card %}
+
+{% block title %}Carrito | Ecuvel{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/cart.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="cart-page content-container">
+  <header class="cart-page__header"><h1>Carrito</h1></header>
+
+  {% if cart.items %}
+    <div class="cart-layout">
+      <section class="cart-items" aria-labelledby="cart-items-title">
+        <h2 id="cart-items-title" class="visually-hidden">Productos del carrito</h2>
+        <div class="cart-selection-bar">
+          <form method="post" action="{{ url_for('storefront.update_all_cart_selection') }}" data-select-all-form>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label><input type="checkbox" name="selected" value="1" data-cart-select-all {{ 'checked' if cart.all_selected }}> Elegir todos los productos</label>
+            <button class="progressive-submit" type="submit">Aplicar</button>
+          </form>
+          <form method="post" action="{{ url_for('storefront.delete_selected_cart_items') }}" data-confirm="¿Eliminar los productos seleccionados?">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="cart-selection-bar__delete" type="submit" aria-label="Eliminar productos seleccionados" {{ 'disabled' if not cart.summary.selected_lines }}><i data-lucide="trash-2" aria-hidden="true"></i><span>Eliminar seleccionados</span></button>
+          </form>
+        </div>
+
+        {% set available_items = cart.items|selectattr('available')|list %}
+        {% set unavailable_items = cart.items|rejectattr('available')|list %}
+        {% if available_items %}
+          <div class="cart-items__group">
+            <h2>Disponible para ordenar</h2>
+            {% for item in available_items %}{{ cart_item(item) }}{% endfor %}
+          </div>
+        {% endif %}
+        {% if unavailable_items %}
+          <div class="cart-items__group cart-items__group--unavailable">
+            <h2>No disponible</h2>
+            {% for item in unavailable_items %}{{ cart_item(item) }}{% endfor %}
+          </div>
+        {% endif %}
+      </section>
+
+      {{ cart_summary(cart.summary) }}
+    </div>
+  {% else %}
+    <section class="cart-empty" aria-labelledby="cart-empty-title">
+      <div><i data-lucide="shopping-cart" aria-hidden="true"></i></div>
+      <h2 id="cart-empty-title">Tu carrito está vacío</h2>
+      <p>Agrega productos para continuar.</p>
+      <a class="button button--primary" href="{{ url_for('storefront.home') }}">Explorar productos</a>
+    </section>
+  {% endif %}
+
+  {% if recommendations %}
+    <section class="cart-recommendations" aria-labelledby="cart-recommendations-title">
+      <div class="detail-section-heading"><span>Descubre algo nuevo</span><h2 id="cart-recommendations-title">También te puede interesar</h2></div>
+      <div class="product-grid">
+        {% for recommendation in recommendations %}
+          {{ product_card(recommendation.product_url, recommendation.image_url, recommendation.title, recommendation.current_price, recommendation.compare_at_price, recommendation.rating, recommendation.review_count, recommendation.is_favorite, recommendation.delivery_label, recommendation.product_slug, recommendation.offer_id, recommendation.is_available) }}
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+</div>
+{% include "components/notice_toast.html" %}
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/cart.js') }}" defer></script>{% endblock %}

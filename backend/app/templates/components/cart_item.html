@@ -1,0 +1,79 @@
+{% macro cart_item(item) -%}
+<article class="cart-item{{ ' cart-item--unavailable' if not item.available }}" data-cart-item>
+  <form class="cart-item__selection" method="post" action="{{ url_for('storefront.update_cart_selection', offer_id=item.offer_id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input
+      id="cart-select-{{ item.offer_id }}"
+      type="checkbox"
+      name="selected"
+      value="1"
+      aria-label="Seleccionar {{ item.product_name }}"
+      data-cart-item-checkbox
+      data-auto-submit
+      {{ 'checked' if item.selected }}
+      {{ 'disabled' if not item.available }}
+    >
+    <noscript><button class="progressive-submit" type="submit">Actualizar selección</button></noscript>
+  </form>
+
+  <a class="cart-item__image" href="{{ item.product_url }}" aria-label="Ver {{ item.product_name }}">
+    <img src="{{ item.image_url }}" alt="Imagen provisional de {{ item.product_name }}" width="112" height="112" loading="lazy">
+  </a>
+
+  <div class="cart-item__information">
+    <h3><a href="{{ item.product_url }}">{{ item.product_name }}</a></h3>
+    {% if item.variant_name %}<p>{{ item.variant_name }}</p>{% endif %}
+    <span>Vendido por {{ item.store_name }}</span>
+    <strong class="cart-item__status cart-item__status--{{ 'available' if item.available else 'unavailable' }}">
+      <i data-lucide="{{ 'circle-check' if item.available else 'circle-x' }}" aria-hidden="true"></i>
+      {{ item.availability_label }}
+    </strong>
+    {% if item.low_stock or not item.available %}
+      <div class="cart-item__availability cart-item__availability--{{ 'low' if item.low_stock else 'unavailable' }}" aria-live="polite">
+        {{ item.availability_message }}
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="cart-item__price">
+    <strong>{{ item.unit_price|money("USD") }}</strong>
+    {% if item.compare_at_price %}<del>{{ item.compare_at_price|money("USD") }}</del>{% endif %}
+    <span>Subtotal: {{ item.line_total|money("USD") }}</span>
+  </div>
+
+  <form class="cart-item__quantity" method="post" action="{{ url_for('storefront.update_cart_quantity', offer_id=item.offer_id) }}" data-cart-quantity-form data-max-quantity="{{ item.max_quantity }}" data-current-quantity="{{ item.quantity }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label class="visually-hidden" for="cart-quantity-{{ item.offer_id }}">Cantidad de {{ item.product_name }}</label>
+    <div>
+      <button type="button" aria-label="Disminuir cantidad de {{ item.product_name }}" data-cart-quantity-decrease{% if not item.available or item.quantity <= 1 %} disabled aria-disabled="true"{% endif %}><i data-lucide="minus" aria-hidden="true"></i></button>
+      <input id="cart-quantity-{{ item.offer_id }}" name="quantity" type="number" min="1" max="{{ item.max_quantity if item.max_quantity > 0 else 1 }}" value="{{ item.quantity }}" data-max-quantity="{{ item.max_quantity }}" inputmode="numeric" required{% if not item.available %} disabled{% endif %}>
+      <button type="button" aria-label="{{ 'Cantidad máxima disponible alcanzada' if item.quantity_limit_reached else 'Aumentar cantidad de ' ~ item.product_name }}" data-cart-quantity-increase{% if not item.available or item.quantity_limit_reached %} disabled aria-disabled="true"{% endif %}><i data-lucide="plus" aria-hidden="true"></i></button>
+    </div>
+    <button class="cart-item__update progressive-submit" type="submit"{% if not item.available %} disabled{% endif %}>Actualizar</button>
+  </form>
+
+  <div class="cart-item__actions">
+    <form
+      method="post"
+      action="{{ url_for('storefront.remove_favorite' if item.is_favorite else 'storefront.add_favorite', product_slug=item.product_slug) }}"
+      data-favorite-form
+      data-product-slug="{{ item.product_slug }}"
+    >
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ url_for('storefront.cart') }}">
+      <button
+        class="{{ 'is-active' if item.is_favorite }}"
+        type="submit"
+        aria-label="{{ 'Eliminar ' ~ item.product_name ~ ' de favoritos' if item.is_favorite else 'Guardar ' ~ item.product_name ~ ' en favoritos' }}"
+        aria-pressed="{{ 'true' if item.is_favorite else 'false' }}"
+      >
+        <i data-lucide="heart" aria-hidden="true"></i>
+      </button>
+    </form>
+    <form method="post" action="{{ url_for('storefront.delete_cart_item', offer_id=item.offer_id) }}" data-confirm="¿Eliminar este producto del carrito?">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" aria-label="Eliminar {{ item.product_name }} del carrito"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+    </form>
+  </div>
+</article>
+{%- endmacro %}

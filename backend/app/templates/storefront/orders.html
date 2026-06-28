@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Mis pedidos | Ecuvel{% endblock %}
+{% block body_class %}orders-shell{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/orders.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="orders-layout content-container">
+  {% include "components/customer_sidebar.html" %}
+
+  <section class="orders-main" aria-labelledby="orders-title">
+    <header class="orders-header">
+      <div>
+        <p class="eyebrow">Cuenta</p>
+        <h1 id="orders-title">Mis pedidos</h1>
+        <p>Consulta tus pagos, preparaciÃ³n y entregas.</p>
+      </div>
+      <a class="button button--secondary" href="{{ url_for('storefront.home') }}">Seguir comprando</a>
+    </header>
+
+    <nav class="orders-tabs" aria-label="Filtrar pedidos">
+      <a href="{{ url_for('storefront.orders', estado='por-entregar') }}" {% if orders_page.active_filter == 'por-entregar' %}aria-current="page" class="is-active"{% endif %}>Por entregar</a>
+      <a href="{{ url_for('storefront.orders', estado='entregado') }}" {% if orders_page.active_filter == 'entregado' %}aria-current="page" class="is-active"{% endif %}>Entregado</a>
+      <a href="{{ url_for('storefront.orders', estado='otros') }}" {% if orders_page.active_filter == 'otros' %}aria-current="page" class="orders-tabs__secondary is-active"{% else %}class="orders-tabs__secondary"{% endif %}>Otros pedidos</a>
+    </nav>
+
+    {% if not orders_page.orders %}
+      <article class="orders-empty">
+        <i data-lucide="package-open" aria-hidden="true"></i>
+        {% if orders_page.active_filter == 'entregado' %}
+          <h2>TodavÃ­a no tienes pedidos entregados</h2>
+          <p>Cuando un pedido sea recogido, aparecerÃ¡ en esta pestaÃ±a.</p>
+        {% elif orders_page.active_filter == 'otros' %}
+          <h2>No tienes pedidos cancelados, expirados o rechazados</h2>
+          <p>Los pedidos no completados seguirÃ¡n disponibles aquÃ­ para consulta.</p>
+        {% else %}
+          <h2>No tienes pedidos por entregar</h2>
+          <p>Cuando crees un checkout, aparecerá aquí asociado a tu cuenta.</p>
+        {% endif %}
+        <a class="button button--primary" href="{{ url_for('storefront.home') }}">Explorar productos</a>
+      </article>
+    {% else %}
+      <div class="orders-list">
+        {% for order in orders_page.orders %}
+          {% include "components/customer_order_card.html" %}
+        {% endfor %}
+      </div>
+      {% with page=orders_page %}
+        {% include "components/pagination.html" %}
+      {% endwith %}
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/payment-countdown.js') }}" defer></script>
+{% endblock %}
+

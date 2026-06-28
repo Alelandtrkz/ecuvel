@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -20,7 +21,79 @@ from app.models.inventory import (
     InventoryReservation,
 )
 from app.models.order import OrderItem
-from app.models.warehouse import WarehouseLocation
+from app.models.warehouse import Warehouse, WarehouseLocation
+
+
+SELLABLE_LOCATION_TYPES = (
+    LocationType.STORAGE,
+    LocationType.PICKING,
+)
+
+
+def get_sellable_quantities_by_warehouse_for_offers(
+    *,
+    session: Session,
+    offer_ids: Collection[uuid.UUID],
+) -> dict[uuid.UUID, dict[uuid.UUID, int]]:
+    """Obtiene stock vendible agrupado por oferta y almacén."""
+
+    normalized_offer_ids = set(offer_ids)
+    if not normalized_offer_ids:
+        return {}
+
+    available_quantity = (
+        InventoryBalance.on_hand_quantity
+        - InventoryBalance.reserved_quantity
+        - InventoryBalance.blocked_quantity
+    )
+    rows = session.execute(
+        select(
+            InventoryBalance.offer_id,
+            Warehouse.id.label("warehouse_id"),
+            func.coalesce(func.sum(available_quantity), 0).label(
+                "available_quantity"
+            ),
+        )
+        .join(
+            WarehouseLocation,
+            WarehouseLocation.id == InventoryBalance.location_id,
+        )
+        .join(Warehouse, Warehouse.id == WarehouseLocation.warehouse_id)
+        .where(
+            InventoryBalance.offer_id.in_(normalized_offer_ids),
+            Warehouse.is_active.is_(True),
+            WarehouseLocation.is_active.is_(True),
+            WarehouseLocation.location_type.in_(SELLABLE_LOCATION_TYPES),
+            available_quantity > 0,
+        )
+        .group_by(InventoryBalance.offer_id, Warehouse.id)
+        .order_by(InventoryBalance.offer_id, Warehouse.id)
+    ).all()
+
+    quantities: dict[uuid.UUID, dict[uuid.UUID, int]] = {}
+    for row in rows:
+        quantities.setdefault(row.offer_id, {})[row.warehouse_id] = int(
+            row.available_quantity
+        )
+    return quantities
+
+
+def get_sellable_quantities_for_offers(
+    *,
+    session: Session,
+    offer_ids: Collection[uuid.UUID],
+) -> dict[uuid.UUID, int]:
+    """Suma el stock vendible actual de cada oferta solicitada."""
+
+    normalized_offer_ids = set(offer_ids)
+    grouped = get_sellable_quantities_by_warehouse_for_offers(
+        session=session,
+        offer_ids=normalized_offer_ids,
+    )
+    return {
+        offer_id: sum(grouped.get(offer_id, {}).values())
+        for offer_id in normalized_offer_ids
+    }
 
 
 class InventoryServiceError(Exception):
@@ -985,12 +1058,7 @@ def reserve_inventory(
             WarehouseLocation.warehouse_id
             == warehouse_id,
             WarehouseLocation.is_active.is_(True),
-            WarehouseLocation.location_type.in_(
-                [
-                    LocationType.PICKING,
-                    LocationType.STORAGE,
-                ]
-            ),
+            WarehouseLocation.location_type.in_(SELLABLE_LOCATION_TYPES),
             (
                 InventoryBalance.on_hand_quantity
                 - InventoryBalance.reserved_quantity

@@ -1,0 +1,29 @@
+{% set stage_items = [
+  ("1", "Verifique sus datos", "VERIFY_DATA"),
+  ("2", "A espera de la verificación", "WAITING_VERIFICATION"),
+  ("3", "Firma del contrato", "CONTRACT_ACCEPTANCE"),
+  ("4", "Subir productos", "PRODUCTS")
+] %}
+<section class="partner-card" aria-label="Onboarding de tienda">
+  <aside class="partner-card__steps">
+    <h1>Bienvenido a ECUVEL Partners</h1>
+    <ol>
+      {% for number, label, stage_name in stage_items %}
+        {% set active = onboarding.current_stage.value == stage_name %}
+        {% set completed = (
+          stage_name == "VERIFY_DATA" and onboarding.status.value not in ["DRAFT", "CORRECTIONS_REQUESTED"]
+        ) or (
+          stage_name == "WAITING_VERIFICATION" and onboarding.status.value in ["APPROVED", "CONTRACT_PENDING", "COMPLETED"]
+        ) or (
+          stage_name == "CONTRACT_ACCEPTANCE" and onboarding.status.value == "COMPLETED"
+        ) %}
+        <li class="{{ 'is-active' if active else '' }} {{ 'is-complete' if completed else '' }}">
+          <span>{{ number }}</span>{{ label }}
+        </li>
+      {% endfor %}
+    </ol>
+  </aside>
+  <div class="partner-card__content">
+    {% include panel_template %}
+  </div>
+</section>

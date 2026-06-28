@@ -1,0 +1,87 @@
+{% set spec = steps[step] %}
+<form class="partner-form" method="post" enctype="multipart/form-data" action="{{ url_for('partners.save_onboarding_step', step=step) }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div>
+    <h2>{{ spec.title }}</h2>
+    <p class="partner-form__subtitle">{{ spec.subtitle }}</p>
+  </div>
+
+  {% if step == 1 %}
+    <label class="partner-field">Nombre de la tienda
+      <input name="store_name" value="{{ form.get('store_name', '') }}" required minlength="2">
+      {% if errors.store_name %}<small>{{ errors.store_name }}</small>{% endif %}
+    </label>
+    <label class="partner-field">Número de cédula / RUC / identificación
+      <input name="legal_id_number" value="{{ form.get('legal_id_number', '') }}" required minlength="6">
+      {% if errors.legal_id_number %}<small>{{ errors.legal_id_number }}</small>{% endif %}
+    </label>
+  {% elif step == 2 %}
+    <label class="partner-field">Provincia
+      <input name="province" value="{{ form.get('province', '') }}" required>
+      {% if errors.province %}<small>{{ errors.province }}</small>{% endif %}
+    </label>
+    <label class="partner-field">Ciudad
+      <input name="city" value="{{ form.get('city', '') }}" required>
+      {% if errors.city %}<small>{{ errors.city }}</small>{% endif %}
+    </label>
+    <label class="partner-field">Dirección de la tienda
+      <input name="address" value="{{ form.get('address', '') }}" required>
+      {% if errors.address %}<small>{{ errors.address }}</small>{% endif %}
+    </label>
+  {% elif step == 3 %}
+    <p>Agrega un número para chatear: lo usaremos para comunicarnos contigo en lugar de llamarte. Podrá responder cuando le resulte conveniente, sin cargos por uso.</p>
+    <label class="partner-field">Número de WhatsApp o nickname
+      <input name="whatsapp_or_nickname" value="{{ form.get('whatsapp_or_nickname', '') }}" required>
+      {% if errors.whatsapp_or_nickname %}<small>{{ errors.whatsapp_or_nickname }}</small>{% endif %}
+    </label>
+  {% elif step == 4 %}
+    <p>Añada cualquiera de los siguientes documentos:</p>
+    <ul class="partner-doc-list">
+      <li>Certificado de Actos Societarios Inscritos</li>
+      <li>Certificado de registro de persona jurídica</li>
+      <li>Pasaporte</li>
+      <li>Cédula de identidad</li>
+    </ul>
+    <label class="partner-uploader">
+      <i data-lucide="paperclip" aria-hidden="true"></i>
+      <span>Seleccione o arrastre un archivo aquí</span>
+      <small>Formato: JPG, PNG, PDF. Tamaño máximo: 32 MB.</small>
+      <strong>Subir un archivo</strong>
+      <input class="visually-hidden" type="file" name="documents" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" multiple>
+    </label>
+    {% if onboarding.documents %}
+      <ul class="partner-uploaded">
+        {% for document in onboarding.documents %}
+          <li>{{ document.file_name }} · {{ (document.size_bytes / 1024)|round|int }} KB</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+    {% if errors.documents %}<small class="partner-error">{{ errors.documents }}</small>{% endif %}
+  {% elif step == 5 %}
+    <label class="partner-field">Nombre del dueño de la cuenta
+      <input name="bank_account_owner" value="{{ form.get('bank_account_owner', '') }}" required>
+      {% if errors.bank_account_owner %}<small>{{ errors.bank_account_owner }}</small>{% endif %}
+    </label>
+    <label class="partner-field">Número de cuenta
+      <input name="bank_account_number" value="{{ form.get('bank_account_number', '') }}" required>
+      {% if errors.bank_account_number %}<small>{{ errors.bank_account_number }}</small>{% endif %}
+    </label>
+    <label class="partner-field">Nombre del banco
+      <input name="bank_name" value="{{ form.get('bank_name', '') }}" required>
+      {% if errors.bank_name %}<small>{{ errors.bank_name }}</small>{% endif %}
+    </label>
+    <label class="partner-field">Número de cédula
+      <input name="bank_id_number" value="{{ form.get('bank_id_number', '') }}" required>
+      {% if errors.bank_id_number %}<small>{{ errors.bank_id_number }}</small>{% endif %}
+    </label>
+    <label class="partner-field">Correo electrónico
+      <input name="bank_email" type="email" value="{{ form.get('bank_email', '') }}" required>
+      {% if errors.bank_email %}<small>{{ errors.bank_email }}</small>{% endif %}
+    </label>
+  {% endif %}
+
+  <div class="partner-actions">
+    {% if step > 1 %}<a class="partner-button partner-button--secondary" href="{{ url_for('partners.onboarding_step', step=step-1) }}">Regresar</a>{% endif %}
+    <button class="partner-button partner-button--primary" type="submit">{{ "Siguiente" if step < 5 else "Siguiente" }}</button>
+  </div>
+</form>

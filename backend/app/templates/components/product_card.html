@@ -1,0 +1,67 @@
+{% macro product_card(product_url, image_url, title, current_price, compare_at_price, rating, review_count, is_favorite, delivery_label, product_slug=None, offer_id=None, is_available=True) -%}
+<article class="product-card" data-product-card="{{ product_slug or '' }}">
+  <div class="product-card__media">
+    {% if product_url %}<a href="{{ product_url }}" aria-label="Ver {{ title }}">{% endif %}
+      <img src="{{ image_url }}" alt="Imagen provisional de {{ title }}" loading="lazy" width="320" height="320">
+    {% if product_url %}</a>{% endif %}
+
+    {% if product_slug %}
+      <form
+        class="product-card__favorite-form"
+        method="post"
+        action="{{ url_for('storefront.remove_favorite' if is_favorite else 'storefront.add_favorite', product_slug=product_slug) }}"
+        data-favorite-form
+        data-product-slug="{{ product_slug }}"
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+        <button
+          class="product-card__favorite{{ ' is-active' if is_favorite }}"
+          type="submit"
+          aria-label="{{ 'Eliminar ' ~ title ~ ' de favoritos' if is_favorite else 'Añadir ' ~ title ~ ' a favoritos' }}"
+          aria-pressed="{{ 'true' if is_favorite else 'false' }}"
+        >
+          <i data-lucide="heart" aria-hidden="true"></i>
+        </button>
+      </form>
+    {% endif %}
+  </div>
+
+  <div class="product-card__body">
+    <div class="product-card__prices">
+      <strong>{{ current_price }}</strong>
+      {% if compare_at_price %}<del>{{ compare_at_price }}</del>{% endif %}
+    </div>
+    <h3 class="product-card__title">
+      {% if product_url %}<a href="{{ product_url }}">{{ title }}</a>{% else %}{{ title }}{% endif %}
+    </h3>
+    <div class="product-card__reviews">
+      {% if rating is not none and review_count is not none %}
+        <i data-lucide="star" aria-hidden="true"></i>
+        <span>{{ rating }} · {{ review_count }} comentarios</span>
+      {% else %}
+        <i data-lucide="message-circle" aria-hidden="true"></i>
+        <span>Sin reseñas</span>
+      {% endif %}
+    </div>
+
+    {% if offer_id and is_available %}
+      <form class="product-card__cart-form" method="post" action="{{ url_for('storefront.add_to_cart') }}" data-cart-add-form>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="offer_id" value="{{ offer_id }}">
+        <input type="hidden" name="quantity" value="1">
+        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+        <button class="product-card__cart-button" type="submit">
+          <i data-lucide="shopping-basket" aria-hidden="true"></i>
+          <span>{{ delivery_label }}</span>
+        </button>
+      </form>
+    {% else %}
+      <span class="product-card__delivery product-card__delivery--unavailable">
+        <i data-lucide="truck" aria-hidden="true"></i>
+        <span>{{ delivery_label }}</span>
+      </span>
+    {% endif %}
+  </div>
+</article>
+{%- endmacro %}

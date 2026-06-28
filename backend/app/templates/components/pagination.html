@@ -1,0 +1,15 @@
+{% if page.total_pages > 1 %}
+  <nav class="orders-pagination" aria-label="Paginación de pedidos">
+    {% if page.has_previous %}
+      <a class="button button--secondary" href="{{ url_for('storefront.orders', estado=page.active_filter, page=page.previous_page) }}">Anterior</a>
+    {% else %}
+      <span class="button button--secondary is-disabled" aria-disabled="true">Anterior</span>
+    {% endif %}
+    <span>Página {{ page.page }} de {{ page.total_pages }}</span>
+    {% if page.has_next %}
+      <a class="button button--secondary" href="{{ url_for('storefront.orders', estado=page.active_filter, page=page.next_page) }}">Siguiente</a>
+    {% else %}
+      <span class="button button--secondary is-disabled" aria-disabled="true">Siguiente</span>
+    {% endif %}
+  </nav>
+{% endif %}

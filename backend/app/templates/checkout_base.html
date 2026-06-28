@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block body_class %}checkout-shell{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/checkout.css') }}">
+{% endblock %}
+{% block header %}
+<header class="checkout-header">
+  <a class="checkout-brand" href="{{ url_for('storefront.home') }}" aria-label="Ecuvel, inicio">ECUVEL</a>
+</header>
+{% endblock %}
+{% block footer %}{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/checkout.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/payment-proof.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/payment-countdown.js') }}" defer></script>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block body_class %}auth-shell{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
+{% endblock %}
+{% block header %}{% endblock %}
+{% block footer %}{% endblock %}
+
+{% block content %}
+<div class="auth-page">
+  <section class="auth-card" aria-labelledby="auth-title">
+    <a class="auth-card__brand" href="{{ url_for('storefront.home') }}" aria-label="Ecuvel, inicio">ECUVEL</a>
+    <a class="auth-card__close" href="{{ url_for('storefront.home') }}" aria-label="Cerrar">
+      <i data-lucide="x" aria-hidden="true"></i>
+    </a>
+    {% block auth_content %}{% endblock %}
+  </section>
+</div>
+{% endblock %}

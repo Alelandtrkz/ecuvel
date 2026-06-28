@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Mi perfil | Ecuvel{% endblock %}
+{% block body_class %}orders-shell account-shell{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/orders.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/account.css') }}">
+{% endblock %}
+
+{% macro verification_badge(label, state) -%}
+  <span class="account-verification account-verification--{{ state }}">{{ label }}</span>
+{%- endmacro %}
+
+{% block content %}
+<div class="orders-layout content-container">
+  {% include "components/customer_sidebar.html" %}
+
+  <section class="account-panel" aria-labelledby="profile-title">
+    <header class="account-panel__header">
+      <div>
+        <h1 id="profile-title"><i data-lucide="ghost" aria-hidden="true"></i> Información de cuenta</h1>
+        <p>Es posible actualizar los datos personales, confirmar el correo electrónico y gestionar la cuenta y su configuración de seguridad en un entorno protegido.</p>
+      </div>
+    </header>
+
+    <div class="account-methods" aria-label="Métodos de acceso">
+      <article>
+        <span>Correo electrónico</span>
+        <strong>{{ current_user.email or "No configurado" }}</strong>
+        {% if current_user.email_verified_at %}
+          {{ verification_badge("Verificado", "verified") }}
+        {% elif current_user.email %}
+          {{ verification_badge("No verificado", "pending") }}
+        {% else %}
+          {{ verification_badge("No configurado", "missing") }}
+        {% endif %}
+        <a href="{{ url_for('account.change_email_form') }}">{{ "Cambiar correo" if current_user.email else "Añadir correo electrónico" }}</a>
+      </article>
+      <article>
+        <span>Teléfono</span>
+        <strong>{{ current_user.phone or "No configurado" }}</strong>
+        {% if current_user.phone_verified_at %}
+          {{ verification_badge("Verificado", "verified") }}
+        {% elif current_user.phone %}
+          {{ verification_badge("No verificado", "pending") }}
+        {% else %}
+          {{ verification_badge("No configurado", "missing") }}
+        {% endif %}
+        <a href="{{ url_for('account.add_phone_form') }}">{{ "Cambiar teléfono" if current_user.phone_verified_at else "Añadir número telefónico" }}</a>
+      </article>
+      <article>
+        <span>Contraseña</span>
+        <strong>{{ "Configurada" if current_user.password_hash else "No configurada" }}</strong>
+        {% if current_user.password_hash %}
+          <a href="{{ url_for('account.change_password_form') }}">Cambiar contraseña</a>
+        {% else %}
+          <a href="{{ url_for('account.create_password_form') }}">Crear contraseña</a>
+        {% endif %}
+      </article>
+    </div>
+
+    <form method="post" action="{{ url_for('account.update_profile_route') }}" class="profile-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="profile-grid">
+        <label>
+          <span>Nombres y apellidos</span>
+          <input name="full_name" value="{{ current_user.full_name }}" autocomplete="name" maxlength="120" required>
+        </label>
+        <div class="profile-readonly">
+          <span>Número telefónico</span>
+          <strong>{{ current_user.phone or "No configurado" }}</strong>
+          <a href="{{ url_for('account.add_phone_form') }}">Verificar o cambiar teléfono</a>
+        </div>
+        <label>
+          <span>Fecha de nacimiento</span>
+          <input name="birth_date" type="date" value="{{ current_user.birth_date.isoformat() if current_user.birth_date else '' }}">
+        </label>
+        <div class="profile-readonly">
+          <span>Correo electrónico</span>
+          <strong>{{ current_user.email or "No configurado" }}</strong>
+          <a href="{{ url_for('account.change_email_form') }}">Verificar o cambiar correo</a>
+        </div>
+        <label>
+          <span>Género</span>
+          <select name="gender">
+            {% for value, label in gender_options %}
+              <option value="{{ value }}"{% if (current_user.gender or '') == value %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="profile-readonly">
+          <span>Número de usuario</span>
+          <strong>{{ current_user.public_code }}</strong>
+        </div>
+      </div>
+      <div class="profile-actions">
+        <button class="button button--primary" type="submit">Guardar cambios</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}

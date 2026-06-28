@@ -1,0 +1,31 @@
+<section class="store-dialog-content" aria-labelledby="store-dialog-title">
+  <h2 id="store-dialog-title">{{ information.title }}</h2>
+  <div class="store-dialog-info-card">
+    <div class="store-dialog-info-card__row">
+      <i data-lucide="shield-check" aria-hidden="true"></i>
+      <div>
+        <span>Código público Ecuvel</span>
+        <strong>{{ information.public_code }}</strong>
+      </div>
+    </div>
+    <div class="store-dialog-info-card__row">
+      <i data-lucide="map-pin" aria-hidden="true"></i>
+      <div>
+        <span>Dirección de la tienda</span>
+        <strong>{{ information.public_address }}</strong>
+      </div>
+    </div>
+  </div>
+  <p>
+    Esta es la información pública disponible para compradores. No se muestran
+    datos internos, fiscales ni de contacto privado de la tienda.
+  </p>
+  {% if information.is_verified %}
+    <p class="store-dialog-badge"><i data-lucide="badge-check" aria-hidden="true"></i> Tienda verificada por Ecuvel</p>
+  {% endif %}
+  {% if is_fragment %}
+    <button class="store-dialog__accept" type="button" data-store-dialog-accept>Aceptar</button>
+  {% else %}
+    <a class="store-dialog__accept" href="{{ url_for('storefront.store_page', store_slug=store_slug) }}">Aceptar</a>
+  {% endif %}
+</section>

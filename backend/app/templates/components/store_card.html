@@ -1,0 +1,22 @@
+{% macro store_card(product) -%}
+<section class="store-card" aria-labelledby="store-card-title">
+  <div class="store-card__icon"><i data-lucide="store" aria-hidden="true"></i></div>
+  <div class="store-card__content">
+    <span>Vendido por</span>
+    <h2 id="store-card-title">{{ product.store_name }}</h2>
+    {% if product.store_is_verified %}
+      <p><i data-lucide="badge-check" aria-hidden="true"></i> Tienda verificada</p>
+    {% endif %}
+    {% if product.store_rating is not none and product.store_review_count %}
+      <p><i data-lucide="star" aria-hidden="true"></i> {{ "%.1f"|format(product.store_rating) }} · {{ product.store_review_count }} reseña{{ '' if product.store_review_count == 1 else 's' }} de productos</p>
+    {% else %}
+      <p>Calificación basada en reseñas de productos publicados.</p>
+    {% endif %}
+  </div>
+  {% if product.store_url %}
+    <a class="button button--secondary" href="{{ product.store_url }}">Ver tienda</a>
+  {% else %}
+    <button class="button button--secondary" type="button" disabled>Página de tienda próximamente</button>
+  {% endif %}
+</section>
+{%- endmacro %}
