@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Category, Product, ProductVariant, SellerOffer, Store
 from app.models.enums import OfferStatus, StoreStatus
+from app.services.public_identifiers import format_store_code
 from app.services.product_reviews import review_stats_for_store_ids
 
 
@@ -170,7 +171,10 @@ def get_public_store_information(
         return None
     return StoreInformationView(
         title="Información de la tienda",
-        public_code=store.public_code,
+        public_code=format_store_code(
+            store.product_code_prefix,
+            store.registration_number,
+        ),
         public_address="Dirección comercial no publicada",
         is_verified=store.is_verified,
     )
@@ -226,7 +230,10 @@ def _public_store_view(
 ) -> PublicStoreView:
     return PublicStoreView(
         slug=store.slug,
-        public_code=store.public_code,
+        public_code=format_store_code(
+            store.product_code_prefix,
+            store.registration_number,
+        ),
         display_name=store.name,
         logo_initial=_logo_initial(store.name),
         is_verified=store.is_verified,

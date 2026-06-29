@@ -24,7 +24,7 @@
 
     <div class="checkout-main">
       <section class="checkout-panel" aria-labelledby="payment-method-title">
-        <h2 id="payment-method-title">MÃ©todos de pago</h2>
+        <h2 id="payment-method-title">Métodos de pago</h2>
         <div class="payment-options">
           <label class="payment-option payment-option--bank is-selected">
             <input type="radio" name="payment_method" value="BANK_TRANSFER" checked data-payment-method>
@@ -34,7 +34,7 @@
           <label class="payment-option payment-option--disabled">
             <input type="radio" name="payment_method" value="CARD" disabled data-payment-method>
             <i data-lucide="credit-card" aria-hidden="true"></i>
-            <span>Tarjeta de crÃ©dito o dÃ©bito <small>PrÃ³ximamente</small></span>
+            <span>Tarjeta de crédito o débito <small>Próximamente</small></span>
           </label>
         </div>
       </section>
@@ -43,11 +43,11 @@
         <h2 id="pickup-title">Lugar de entrega</h2>
         <div class="checkout-delivery__row">
           <i data-lucide="map-pin" aria-hidden="true"></i>
-          <div><strong>{{ pickup_name }}</strong><p>{{ pickup_address }}</p><p>Plazo de conservaciÃ³n despuÃ©s del pago: {{ order_hold_days }} dÃ­as</p></div>
+          <div><strong>{{ pickup_name }}</strong><p>{{ pickup_address }}</p><p>Plazo de conservación después del pago: {{ order_hold_days }} días</p></div>
         </div>
         <div class="checkout-buyer">
           <i data-lucide="user-round" aria-hidden="true"></i>
-          <span>{{ buyer.full_name }}{% if buyer.phone %} Â· {{ buyer.phone }}{% endif %}</span>
+          <span>{{ buyer.full_name }}{% if buyer.phone %} · {{ buyer.phone }}{% endif %}</span>
         </div>
       </section>
 
@@ -57,12 +57,12 @@
           <div><h2 id="store-{{ group.store_id }}">{{ group.store_name }}</h2><p>{{ group.total_units }} unidad{{ '' if group.total_units == 1 else 'es' }}</p></div>
           <strong>{{ group.total|money("USD") }}</strong>
         </div>
-        <p class="checkout-estimate">La fecha estimada se confirmarÃ¡ despuÃ©s del pago.</p>
+        <p class="checkout-estimate">La fecha estimada se confirmará después del pago.</p>
         <ul class="checkout-products">
           {% for line in group.lines %}
           <li>
             <img src="{{ line.image_url or placeholder_image }}" alt="Imagen provisional de {{ line.product_name }}" width="84" height="84">
-            <div><strong>{{ line.product_name }}</strong>{% if line.variant_name %}<span>{{ line.variant_name }}</span>{% endif %}<span>{{ line.quantity }} Ã— {{ line.unit_price|money("USD") }}</span></div>
+            <div><strong>{{ line.product_name }}</strong>{% if line.variant_name %}<span>{{ line.variant_name }}</span>{% endif %}<span>{{ line.quantity }} × {{ line.unit_price|money("USD") }}</span></div>
             {% if line.quantity > 1 %}<span class="checkout-quantity-badge">{{ line.quantity }} uds.</span>{% endif %}
           </li>
           {% endfor %}
@@ -74,7 +74,7 @@
 
     <aside class="checkout-summary" aria-labelledby="checkout-summary-title">
       <button class="button button--primary checkout-submit" type="submit" data-checkout-submit{% if not preview.can_submit or not pickup_is_free %} disabled{% endif %}>Generar pedido</button>
-      <p class="checkout-terms">Al continuar, usted acepta las condiciones de venta y el tratamiento de datos aplicable. Documentos legales definitivos prÃ³ximamente.</p>
+      <p class="checkout-terms">Al continuar, usted acepta las condiciones de venta y el tratamiento de datos aplicable. Documentos legales definitivos próximamente.</p>
       <div class="checkout-summary__body">
         <div><h2 id="checkout-summary-title">Su pedido</h2><span>{{ preview.total_units }} producto{{ '' if preview.total_units == 1 else 's' }}</span></div>
         <dl>

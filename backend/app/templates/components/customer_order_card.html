@@ -8,10 +8,6 @@
         <h2>{{ order.display_status.label }}</h2>
         <p>{{ order.display_status.description }}</p>
       </div>
-      <div class="customer-order-card__meta">
-        <strong>{{ order.total|money(order.currency) }}</strong>
-        <span>Pedido {{ order.order_number }}</span>
-      </div>
     </header>
 
     <div class="customer-order-card__pickup">
@@ -52,24 +48,30 @@
   </div>
 
   <footer class="customer-order-card__actions">
-    {% set primary = order.display_status.primary_action %}
-    {% set secondary = order.display_status.secondary_action %}
-    {% if primary %}
-      {% if primary.endpoint == "bank_transfer" %}
-        <a class="button button--{{ primary.tone }}" href="{{ url_for('storefront.bank_transfer', order_number=order.order_number) }}">{{ primary.label }}</a>
-      {% elif primary.endpoint == "order_detail" %}
-        <a class="button button--{{ primary.tone }}" href="{{ url_for('storefront.order_detail', order_number=order.order_number) }}">{{ primary.label }}</a>
+    <div class="customer-order-card__meta">
+      <strong>{{ order.total|money(order.currency) }}</strong>
+      <span>Pedido {{ order.order_number }}</span>
+    </div>
+    <div class="customer-order-card__buttons">
+      {% set primary = order.display_status.primary_action %}
+      {% set secondary = order.display_status.secondary_action %}
+      {% if primary %}
+        {% if primary.endpoint == "bank_transfer" %}
+          <a class="button button--{{ primary.tone }}" href="{{ url_for('storefront.bank_transfer', order_number=order.order_number) }}">{{ primary.label }}</a>
+        {% elif primary.endpoint == "order_detail" %}
+          <a class="button button--{{ primary.tone }}" href="{{ url_for('storefront.order_detail', order_number=order.order_number) }}">{{ primary.label }}</a>
+        {% endif %}
       {% endif %}
-    {% endif %}
-    {% if secondary %}
-      {% if secondary.endpoint == "cancel_order" %}
-        <form method="post" action="{{ url_for('storefront.cancel_order', order_number=order.order_number) }}" data-expiring-action>
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="button button--{{ secondary.tone }}" type="submit">{{ secondary.label }}</button>
-        </form>
-      {% elif secondary.endpoint == "private_payment_proof" and order.payment_proof_id %}
-        <a class="button button--{{ secondary.tone }}" href="{{ url_for('storefront.private_payment_proof', proof_id=order.payment_proof_id) }}">{{ secondary.label }}</a>
+      {% if secondary %}
+        {% if secondary.endpoint == "cancel_order" %}
+          <form method="post" action="{{ url_for('storefront.cancel_order', order_number=order.order_number) }}" data-expiring-action>
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button button--{{ secondary.tone }}" type="submit">{{ secondary.label }}</button>
+          </form>
+        {% elif secondary.endpoint == "private_payment_proof" and order.payment_proof_id %}
+          <a class="button button--{{ secondary.tone }}" href="{{ url_for('storefront.private_payment_proof', proof_id=order.payment_proof_id) }}">{{ secondary.label }}</a>
+        {% endif %}
       {% endif %}
-    {% endif %}
+    </div>
   </footer>
 </article>

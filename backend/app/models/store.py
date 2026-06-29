@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 import uuid
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
+    CheckConstraint,
     Enum,
     ForeignKey,
+    Integer,
     String,
     UniqueConstraint,
+    event,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -29,6 +36,19 @@ class Store(
         nullable=False,
         unique=True,
         index=True,
+    )
+
+    registration_number: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        unique=True,
+        index=True,
+        server_default=text("nextval('store_registration_number_seq'::regclass)"),
+    )
+
+    product_code_prefix: Mapped[str] = mapped_column(
+        String(3),
+        nullable=False,
     )
 
     name: Mapped[str] = mapped_column(
@@ -83,6 +103,58 @@ class Store(
     offers: Mapped[list["SellerOffer"]] = relationship(
         "SellerOffer",
         back_populates="store",
+    )
+
+    product_code_counter: Mapped["StoreProductCounter | None"] = relationship(
+        "StoreProductCounter",
+        back_populates="store",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+    @property
+    def public_store_code(self) -> str:
+        if not self.registration_number:
+            return f"{self.product_code_prefix or 'ECU'}-PENDIENTE"
+        return f"{self.product_code_prefix}-{self.registration_number:08d}"
+
+    __table_args__ = (
+        CheckConstraint(
+            "registration_number > 0",
+            name="ck_stores_registration_number_positive",
+        ),
+        CheckConstraint(
+            "product_code_prefix ~ '^[A-Z0-9]{3}$'",
+            name="ck_stores_product_code_prefix_format",
+        ),
+    )
+
+
+class StoreProductCounter(db.Model):
+    __tablename__ = "store_product_counters"
+
+    store_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stores.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    last_value: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+
+    store: Mapped["Store"] = relationship(
+        "Store",
+        back_populates="product_code_counter",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "last_value >= 0 AND last_value <= 999999",
+            name="ck_store_product_counters_last_value_range",
+        ),
     )
 
 
@@ -149,3 +221,20 @@ class StoreMember(
             name="uq_store_members_store_user",
         ),
     )
+
+
+@event.listens_for(Store, "before_insert")
+def _set_store_product_code_prefix(_mapper, _connection, target: Store) -> None:
+    if not target.product_code_prefix:
+        target.product_code_prefix = _normalize_store_prefix(
+            target.name or target.legal_name or target.public_code
+        )
+
+
+def _normalize_store_prefix(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii").upper()
+    characters = re.findall(r"[A-Z0-9]", ascii_text)
+    if not characters:
+        return "ECU"
+    return ("".join(characters) + "XXX")[:3]

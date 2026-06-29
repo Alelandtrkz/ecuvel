@@ -4,7 +4,19 @@ from datetime import date, datetime
 import uuid
 
 from flask_login import UserMixin
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, event
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    event,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -30,6 +42,14 @@ class User(
         nullable=False,
         unique=True,
         index=True,
+    )
+
+    registration_number: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        unique=True,
+        index=True,
+        server_default=text("nextval('user_registration_number_seq'::regclass)"),
     )
 
     email: Mapped[str | None] = mapped_column(
@@ -150,6 +170,19 @@ class User(
     @property
     def is_anonymous(self) -> bool:
         return False
+
+    @property
+    def public_account_code(self) -> str:
+        if not self.registration_number:
+            return "U-PENDIENTE"
+        return f"U-{self.registration_number:08d}"
+
+    __table_args__ = (
+        CheckConstraint(
+            "registration_number > 0",
+            name="ck_users_registration_number_positive",
+        ),
+    )
 
 
 class UserAccountToken(

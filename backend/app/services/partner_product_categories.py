@@ -105,7 +105,6 @@ def require_partner_catalog_store(session: Session, user_id: uuid.UUID) -> Partn
             StoreMember.role.in_(_CATALOG_ROLES),
             Store.status == StoreStatus.ACTIVE,
             Store.is_verified.is_(True),
-            StoreOnboarding.user_id == user_id,
             StoreOnboarding.status == StoreOnboardingStatus.COMPLETED,
             StoreContractAcceptance.status == StoreContractAcceptanceStatus.ACCEPTED,
         )

@@ -5,20 +5,64 @@
       <span class="brand-mark__note">marca temporal</span>
     </a>
 
-    <a class="catalog-button button button--primary" href="{{ url_for('storefront.home') }}">
-      <i data-lucide="layout-grid" aria-hidden="true"></i>
-      <span>Catálogo</span>
-    </a>
+    <details class="catalog-menu" id="catalog-menu">
+      <summary class="catalog-button button button--primary">
+        <i data-lucide="layout-grid" aria-hidden="true"></i>
+        <span>Catálogo</span>
+      </summary>
+      {% if nav_categories|default([]) %}
+      <div class="catalog-dropdown" role="dialog" aria-label="Categorías del catálogo">
+        <div class="catalog-dropdown__left">
+          {% for cat in nav_categories %}
+            <button
+              class="catalog-dropdown__main-cat{% if loop.first %} is-active{% endif %}"
+              type="button"
+              data-cat-index="{{ loop.index0 }}"
+            >
+              <span>{{ cat.name }}</span>
+              <i data-lucide="chevron-right" aria-hidden="true"></i>
+            </button>
+          {% endfor %}
+        </div>
+        <div class="catalog-dropdown__right">
+          {% for cat in nav_categories %}
+            <div
+              class="catalog-dropdown__sub-panel{% if loop.first %} is-visible{% endif %}"
+              data-panel-index="{{ loop.index0 }}"
+            >
+              <p class="catalog-dropdown__sub-heading">{{ cat.name }}</p>
+              {% set active_subs = cat.children | selectattr('is_active') | list %}
+              {% if active_subs %}
+                {% for sub in active_subs | sort(attribute='sort_order') %}
+                  <a
+                    class="catalog-dropdown__sub-link"
+                    href="{{ url_for('storefront.home', category=sub.slug) }}"
+                  >{{ sub.name }}</a>
+                {% endfor %}
+              {% else %}
+                <p class="catalog-dropdown__sub-empty">Próximamente</p>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    </details>
 
     <form class="search-bar" role="search" method="get" action="{{ url_for('storefront.home') }}">
       <label class="visually-hidden" for="storefront-search">Buscar productos</label>
-      <label class="visually-hidden" for="storefront-category">Categoría</label>
-      <select id="storefront-category" class="search-bar__category" name="category" aria-label="Categoría de búsqueda">
-        <option value="">Todos</option>
-        {% for category in categories|default([]) %}
-          <option value="{{ category.slug }}"{% if selected_category|default('') == category.slug %} selected{% endif %}>{{ category.name }}</option>
-        {% endfor %}
-      </select>
+      <label class="visually-hidden" for="search-category-btn">Categoría</label>
+      {% set _ns = namespace(cat_name='Todos') %}
+      {% for cat in nav_categories|default([]) %}
+        {% if cat.slug == (selected_category|default('')) %}{% set _ns.cat_name = cat.name %}{% endif %}
+      {% endfor %}
+      <button type="button" class="search-bar__category-btn" id="search-category-btn"
+              aria-haspopup="dialog" aria-controls="category-modal">
+        <span id="search-category-label">{{ _ns.cat_name }}</span>
+        <i data-lucide="chevron-down" aria-hidden="true"></i>
+      </button>
+      <input type="hidden" name="category" id="search-category-value"
+             value="{{ selected_category|default('') }}">
       <input
         id="storefront-search"
         class="search-bar__input"

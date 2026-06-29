@@ -1,0 +1,74 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Vista previa del borrador | ECUVEL Partners{% endblock %}
+
+{% block content %}
+{% set draft = view.draft %}
+{% set price = draft.pricing_data or {} %}
+<main class="partner-page partner-page--wide">
+  <section class="partner-draft-preview" aria-labelledby="draft-preview-title">
+    <header>
+      <p class="partner-eyebrow">Vista privada · No publicado</p>
+      <h1 id="draft-preview-title">{{ draft.title or "Producto sin título" }}</h1>
+      <p>Esta vista previa sirve para revisar el contenido antes de enviarlo a revisión. Aún no existe producto público, oferta ni inventario físico.</p>
+      <div class="partner-actions partner-actions--inline">
+        <a class="partner-button partner-button--secondary" href="{{ url_for('partners.product_draft', draft_id=draft.id) }}">Volver a editar</a>
+        <a class="partner-button partner-button--primary" href="{{ url_for('partners.product_draft', draft_id=draft.id) }}">Revisar checklist</a>
+      </div>
+    </header>
+
+    <div class="partner-preview-grid">
+      <section class="partner-draft-card">
+        <h2>Galería</h2>
+        <div class="partner-gallery-grid partner-gallery-grid--preview">
+          {% for file in view.image_files %}
+            <img src="{{ url_for('partners.product_draft_file', draft_id=draft.id, file_id=file.id) }}" alt="Imagen del borrador {{ loop.index }}">
+          {% else %}
+            <p>No hay imágenes cargadas.</p>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="partner-draft-card">
+        <h2>Resumen</h2>
+        <dl class="partner-summary partner-summary--large">
+          <div><dt>Categoría</dt><dd>{{ draft.category.name }}</dd></div>
+          <div><dt>Subcategoría</dt><dd>{{ draft.subcategory.name }}</dd></div>
+          <div><dt>Plantilla</dt><dd><code>{{ draft.template_key }}</code></dd></div>
+          <div><dt>Código del producto</dt><dd>{{ draft.seller_sku or "Pendiente" }}</dd></div>
+          <div>
+            <dt>Código de barras</dt>
+            <dd>
+              {% if draft.seller_sku %}
+                <img class="partner-summary-barcode" src="{{ url_for('partners.product_draft_barcode', draft_id=draft.id) }}" alt="Código de barras Code 128 de {{ draft.seller_sku }}">
+              {% else %}
+                Pendiente
+              {% endif %}
+            </dd>
+          </div>
+          <div><dt>Precio</dt><dd>${{ price.get("price") or "0.00" }}</dd></div>
+          <div><dt>Estado</dt><dd>{{ draft.status.value.replace("_", " ")|title }}</dd></div>
+        </dl>
+      </section>
+    </div>
+
+    <section class="partner-draft-card">
+      <h2>Descripción</h2>
+      <p>{{ draft.description or "Sin descripción todavía." }}</p>
+    </section>
+
+    <section class="partner-draft-card">
+      <h2>Características</h2>
+      <dl class="partner-summary partner-summary--large">
+        {% for field in view.template.fields %}
+          {% set value = draft.attributes.get(field.key) if draft.attributes else none %}
+          {% if value %}
+            <div><dt>{{ field.label }}</dt><dd>{{ value|join(", ") if value is sequence and value is not string else value }}</dd></div>
+          {% endif %}
+        {% else %}
+          <div><dt>Plantilla</dt><dd>Sin campos configurados.</dd></div>
+        {% endfor %}
+      </dl>
+    </section>
+  </section>
+</main>
+{% endblock %}

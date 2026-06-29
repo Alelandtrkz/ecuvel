@@ -11,6 +11,7 @@ from app.extensions import db
 from app.models import (
     Category,
     Product,
+    ProductDraft,
     ProductVariant,
     SellerOffer,
     Store,
@@ -257,19 +258,27 @@ def test_valid_selection_is_saved_in_session_and_details_show_template_key(clien
     )
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/partners/products/new/details")
+    assert "/partners/products/drafts/" in response.headers["Location"]
     with client.session_transaction() as browser_session:
         draft = browser_session[PARTNER_PRODUCT_DRAFT_SESSION_KEY]
     assert draft["category_id"] == str(electronics.id)
     assert draft["subcategory_id"] == str(cameras.id)
     assert draft["template_key"] == "electronics_cameras"
 
+    created_draft = session.scalar(select(ProductDraft))
+    assert created_draft is not None
+    assert created_draft.category_id == electronics.id
+    assert created_draft.subcategory_id == cameras.id
+    assert created_draft.template_key == "electronics_cameras"
+
     details = client.get("/partners/products/new/details")
+    assert details.status_code == 302
+    details = client.get(response.headers["Location"])
     assert details.status_code == 200
     html = details.get_data(as_text=True)
     assert "Electrónicos" in html
     assert "Cámaras y Fotografía" in html
-    assert "electronics_cameras" in html
+    assert "Electronics Cameras" in html
 
 
 def test_foreign_subcategory_is_rejected(client, session):

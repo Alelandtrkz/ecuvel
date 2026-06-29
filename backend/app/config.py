@@ -259,6 +259,34 @@ class Config:
         1024,
         64 * 1024 * 1024,
     )
+    PARTNER_PRODUCT_DRAFT_UPLOAD_DIR = os.getenv(
+        "PARTNER_PRODUCT_DRAFT_UPLOAD_DIR",
+        "/app/private/partner-product-drafts",
+    )
+    PARTNER_PRODUCT_IMAGE_MAX_BYTES = _environment_int_range(
+        "PARTNER_PRODUCT_IMAGE_MAX_BYTES",
+        5 * 1024 * 1024,
+        1024,
+        20 * 1024 * 1024,
+    )
+    PARTNER_PRODUCT_DOCUMENT_MAX_BYTES = _environment_int_range(
+        "PARTNER_PRODUCT_DOCUMENT_MAX_BYTES",
+        32 * 1024 * 1024,
+        1024,
+        64 * 1024 * 1024,
+    )
+    PARTNER_PRODUCT_MIN_IMAGES = _environment_int_range(
+        "PARTNER_PRODUCT_MIN_IMAGES",
+        3,
+        1,
+        6,
+    )
+    PARTNER_PRODUCT_MAX_IMAGES = _environment_int_range(
+        "PARTNER_PRODUCT_MAX_IMAGES",
+        6,
+        3,
+        6,
+    )
     PARTNER_CONTRACT_UPLOAD_DIR = os.getenv(
         "PARTNER_CONTRACT_UPLOAD_DIR",
         "/app/private/partner-contracts",

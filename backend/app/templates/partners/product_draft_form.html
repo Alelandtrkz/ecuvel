@@ -1,0 +1,292 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Borrador de producto | ECUVEL Partners{% endblock %}
+
+{% block content %}
+{% set draft = view.draft %}
+{% set attrs = draft.attributes or {} %}
+{% set price = draft.pricing_data or {} %}
+{% set inventory = draft.inventory_data or {} %}
+{% set dimensions = draft.dimensions_data or {} %}
+{% set warranty = draft.warranty_data or {} %}
+<main class="partner-page partner-page--draft">
+  <header class="partner-draft-hero">
+    <p class="partner-breadcrumb">
+      <a href="{{ url_for('partners.products') }}">Productos</a>
+      <span>/</span>
+      <a href="{{ url_for('partners.new_product_category') }}" data-confirm-change>Categoría</a>
+      <span>/</span>
+      <strong>{{ view.template.name }}</strong>
+    </p>
+    <h1>Crear producto</h1>
+    <p>Completa la información técnica y comercial. El producto se enviará a revisión y no se publicará automáticamente.</p>
+  </header>
+
+  <div class="partner-draft-layout" data-product-draft>
+    <div class="partner-draft-main">
+      {% include "partners/_product_draft_gallery.html" %}
+
+      <form id="partner-product-draft-form" class="partner-draft-form" method="post" action="{{ url_for('partners.save_product_draft_route', draft_id=draft.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <section class="partner-draft-card" aria-labelledby="product-info-title">
+          <h2 id="product-info-title">Información del producto</h2>
+          <div class="partner-draft-grid partner-draft-grid--2">
+            <label class="partner-draft-field partner-draft-field--wide">
+              <span>Título del producto</span>
+              <input name="title" maxlength="250" value="{{ draft.title or '' }}" placeholder="Ej. Cámara IP 4MP con visión nocturna">
+              {% if errors.title %}<em class="partner-error">{{ errors.title }}</em>{% endif %}
+            </label>
+            <label class="partner-draft-field">
+              <span>Categoría</span>
+              <input value="{{ draft.category.name }}" disabled>
+            </label>
+            <label class="partner-draft-field">
+              <span>Subcategoría</span>
+              <input value="{{ draft.subcategory.name }}" disabled>
+            </label>
+          </div>
+          <div class="partner-draft-grid partner-draft-grid--3">
+            <label class="partner-draft-field">
+              <span>Marca *</span>
+              <input name="brand" maxlength="120" value="{{ draft.brand or '' }}" placeholder="Ej. Hikvision">
+            </label>
+            <label class="partner-draft-field">
+              <span>Modelo *</span>
+              <input name="model_number" maxlength="120" value="{{ draft.model_number or '' }}" placeholder="Ej. DS-2CD">
+            </label>
+            <label class="partner-draft-field">
+              <span>País de origen</span>
+              <input name="country_origin" maxlength="80" value="{{ draft.country_origin or '' }}" placeholder="Ecuador">
+            </label>
+          </div>
+          <div class="partner-product-code-card" aria-label="Identificación del producto">
+            <div class="partner-product-code-card__code">
+              <span>Código del producto</span>
+              <strong>{{ draft.seller_sku or "Pendiente" }}</strong>
+              <small>Generado automáticamente por ECUVEL. No se puede editar.</small>
+              {% if errors.seller_sku %}<em class="partner-error">{{ errors.seller_sku }}</em>{% endif %}
+            </div>
+            <button class="partner-button partner-button--secondary" type="button" data-copy-text="{{ draft.seller_sku or '' }}">
+              Copiar código
+            </button>
+            <div class="partner-barcode-preview">
+              {% if draft.seller_sku %}
+                <img src="{{ url_for('partners.product_draft_barcode', draft_id=draft.id) }}" alt="Código de barras Code 128 de {{ draft.seller_sku }}">
+              {% endif %}
+              <small>El código de barras usa el mismo código del producto.</small>
+              {% if errors.barcode %}<em class="partner-error">{{ errors.barcode }}</em>{% endif %}
+              {% if errors.condition %}<em class="partner-error">{{ errors.condition }}</em>{% endif %}
+            </div>
+            <p class="partner-product-condition-note">Condición fija: <strong>Nuevo</strong>.</p>
+          </div>
+          <label class="partner-draft-field partner-draft-field--wide">
+            <span>Descripción del producto</span>
+            <textarea name="description" rows="7" placeholder="Proporciona una descripción detallada del producto, características y estado...">{{ draft.description or '' }}</textarea>
+            {% if errors.description %}<em class="partner-error">{{ errors.description }}</em>{% endif %}
+          </label>
+        </section>
+
+        <section class="partner-draft-card" aria-labelledby="template-fields-title">
+          <h2 id="template-fields-title">{{ view.template.name }}</h2>
+          <p>{{ view.template.description }}</p>
+          <div class="partner-draft-grid partner-draft-grid--2">
+            {% for field in view.template.fields %}
+              {% include "partners/_dynamic_field.html" %}
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="partner-draft-card" aria-labelledby="highlights-title">
+          <h2 id="highlights-title">Puntos destacados y contenido</h2>
+          <div class="partner-repeat-list" data-repeat-list>
+            {% for index in range(3) %}
+              <label class="partner-draft-field">
+                <span>Punto destacado {{ index + 1 }}</span>
+                <input name="highlights[]" value="{{ draft.highlights[index] if draft.highlights and index < draft.highlights|length else '' }}" placeholder="Ej. Resolución 4MP">
+              </label>
+            {% endfor %}
+          </div>
+          <div class="partner-draft-grid partner-draft-grid--3">
+            <label class="partner-draft-field">
+              <span>Cantidad en empaque</span>
+              <input name="package_quantity[]" value="{{ draft.package_contents[0].quantity if draft.package_contents else '' }}" placeholder="1">
+            </label>
+            <label class="partner-draft-field">
+              <span>Contenido del paquete</span>
+              <input name="package_name[]" value="{{ draft.package_contents[0].name if draft.package_contents else '' }}" placeholder="Producto principal">
+            </label>
+            <label class="partner-draft-field">
+              <span>Nota</span>
+              <input name="package_note[]" value="{{ draft.package_contents[0].note if draft.package_contents else '' }}" placeholder="Incluye accesorios">
+            </label>
+          </div>
+        </section>
+
+        <section class="partner-draft-card" aria-labelledby="variants-title">
+          <h2 id="variants-title">Variantes</h2>
+          <label class="partner-switch">
+            <input type="checkbox" name="has_variants" value="1" {{ "checked" if draft.variants }}>
+            <span>Este producto tiene variantes</span>
+          </label>
+          {% if errors.variants %}<p class="partner-error">{{ errors.variants }}</p>{% endif %}
+          <div class="partner-variant-table">
+            <div class="partner-variant-table__head">
+              <span>Nombre</span><span>Precio</span><span>Stock</span>
+            </div>
+            {% for index in range(3) %}
+              {% set variant = draft.variants[index] if draft.variants and index < draft.variants|length else {} %}
+              <div class="partner-variant-row">
+                <input name="variant_name[]" value="{{ variant.get('name', '') }}" placeholder="Ej. Azul / 128GB">
+                <input name="variant_price[]" value="{{ variant.get('price', '') }}" placeholder="0.00">
+                <input name="variant_stock[]" value="{{ variant.get('stock', '') }}" placeholder="0">
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        <section class="partner-draft-card" aria-labelledby="dimensions-title">
+          <h2 id="dimensions-title">Dimensiones y embalaje</h2>
+          <div class="partner-draft-grid partner-draft-grid--4">
+            {% for key, label in [
+              ("product_weight_kg", "Peso producto kg"),
+              ("product_length_cm", "Largo producto cm"),
+              ("product_width_cm", "Ancho producto cm"),
+              ("product_height_cm", "Alto producto cm"),
+              ("package_weight_kg", "Peso paquete kg"),
+              ("package_length_cm", "Largo paquete cm"),
+              ("package_width_cm", "Ancho paquete cm"),
+              ("package_height_cm", "Alto paquete cm")
+            ] %}
+              <label class="partner-draft-field">
+                <span>{{ label }}</span>
+                <input name="{{ key }}" value="{{ dimensions.get(key, '') }}" placeholder="0.00">
+                {% if errors.get(key) %}<em class="partner-error">{{ errors.get(key) }}</em>{% endif %}
+              </label>
+            {% endfor %}
+          </div>
+          <label class="partner-draft-field partner-draft-field--wide">
+            <span>Notas de embalaje</span>
+            <textarea name="package_notes" rows="3">{{ dimensions.get("package_notes", "") }}</textarea>
+          </label>
+        </section>
+
+        <section class="partner-draft-card" aria-labelledby="warranty-title">
+          <h2 id="warranty-title">Garantía</h2>
+          <div class="partner-draft-grid partner-draft-grid--3">
+            <label class="partner-draft-field"><span>Tipo</span><input name="warranty_type" value="{{ warranty.get('type', '') }}" placeholder="Garantía de tienda"></label>
+            <label class="partner-draft-field"><span>Duración</span><input name="warranty_duration" value="{{ warranty.get('duration', '') }}" placeholder="12"></label>
+            <label class="partner-draft-field"><span>Unidad</span><input name="warranty_unit" value="{{ warranty.get('unit', '') }}" placeholder="meses"></label>
+          </div>
+          <label class="partner-draft-field partner-draft-field--wide"><span>Condiciones</span><textarea name="warranty_conditions" rows="3">{{ warranty.get("conditions", "") }}</textarea></label>
+        </section>
+      </form>
+
+      <section class="partner-draft-card" aria-labelledby="documents-title">
+        <div class="partner-draft-card__title">
+          <div>
+            <h2 id="documents-title">Documentación</h2>
+            <p>Sube documentos privados requeridos por la plantilla. No serán públicos.</p>
+          </div>
+        </div>
+        {% if view.template.required_documents %}
+          <ul class="partner-doc-list">
+            {% for doc in view.template.required_documents %}
+              <li>{{ doc }}</li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p>No hay documentos obligatorios para esta plantilla.</p>
+        {% endif %}
+        <form class="partner-draft-upload partner-draft-upload--document" method="post" enctype="multipart/form-data" action="{{ url_for('partners.upload_product_draft_file', draft_id=draft.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="kind" value="DOCUMENT">
+          <label class="partner-draft-field">
+            <span>Tipo de documento</span>
+            <input name="document_type" placeholder="Manual, ficha técnica, certificado...">
+          </label>
+          <label class="partner-uploader">
+            <input class="visually-hidden" type="file" name="file" accept="application/pdf,image/jpeg,image/png,image/webp">
+            <i data-lucide="paperclip" aria-hidden="true"></i>
+            <span>Seleccione o arrastre un archivo</span>
+            <small>PDF, JPG, PNG o WebP.</small>
+            <strong>Subir archivo</strong>
+          </label>
+          <button class="partner-button partner-button--secondary" type="submit">Subir documento</button>
+        </form>
+        {% if view.document_files %}
+          <ul class="partner-file-list">
+            {% for file in view.document_files %}
+              <li>
+                <a href="{{ url_for('partners.product_draft_file', draft_id=draft.id, file_id=file.id) }}">{{ file.document_type or file.original_filename }}</a>
+                <form method="post" action="{{ url_for('partners.delete_product_draft_file_route', draft_id=draft.id, file_id=file.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit">Eliminar</button>
+                </form>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </section>
+    </div>
+
+    <aside class="partner-draft-sidebar" aria-label="Estado del borrador">
+      <section class="partner-draft-card partner-draft-card--sticky">
+        <h2>Precio e inventario</h2>
+        <div class="partner-draft-grid">
+          <label class="partner-draft-field">
+            <span>Precio de venta (USD)</span>
+            <input form="partner-product-draft-form" name="price" value="{{ price.get('price', '') }}" placeholder="$ 0.00">
+            {% if errors.price %}<em class="partner-error">{{ errors.price }}</em>{% endif %}
+          </label>
+          <label class="partner-draft-field">
+            <span>Precio anterior</span>
+            <input form="partner-product-draft-form" name="compare_at_price" value="{{ price.get('compare_at_price', '') }}" placeholder="$ 0.00">
+          </label>
+          <label class="partner-draft-field">
+            <span>Stock</span>
+            <input form="partner-product-draft-form" name="stock_quantity" value="{{ inventory.get('stock_quantity', '') }}" placeholder="0">
+            {% if errors.stock_quantity %}<em class="partner-error">{{ errors.stock_quantity }}</em>{% endif %}
+          </label>
+          <label class="partner-draft-field">
+            <span>Preparación (días)</span>
+            <input form="partner-product-draft-form" name="preparation_time_days" value="{{ inventory.get('preparation_time_days', '') }}" placeholder="1">
+          </label>
+        </div>
+      </section>
+
+      <section class="partner-draft-card partner-draft-card--sticky partner-checklist">
+        <div class="partner-checklist__head">
+          <h2>Checklist</h2>
+          <strong>{{ draft.completion_percentage or 0 }}%</strong>
+        </div>
+        <progress value="{{ draft.completion_percentage or 0 }}" max="100">{{ draft.completion_percentage or 0 }}%</progress>
+        <ul>
+          {% for item in view.checklist %}
+            <li class="{{ 'is-complete' if item.complete }}">
+              <i data-lucide="{{ 'check-circle-2' if item.complete else 'circle' }}" aria-hidden="true"></i>
+              <span>{{ item.label }}</span>
+              <small>{{ item.message }}</small>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="partner-draft-bar">
+    <span>Estado: {{ draft.status.value.replace("_", " ")|title }} · {{ "Sin publicar" }}</span>
+    <div>
+      <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Cancelar</a>
+      <button class="partner-button partner-button--secondary" form="partner-product-draft-form" type="submit">Guardar borrador</button>
+      <a class="partner-button partner-button--secondary" href="{{ url_for('partners.product_draft_preview', draft_id=draft.id) }}">Vista previa</a>
+      <button class="partner-button partner-button--primary" form="partner-product-draft-form" type="submit" formaction="{{ url_for('partners.submit_product_draft_route', draft_id=draft.id) }}" data-submit-review>
+        Enviar a revisión
+      </button>
+    </div>
+  </footer>
+</main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/partner-product-draft.js') }}" defer></script>
+{% endblock %}

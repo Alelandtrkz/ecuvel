@@ -233,14 +233,19 @@
 
 .customer-order-card__actions {
   display: grid;
-  align-content: end;
+  align-content: space-between;
   gap: var(--space-3);
   min-width: 180px;
 }
 
-.customer-order-card__actions .button,
-.customer-order-card__actions form,
-.customer-order-card__actions button {
+.customer-order-card__buttons {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.customer-order-card__buttons .button,
+.customer-order-card__buttons form,
+.customer-order-card__buttons button {
   width: 100%;
 }
 

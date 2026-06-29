@@ -27,6 +27,7 @@ services:
       PRODUCT_REVIEW_UPLOAD_DIR: /tmp/product-reviews
       PARTNER_DOCUMENT_UPLOAD_DIR: /tmp/partner-documents
       PARTNER_CONTRACT_UPLOAD_DIR: /tmp/partner-contracts
+      PARTNER_PRODUCT_DRAFT_UPLOAD_DIR: /tmp/partner-product-drafts
     command: ["pytest", "-q"]
     volumes:
       - ./backend:/app
@@ -35,6 +36,7 @@ services:
       - /tmp/product-reviews
       - /tmp/partner-documents
       - /tmp/partner-contracts
+      - /tmp/partner-product-drafts
     depends_on:
       db_test:
         condition: service_healthy
@@ -53,6 +55,7 @@ services:
       PRODUCT_REVIEW_UPLOAD_DIR: /tmp/product-reviews
       PARTNER_DOCUMENT_UPLOAD_DIR: /tmp/partner-documents
       PARTNER_CONTRACT_UPLOAD_DIR: /tmp/partner-contracts
+      PARTNER_PRODUCT_DRAFT_UPLOAD_DIR: /tmp/partner-product-drafts
     command:
       - sh
       - -c
@@ -64,6 +67,7 @@ services:
       - /tmp/product-reviews
       - /tmp/partner-documents
       - /tmp/partner-contracts
+      - /tmp/partner-product-drafts
     depends_on:
       db_test:
         condition: service_healthy

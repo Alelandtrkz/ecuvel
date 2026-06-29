@@ -467,20 +467,23 @@
 }
 
 .review-card__media {
-  width: 100%;
-  display: grid;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-large);
-  background: var(--color-surface-subtle);
-  cursor: pointer;
-  overflow: hidden;
+    width: 150px;        
+    height: 150px;     
+    display: grid;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-large);
+    background: var(--color-surface-subtle);
+    cursor: pointer;
+    overflow: hidden;
 }
 
 .review-card__media img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
+    width: 100%;
+    height: 100%;     
+    aspect-ratio: 1;
+    object-fit: cover;
+    display: block;    
 }
 
 .review-lightbox {

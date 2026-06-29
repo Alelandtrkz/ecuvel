@@ -15,7 +15,7 @@
       <div>
         <p class="eyebrow">Cuenta</p>
         <h1 id="orders-title">Mis pedidos</h1>
-        <p>Consulta tus pagos, preparaciÃ³n y entregas.</p>
+        <p>Consulta tus pagos, preparación y entregas.</p>
       </div>
       <a class="button button--secondary" href="{{ url_for('storefront.home') }}">Seguir comprando</a>
     </header>
@@ -30,11 +30,11 @@
       <article class="orders-empty">
         <i data-lucide="package-open" aria-hidden="true"></i>
         {% if orders_page.active_filter == 'entregado' %}
-          <h2>TodavÃ­a no tienes pedidos entregados</h2>
-          <p>Cuando un pedido sea recogido, aparecerÃ¡ en esta pestaÃ±a.</p>
+          <h2>Todavía no tienes pedidos entregados</h2>
+          <p>Cuando un pedido sea recogido, aparecerá en esta pestaña.</p>
         {% elif orders_page.active_filter == 'otros' %}
           <h2>No tienes pedidos cancelados, expirados o rechazados</h2>
-          <p>Los pedidos no completados seguirÃ¡n disponibles aquÃ­ para consulta.</p>
+          <p>Los pedidos no completados seguirán disponibles aquí para consulta.</p>
         {% else %}
           <h2>No tienes pedidos por entregar</h2>
           <p>Cuando crees un checkout, aparecerá aquí asociado a tu cuenta.</p>

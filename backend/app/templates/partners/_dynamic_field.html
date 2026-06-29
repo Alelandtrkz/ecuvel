@@ -1,0 +1,40 @@
+{% set field_name = "attributes[" ~ field.key ~ "]" %}
+{% set value = view.draft.attributes.get(field.key) if view.draft.attributes else none %}
+{% set error = errors.get(field.key) or errors.get("attributes." ~ field.key) %}
+<label class="partner-draft-field partner-draft-field--{{ field.type }}">
+  <span>
+    {{ field.label }}{% if field.required %} <strong aria-label="obligatorio">*</strong>{% endif %}
+  </span>
+  {% if field.help %}
+    <small>{{ field.help }}</small>
+  {% endif %}
+
+  {% if field.type in ["textarea", "repeater", "compatibility_table", "size_table"] %}
+    <textarea name="{{ field_name }}" rows="4" placeholder="{{ field.placeholder or '' }}">{{ value or '' }}</textarea>
+  {% elif field.type in ["select", "radio"] %}
+    <select name="{{ field_name }}">
+      <option value="">Seleccione una opción</option>
+      {% for option in field.options %}
+        <option value="{{ option }}" {{ "selected" if value == option }}>{{ option }}</option>
+      {% endfor %}
+    </select>
+  {% elif field.type in ["multiselect", "chips", "variant_attribute"] %}
+    <input type="text" name="{{ field_name }}" value="{{ (value|join(', ')) if value is sequence and value is not string else (value or '') }}" placeholder="{{ field.placeholder or 'Separe los valores con coma' }}">
+  {% elif field.type == "boolean" %}
+    <input type="checkbox" name="{{ field_name }}" value="1" {{ "checked" if value }}>
+  {% elif field.type == "integer" %}
+    <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or '' }}" step="1">
+  {% elif field.type == "decimal" or field.type == "dimension" %}
+    <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or '' }}" step="0.01">
+  {% elif field.type == "color" %}
+    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or 'Azul, negro, #085DF8...' }}">
+  {% elif field.type == "date" %}
+    <input type="date" name="{{ field_name }}" value="{{ value or '' }}">
+  {% elif field.type in ["file", "document"] %}
+    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or 'Referencia del documento' }}">
+  {% else %}
+    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or '' }}">
+  {% endif %}
+
+  {% if error %}<em class="partner-error">{{ error }}</em>{% endif %}
+</label>

@@ -149,6 +149,26 @@ class ProductReviewStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class ProductDraftStatus(StrEnum):
+    DRAFT = "DRAFT"
+    INCOMPLETE = "INCOMPLETE"
+    READY_FOR_REVIEW = "READY_FOR_REVIEW"
+    SUBMITTED = "SUBMITTED"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class ProductDraftFileKind(StrEnum):
+    IMAGE = "IMAGE"
+    DOCUMENT = "DOCUMENT"
+
+
+class ProductDraftFileStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    DELETED = "DELETED"
+
+
 class PackageStatus(StrEnum):
     CREATED = "CREATED"
     PACKED = "PACKED"

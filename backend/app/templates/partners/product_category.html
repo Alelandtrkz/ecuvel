@@ -9,7 +9,7 @@
       <p>Para configurar su publicación, seleccione una categoría y una plantilla.</p>
     </header>
 
-    <form method="post" action="{{ url_for('partners.save_new_product_category') }}" data-category-form>
+    <form method="post" action="{{ url_for('partners.create_product_draft') }}" data-category-form>
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <script type="application/json" data-category-json>{{ categories_json|tojson }}</script>
       <div class="partner-category-grid">

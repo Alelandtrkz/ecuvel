@@ -26,7 +26,8 @@ from app.models.partner_onboarding import (
     StoreVerificationReview,
 )
 from app.models.product_review import ProductReview, ProductReviewImage
-from app.models.store import Store, StoreMember
+from app.models.product_draft import ProductDraft, ProductDraftFile
+from app.models.store import Store, StoreMember, StoreProductCounter
 from app.models.user import PhoneOtpChallenge, User, UserAccountToken
 from app.models.warehouse import Warehouse, WarehouseLocation
 
@@ -37,6 +38,7 @@ __all__ = [
     "PhoneOtpChallenge",
     "Store",
     "StoreMember",
+    "StoreProductCounter",
     "Category",
     "Product",
     "ProductVariant",
@@ -56,6 +58,8 @@ __all__ = [
     "StoreContractOtpChallenge",
     "ProductReview",
     "ProductReviewImage",
+    "ProductDraft",
+    "ProductDraftFile",
     "InventoryBalance",
     "InventoryReservation",
     "InventoryMovement",

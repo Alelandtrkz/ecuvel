@@ -22,9 +22,39 @@
     {% block content %}{% endblock %}
   </main>
   {% block footer %}{% include "components/footer.html" %}{% endblock %}
+  <div class="category-modal" id="category-modal" hidden
+       role="dialog" aria-modal="true" aria-label="Seleccionar categoría">
+    <div class="category-modal__card">
+      <div class="category-modal__header">
+        <span class="category-modal__title">Categorías</span>
+        <button class="category-modal__close" id="close-category-modal" aria-label="Cerrar">
+          <i data-lucide="x" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="category-modal__grid">
+        <button class="category-modal__item" type="button" data-slug="" data-name="Todos"
+                data-href="{{ url_for('storefront.home') }}">
+          <i data-lucide="layout-grid" aria-hidden="true"></i>
+          <span>Todos</span>
+        </button>
+        {% set _icon = {'ELECTRONICS': 'cpu', 'FASHION': 'shirt', 'HOME_KITCHEN': 'home',
+                        'BEAUTY_HEALTH': 'heart-pulse', 'AUTOMOTIVE': 'car', 'BABIES_KIDS': 'baby'} %}
+        {% for cat in nav_categories|default([]) %}
+          <button class="category-modal__item" type="button"
+                  data-slug="{{ cat.slug }}"
+                  data-name="{{ cat.name }}"
+                  data-href="{{ url_for('storefront.home', category=cat.slug) }}">
+            <i data-lucide="{{ _icon.get(cat.code, 'tag') }}" aria-hidden="true"></i>
+            <span>{{ cat.name }}</span>
+          </button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js" defer></script>
   <script src="{{ url_for('static', filename='js/icons.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/favorites.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/catalog-menu.js') }}" defer></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

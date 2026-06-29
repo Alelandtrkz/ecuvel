@@ -27,6 +27,7 @@ from flask import (
 )
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 
 from app.extensions import db, limiter
 from app.models import (
@@ -347,6 +348,7 @@ def cart_header_context() -> dict[str, int]:
             flask_session.get(CART_SESSION_KEY)
         ),
         "header_favorite_count": favorite_count,
+        "nav_categories": _load_nav_categories(),
     }
 
 
@@ -411,6 +413,16 @@ def _load_categories():
         select(Category.name, Category.slug)
         .where(Category.is_active.is_(True))
         .order_by(Category.sort_order, Category.name)
+    ).all()
+
+
+def _load_nav_categories():
+    """Top-level categories with their active subcategories for the header dropdown."""
+    return db.session.scalars(
+        select(Category)
+        .where(Category.parent_id.is_(None), Category.is_active.is_(True))
+        .order_by(Category.sort_order, Category.name)
+        .options(selectinload(Category.children))
     ).all()
 
 
