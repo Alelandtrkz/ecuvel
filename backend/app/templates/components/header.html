@@ -5,6 +5,8 @@
       <span class="brand-mark__note">marca temporal</span>
     </a>
 
+    {% set _cat_icon = {'ELECTRONICS': 'cpu', 'FASHION': 'shirt', 'HOME_KITCHEN': 'home',
+                        'BEAUTY_HEALTH': 'heart-pulse', 'AUTOMOTIVE': 'car', 'BABIES_KIDS': 'baby'} %}
     <details class="catalog-menu" id="catalog-menu">
       <summary class="catalog-button button button--primary">
         <i data-lucide="layout-grid" aria-hidden="true"></i>
@@ -19,7 +21,10 @@
               type="button"
               data-cat-index="{{ loop.index0 }}"
             >
-              <span>{{ cat.name }}</span>
+              <span class="catalog-dropdown__main-cat-inner">
+                <i data-lucide="{{ _cat_icon.get(cat.code, 'tag') }}" aria-hidden="true"></i>
+                <span>{{ cat.name }}</span>
+              </span>
               <i data-lucide="chevron-right" aria-hidden="true"></i>
             </button>
           {% endfor %}
@@ -33,12 +38,14 @@
               <p class="catalog-dropdown__sub-heading">{{ cat.name }}</p>
               {% set active_subs = cat.children | selectattr('is_active') | list %}
               {% if active_subs %}
-                {% for sub in active_subs | sort(attribute='sort_order') %}
-                  <a
-                    class="catalog-dropdown__sub-link"
-                    href="{{ url_for('storefront.home', category=sub.slug) }}"
-                  >{{ sub.name }}</a>
-                {% endfor %}
+                <div class="catalog-dropdown__sub-grid">
+                  {% for sub in active_subs | sort(attribute='sort_order') %}
+                    <a
+                      class="catalog-dropdown__sub-link"
+                      href="{{ url_for('storefront.home', category=sub.slug) }}"
+                    >{{ sub.name }}</a>
+                  {% endfor %}
+                </div>
               {% else %}
                 <p class="catalog-dropdown__sub-empty">Próximamente</p>
               {% endif %}

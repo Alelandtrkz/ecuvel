@@ -5,31 +5,95 @@
 <div class="transfer-page content-container">
   <a class="checkout-back" href="{{ url_for('storefront.home') }}"><i data-lucide="arrow-left" aria-hidden="true"></i> Volver al inicio</a>
   <div class="transfer-card">
-    <div class="transfer-heading"><div><span class="pending-pill"><i data-lucide="clock-3" aria-hidden="true"></i> Esperando comprobante</span><h1>Pago por transferencia</h1><p>Pedido {{ order.order_number }}</p></div><strong>{{ order.total|money(order.currency) }}</strong></div>
 
-    <p>Realiza la transferencia antes de <time datetime="{{ order.expires_at.isoformat() }}">{{ order.expires_at.strftime('%d/%m/%Y %H:%M %Z') }}</time>. La reserva se liberará automáticamente al vencer.</p>
-    {% if order.can_continue_payment %}
-      <div class="payment-countdown" role="status" data-payment-countdown data-expires-at="{{ order.expires_at.isoformat() }}">
-        <i data-lucide="timer" aria-hidden="true"></i>
-        <span>Tiempo restante para enviar comprobante: <strong data-payment-countdown-value>calculando…</strong></span>
+    <div class="transfer-heading">
+      <div class="transfer-heading__meta">
+        <span class="pending-pill"><i data-lucide="clock-3" aria-hidden="true"></i> Esperando comprobante</span>
+        <h1>Pago por transferencia</h1>
+        <p class="transfer-heading__order">Pedido <strong>{{ order.order_number }}</strong></p>
       </div>
-    {% endif %}
+      <div class="transfer-heading__amount">
+        <span>Total a transferir</span>
+        <strong>{{ order.total|money(order.currency) }}</strong>
+      </div>
+    </div>
+
+    <div class="transfer-expiry">
+      {% if order.can_continue_payment %}
+        <div class="payment-countdown" role="status" data-payment-countdown data-expires-at="{{ order.expires_at.isoformat() }}">
+          <i data-lucide="timer" aria-hidden="true"></i>
+          <span>Tiempo restante: <strong data-payment-countdown-value>calculando…</strong></span>
+        </div>
+      {% endif %}
+      <p class="transfer-expiry__note">
+        Realiza la transferencia antes de <time datetime="{{ order.expires_at.isoformat() }}">{{ order.expires_at.strftime('%d/%m/%Y %H:%M %Z') }}</time>. La reserva se liberará automáticamente al vencer.
+      </p>
+    </div>
 
     {% if not bank_configured %}
-      <div class="checkout-issues" role="alert"><strong>Configuración bancaria incompleta.</strong> Contacta con Ecuvel antes de realizar el pago.</div>
+      <div class="checkout-issues" role="alert">
+        <i data-lucide="triangle-alert" aria-hidden="true"></i>
+        <p><strong>Configuración bancaria incompleta.</strong> Contacta con Ecuvel antes de realizar el pago.</p>
+      </div>
     {% endif %}
 
     <section class="bank-details" aria-labelledby="bank-details-title">
-      <div><h2 id="bank-details-title">Datos para la transferencia</h2>
+      <div class="bank-details__info">
+        <h2 id="bank-details-title">Datos para la transferencia</h2>
         <dl>
-          <div><dt>Banco</dt><dd>{{ bank.bank_name or 'Pendiente de configuración' }}</dd></div>
-          <div><dt>Titular</dt><dd>{{ bank.account_holder or 'Pendiente de configuración' }}</dd></div>
-          <div><dt>Número de cuenta</dt><dd>{{ bank.account_number or 'Pendiente de configuración' }}</dd></div>
-          <div><dt>Identificación</dt><dd>{{ bank.holder_id or 'Pendiente de configuración' }}</dd></div>
-          <div><dt>Correo</dt><dd>{{ bank.email or 'Pendiente de configuración' }}</dd></div>
+          <div>
+            <dt>Banco</dt>
+            <dd>{{ bank.bank_name or 'Pendiente de configuración' }}</dd>
+          </div>
+          <div>
+            <dt>Titular</dt>
+            <dd>{{ bank.account_holder or 'Pendiente de configuración' }}</dd>
+          </div>
+          <div>
+            <dt>Número de cuenta</dt>
+            <dd>
+              {{ bank.account_number or 'Pendiente de configuración' }}
+              {% if bank.account_number %}
+                <button class="copy-btn" type="button"
+                        data-copy-text="{{ bank.account_number }}"
+                        aria-label="Copiar número de cuenta">
+                  <i data-lucide="copy" aria-hidden="true"></i>
+                  <span>Copiar</span>
+                </button>
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Identificación</dt>
+            <dd>{{ bank.holder_id or 'Pendiente de configuración' }}</dd>
+          </div>
+          <div>
+            <dt>Correo</dt>
+            <dd>{{ bank.email or 'Pendiente de configuración' }}</dd>
+          </div>
         </dl>
       </div>
-      {% if bank.qr_image %}<img class="bank-qr" src="{{ bank.qr_image }}" alt="Código QR configurado para la transferencia" width="240" height="240">{% endif %}
+
+      <div class="bank-qr-wrapper">
+        {% if bank_configured and bank.qr_image %}
+          <img class="bank-qr" src="{{ bank.qr_image }}"
+               alt="Código QR para transferencia bancaria" width="230" height="230">
+          <p class="bank-qr__hint">Escanea para transferir</p>
+        {% elif bank_configured %}
+          <div class="bank-qr-placeholder" role="img" aria-label="QR no configurado">
+            <i data-lucide="qr-code" aria-hidden="true"></i>
+            <p>QR no configurado</p>
+            <span>El código QR no ha sido cargado todavía.</span>
+          </div>
+        {% else %}
+          <div class="bank-qr-placeholder bank-qr-placeholder--unavailable"
+               role="img" aria-label="Código QR no disponible">
+            <i data-lucide="alert-circle" aria-hidden="true"></i>
+            <p>Código QR no disponible</p>
+            <span>Los datos bancarios deben configurarse antes de realizar la transferencia.</span>
+          </div>
+        {% endif %}
+      </div>
     </section>
 
     <section class="proof-upload" aria-labelledby="proof-title">
@@ -42,11 +106,12 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="upload_token" value="{{ upload_token }}">
           <label class="proof-dropzone" for="proof-file"><i data-lucide="camera" aria-hidden="true"></i><strong>Seleccionar comprobante</strong><span>JPEG, PNG o PDF · máximo 10 MiB</span><input id="proof-file" name="proof_file" type="file" accept="image/jpeg,image/png,application/pdf" required data-proof-file></label>
-          <div class="proof-preview" hidden data-proof-preview><img alt="Vista previa local del comprobante" data-proof-image><i data-lucide="file-text" aria-hidden="true" data-proof-pdf hidden></i><div><strong data-proof-name></strong><span data-proof-size></span></div></div>
+          <div class="proof-preview" hidden data-proof-preview><img alt="Vista previa del comprobante" data-proof-image hidden><span class="proof-pdf-icon" data-proof-pdf hidden aria-hidden="true"><i data-lucide="file-text"></i></span><div><strong data-proof-name></strong><span data-proof-size></span></div></div>
           <button class="button button--primary" type="submit" data-proof-submit disabled>Enviar comprobante</button>
         </form>
       {% else %}<p>Este pago ya no admite una nueva carga.</p>{% endif %}
     </section>
+
     <div class="transfer-actions">
       <a class="button button--secondary" href="{{ url_for('storefront.orders') }}">Pagar más tarde</a>
       {% if order.can_cancel %}
@@ -56,6 +121,28 @@
         </form>
       {% endif %}
     </div>
+
+    <script>
+    (function () {
+      document.querySelectorAll('[data-copy-text]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var val = btn.dataset.copyText || '';
+          if (!val) return;
+          var label = btn.querySelector('span');
+          var orig = label ? label.textContent : '';
+          try {
+            await navigator.clipboard.writeText(val);
+            if (label) label.textContent = 'Copiado';
+          } catch (_) {
+            window.prompt('Copia el número de cuenta:', val);
+          } finally {
+            setTimeout(function () { if (label) label.textContent = orig; }, 1600);
+          }
+        });
+      });
+    }());
+    </script>
+
   </div>
 </div>
 {% endblock %}

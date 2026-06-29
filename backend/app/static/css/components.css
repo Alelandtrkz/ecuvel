@@ -520,10 +520,6 @@
 
 /* ─── Catalog dropdown menu ────────────────────────────── */
 
-.catalog-menu {
-  position: relative;
-}
-
 .catalog-menu > summary {
   list-style: none;
   cursor: pointer;
@@ -536,23 +532,23 @@
 
 .catalog-dropdown {
   position: absolute;
-  top: calc(100% + 8px);
+  top: 100%;
   left: 0;
+  right: 0;
   z-index: 100;
   display: grid;
-  grid-template-columns: 200px 260px;
-  min-height: 320px;
+  grid-template-columns: 260px 1fr;
+  height: calc(100vh - 88px);
   background: var(--color-surface);
-  border: 1px solid var(--color-border-light);
-  border-radius: 16px;
-  box-shadow: 0 16px 40px rgb(15 23 42 / 14%);
+  border-top: 1px solid var(--color-border-light);
+  box-shadow: 0 20px 50px rgb(15 23 42 / 14%);
   overflow: hidden;
 }
 
 .catalog-dropdown__left {
   display: flex;
   flex-direction: column;
-  padding: var(--space-2);
+  padding: var(--space-3);
   background: var(--color-surface-subtle);
   border-right: 1px solid var(--color-border-light);
   overflow-y: auto;
@@ -563,7 +559,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-3);
   border: 0;
   border-radius: var(--radius-medium);
   background: transparent;
@@ -576,7 +572,23 @@
   transition: background 0.1s, color 0.1s;
 }
 
-.catalog-dropdown__main-cat svg {
+.catalog-dropdown__main-cat-inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.catalog-dropdown__main-cat-inner > i,
+.catalog-dropdown__main-cat-inner > svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+  transition: color 0.1s;
+}
+
+.catalog-dropdown__main-cat > i:last-child,
+.catalog-dropdown__main-cat > svg:last-child {
   width: 14px;
   height: 14px;
   color: var(--color-text-secondary);
@@ -590,51 +602,62 @@
   color: var(--color-primary);
 }
 
-.catalog-dropdown__main-cat:hover svg,
-.catalog-dropdown__main-cat.is-active svg {
+.catalog-dropdown__main-cat:hover .catalog-dropdown__main-cat-inner > i,
+.catalog-dropdown__main-cat:hover .catalog-dropdown__main-cat-inner > svg,
+.catalog-dropdown__main-cat.is-active .catalog-dropdown__main-cat-inner > i,
+.catalog-dropdown__main-cat.is-active .catalog-dropdown__main-cat-inner > svg {
+  color: var(--color-primary);
+}
+
+.catalog-dropdown__main-cat:hover > i:last-child,
+.catalog-dropdown__main-cat:hover > svg:last-child,
+.catalog-dropdown__main-cat.is-active > i:last-child,
+.catalog-dropdown__main-cat.is-active > svg:last-child {
   color: var(--color-primary);
 }
 
 .catalog-dropdown__right {
-  padding: var(--space-4);
+  padding: var(--space-8) var(--space-10);
   overflow-y: auto;
+  background: var(--color-surface);
 }
 
 .catalog-dropdown__sub-panel {
   display: none;
-  flex-direction: column;
-  gap: 2px;
 }
 
 .catalog-dropdown__sub-panel.is-visible {
-  display: flex;
+  display: block;
 }
 
 .catalog-dropdown__sub-heading {
-  margin-bottom: var(--space-2);
-  font-size: var(--font-size-small);
-  font-weight: var(--font-weight-semibold);
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  margin-bottom: var(--space-6);
+  font-size: 2rem;
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+  line-height: 1.2;
+}
+
+.catalog-dropdown__sub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--space-1) var(--space-6);
 }
 
 .catalog-dropdown__sub-link {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-medium);
-  color: var(--color-text);
+  display: block;
+  padding: var(--space-2) var(--space-1);
+  color: var(--color-text-secondary);
   text-decoration: none;
   font-size: var(--font-size-body);
-  transition: background 0.1s, color 0.1s;
+  transition: color 0.1s;
 }
 
 .catalog-dropdown__sub-link:hover {
-  background: var(--color-surface-subtle);
   color: var(--color-primary);
 }
 
 .catalog-dropdown__sub-empty {
-  padding: var(--space-2) var(--space-3);
   color: var(--color-text-secondary);
   font-size: var(--font-size-body);
 }
