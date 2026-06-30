@@ -197,6 +197,36 @@ def test_template_registry_covers_seeded_subcategories():
     assert expected <= set(PRODUCT_TEMPLATES)
 
 
+def test_template_registry_does_not_include_removed_package_content_field():
+    validate_template_registry()
+    for template in PRODUCT_TEMPLATES.values():
+        assert "contenido" not in {field.key for field in template.fields}
+        assert "Contenido del paquete" not in {field.label for field in template.fields}
+
+
+def test_product_draft_form_removes_highlights_and_package_content_section(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+
+    response = client.get(f"/partners/products/drafts/{draft.id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Puntos destacados y contenido" not in html
+    assert "Punto destacado" not in html
+    assert "Cantidad en empaque" not in html
+    assert "Contenido del paquete" not in html
+    assert 'name="highlights[]"' not in html
+    assert 'name="package_quantity[]"' not in html
+    assert 'name="package_name[]"' not in html
+    assert 'name="package_note[]"' not in html
+    assert "Galería Multimedia" in html
+    assert "Código del producto" in html
+    assert "Variantes" in html
+    assert "Precio de venta" in html
+
+
 def test_create_and_save_draft_without_public_product_rows(client, session):
     user = _user(session)
     _enabled_store(session, user)
@@ -231,6 +261,44 @@ def test_create_and_save_draft_without_public_product_rows(client, session):
     assert session.scalar(select(func.count()).select_from(SellerOffer)) == 0
 
 
+def test_removed_fields_are_ignored_and_legacy_values_are_preserved(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    legacy_highlights = ["Dato antiguo"]
+    legacy_contents = [{"quantity": "9", "name": "Contenido antiguo", "note": "No borrar"}]
+    draft.highlights = legacy_highlights
+    draft.package_contents = legacy_contents
+    session.commit()
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "title": "Cámara de seguridad exterior 4MP",
+            "brand": "Hikvision",
+            "model_number": "DS-DEMO",
+            "description": "Borrador inicial con una descripción suficientemente larga.",
+            "attributes[tipo_camara]": "Seguridad",
+            "attributes[resolucion_mp]": "4",
+            "price": "45.00",
+            "stock_quantity": "5",
+            "product_weight_kg": "0.5",
+            "highlights[]": ["Valor manipulado"],
+            "package_quantity[]": ["1"],
+            "package_name[]": ["Producto manipulado"],
+            "package_note[]": ["Nota manipulada"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    session.expire_all()
+    saved = session.get(ProductDraft, draft.id)
+    assert saved.highlights == legacy_highlights
+    assert saved.package_contents == legacy_contents
+    assert 0 <= saved.completion_percentage <= 100
+
+
 def test_submit_incomplete_draft_is_rejected(client, session):
     user = _user(session)
     _enabled_store(session, user)
@@ -245,6 +313,45 @@ def test_submit_incomplete_draft_is_rejected(client, session):
     assert "Carga al menos 3" in response.get_data(as_text=True)
     session.expire_all()
     assert session.get(ProductDraft, draft.id).status != ProductDraftStatus.SUBMITTED
+
+
+def test_valid_draft_submits_without_highlights_or_package_contents(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    client.post(
+        f"/partners/products/drafts/{draft.id}/files",
+        data={
+            "kind": "IMAGE",
+            "files": [_image_tuple(f"image-{index}.png") for index in range(3)],
+        },
+        content_type="multipart/form-data",
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/submit",
+        data={
+            "title": "Cámara de seguridad exterior 4MP",
+            "brand": "Hikvision",
+            "model_number": "DS-DEMO",
+            "description": "Borrador listo con una descripción suficientemente detallada.",
+            "attributes[tipo_camara]": "Seguridad",
+            "attributes[resolucion_mp]": "4",
+            "price": "45.00",
+            "stock_quantity": "5",
+            "product_weight_kg": "0.5",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    session.expire_all()
+    submitted = session.get(ProductDraft, draft.id)
+    assert submitted.status == ProductDraftStatus.SUBMITTED
+    assert submitted.completion_percentage == 100
+    assert submitted.highlights == []
+    assert submitted.package_contents == []
 
 
 def test_valid_image_upload_is_private_and_authorized(client, session):

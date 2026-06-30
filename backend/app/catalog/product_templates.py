@@ -111,7 +111,6 @@ def _common(*fields: ProductTemplateField) -> tuple[ProductTemplateField, ...]:
     return (
         field_def("color_principal", "Color principal", type="color", section="presentacion", order=10),
         field_def("material", "Material", section="presentacion", order=20),
-        field_def("contenido", "Contenido del paquete", type="repeater", section="contenido", order=30),
         *fields,
     )
 

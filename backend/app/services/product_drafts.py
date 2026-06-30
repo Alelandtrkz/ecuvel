@@ -465,8 +465,6 @@ def _apply_form_to_draft(draft: ProductDraft, template: ProductTemplate, form: M
     draft.condition = "NEW"
     draft.country_origin = _clean_text(form.get("country_origin"), 80)
     draft.description = _clean_text(form.get("description"), 5000)
-    draft.highlights = _nonempty_list(form.getlist("highlights[]"))
-    draft.package_contents = _package_contents(form)
     draft.warranty_data = {
         "type": _clean_text(form.get("warranty_type"), 80),
         "duration": _clean_text(form.get("warranty_duration"), 20),
@@ -611,22 +609,6 @@ def _variants_complete(draft: ProductDraft) -> bool:
             return False
         seen.add(sku)
     return True
-
-
-def _package_contents(form: MultiDict) -> list[dict[str, str]]:
-    quantities = form.getlist("package_quantity[]")
-    names = form.getlist("package_name[]")
-    notes = form.getlist("package_note[]")
-    rows: list[dict[str, str]] = []
-    for index, name in enumerate(names):
-        row = {
-            "quantity": _clean_text(quantities[index] if index < len(quantities) else "", 20),
-            "name": _clean_text(name, 120),
-            "note": _clean_text(notes[index] if index < len(notes) else "", 200),
-        }
-        if any(row.values()):
-            rows.append(row)
-    return rows
 
 
 def _ensure_editable(draft: ProductDraft) -> None:

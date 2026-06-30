@@ -100,32 +100,6 @@
           </div>
         </section>
 
-        <section class="partner-draft-card" aria-labelledby="highlights-title">
-          <h2 id="highlights-title">Puntos destacados y contenido</h2>
-          <div class="partner-repeat-list" data-repeat-list>
-            {% for index in range(3) %}
-              <label class="partner-draft-field">
-                <span>Punto destacado {{ index + 1 }}</span>
-                <input name="highlights[]" value="{{ draft.highlights[index] if draft.highlights and index < draft.highlights|length else '' }}" placeholder="Ej. Resolución 4MP">
-              </label>
-            {% endfor %}
-          </div>
-          <div class="partner-draft-grid partner-draft-grid--3">
-            <label class="partner-draft-field">
-              <span>Cantidad en empaque</span>
-              <input name="package_quantity[]" value="{{ draft.package_contents[0].quantity if draft.package_contents else '' }}" placeholder="1">
-            </label>
-            <label class="partner-draft-field">
-              <span>Contenido del paquete</span>
-              <input name="package_name[]" value="{{ draft.package_contents[0].name if draft.package_contents else '' }}" placeholder="Producto principal">
-            </label>
-            <label class="partner-draft-field">
-              <span>Nota</span>
-              <input name="package_note[]" value="{{ draft.package_contents[0].note if draft.package_contents else '' }}" placeholder="Incluye accesorios">
-            </label>
-          </div>
-        </section>
-
         <section class="partner-draft-card" aria-labelledby="variants-title">
           <h2 id="variants-title">Variantes</h2>
           <label class="partner-switch">
