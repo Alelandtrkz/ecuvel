@@ -15,7 +15,6 @@
     </div>
   </div>
   <nav class="customer-sidebar__nav" aria-label="Información general">
-    <p>Información general</p>
     <a class="{% if current_section|default('') == 'profile' %}is-active{% endif %}" href="{{ url_for('account.profile') }}" {% if current_section|default('') == 'profile' %}aria-current="page"{% endif %}>Información general</a>
     <a class="{% if current_section|default('') == 'orders' %}is-active{% endif %}" href="{{ url_for('storefront.orders') }}" {% if current_section|default('') == 'orders' %}aria-current="page"{% endif %}>Pedidos</a>
     <a class="{% if current_section|default('') == 'favorites' %}is-active{% endif %}" href="{{ url_for('storefront.favorites') }}" {% if current_section|default('') == 'favorites' %}aria-current="page"{% endif %}>Favoritos</a>

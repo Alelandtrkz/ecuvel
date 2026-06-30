@@ -248,15 +248,28 @@
     button.addEventListener("click", async () => {
       const value = button.dataset.copyText || "";
       if (!value) return;
-      const original = button.textContent;
+      const icon = button.querySelector("i[data-lucide]");
+      const originalIcon = icon?.dataset.lucide;
+      const originalLabel = button.getAttribute("aria-label");
+      const originalTitle = button.getAttribute("title");
       try {
         await navigator.clipboard.writeText(value);
-        button.textContent = "Copiado";
+        if (icon) {
+          icon.dataset.lucide = "copy-plus";
+          refreshIcons();
+        }
+        button.setAttribute("aria-label", "Código copiado");
+        button.setAttribute("title", "Código copiado");
       } catch (_error) {
         window.prompt("Copia el código del producto:", value);
       } finally {
         window.setTimeout(() => {
-          button.textContent = original;
+          if (icon) {
+            icon.dataset.lucide = originalIcon;
+            refreshIcons();
+          }
+          button.setAttribute("aria-label", originalLabel);
+          button.setAttribute("title", originalTitle);
         }, 1600);
       }
     });

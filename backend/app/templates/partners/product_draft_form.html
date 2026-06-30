@@ -9,19 +9,19 @@
 {% set dimensions = draft.dimensions_data or {} %}
 {% set warranty = draft.warranty_data or {} %}
 <main class="partner-page partner-page--draft">
-  <header class="partner-draft-hero">
-    <p class="partner-breadcrumb">
-      <a href="{{ url_for('partners.products') }}">Productos</a>
-      <span>/</span>
-      <a href="{{ url_for('partners.new_product_category') }}" data-confirm-change>Categoría</a>
-      <span>/</span>
-      <strong>{{ view.template.name }}</strong>
-    </p>
-    <h1>Crear producto</h1>
-    <p>Completa la información técnica y comercial. El producto se enviará a revisión y no se publicará automáticamente.</p>
-  </header>
-
   <div class="partner-draft-layout" data-product-draft>
+    <header class="partner-draft-hero">
+      <p class="partner-breadcrumb">
+        <a href="{{ url_for('partners.products') }}">Productos</a>
+        <span>/</span>
+        <a href="{{ url_for('partners.new_product_category') }}" data-confirm-change>Categoría</a>
+        <span>/</span>
+        <strong>{{ view.template.name }}</strong>
+      </p>
+      <h1>Crear un nuevo producto</h1>
+      <p>Completa la información técnica y comercial. El producto se enviará a revisión y no se publicará automáticamente.</p>
+    </header>
+
     <div class="partner-draft-main">
       {% include "partners/_product_draft_gallery.html" %}
 
@@ -60,15 +60,20 @@
             </label>
           </div>
           <div class="partner-product-code-card" aria-label="Identificación del producto">
-            <div class="partner-product-code-card__code">
-              <span>Código del producto</span>
-              <strong>{{ draft.seller_sku or "Pendiente" }}</strong>
-              <small>Generado automáticamente por ECUVEL. No se puede editar.</small>
-              {% if errors.seller_sku %}<em class="partner-error">{{ errors.seller_sku }}</em>{% endif %}
+            <div class="partner-product-code-card__left">
+              <div class="partner-product-code-card__code">
+                <span>Código del producto</span>
+                <strong>{{ draft.seller_sku or "Pendiente" }}</strong>
+                <small>Generado automáticamente por ECUVEL.</small>
+                {% if errors.seller_sku %}<em class="partner-error">{{ errors.seller_sku }}</em>{% endif %}
+              </div>
+              <button class="partner-button partner-button--secondary partner-copy-btn" type="button"
+                      data-copy-text="{{ draft.seller_sku or '' }}"
+                      aria-label="Copiar código del producto"
+                      title="Copiar código">
+                <i data-lucide="copy" aria-hidden="true"></i>
+              </button>
             </div>
-            <button class="partner-button partner-button--secondary" type="button" data-copy-text="{{ draft.seller_sku or '' }}">
-              Copiar código
-            </button>
             <div class="partner-barcode-preview">
               {% if draft.seller_sku %}
                 <img src="{{ url_for('partners.product_draft_barcode', draft_id=draft.id) }}" alt="Código de barras Code 128 de {{ draft.seller_sku }}">
@@ -77,7 +82,6 @@
               {% if errors.barcode %}<em class="partner-error">{{ errors.barcode }}</em>{% endif %}
               {% if errors.condition %}<em class="partner-error">{{ errors.condition }}</em>{% endif %}
             </div>
-            <p class="partner-product-condition-note">Condición fija: <strong>Nuevo</strong>.</p>
           </div>
           <label class="partner-draft-field partner-draft-field--wide">
             <span>Descripción del producto</span>

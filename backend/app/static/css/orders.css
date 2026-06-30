@@ -31,7 +31,7 @@
 .customer-sidebar__identity {
   display: grid;
   gap: var(--space-3);
-  margin-bottom: var(--space-8);
+  margin-bottom: var(--space-6);
 }
 
 .customer-sidebar__avatar {
