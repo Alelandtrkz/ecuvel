@@ -1,6 +1,13 @@
 {% set field_name = "attributes[" ~ field.key ~ "]" %}
 {% set value = view.draft.attributes.get(field.key) if view.draft.attributes else none %}
 {% set error = errors.get(field.key) or errors.get("attributes." ~ field.key) %}
+{% if field.condition %}
+  {% set _trigger_val = view.draft.attributes.get(field.condition.field) if view.draft.attributes else none %}
+  {% set _condition_met = _trigger_val in field.condition['values'] %}
+  <div data-condition-field="{{ field.condition.field }}"
+       data-condition-values="{{ field.condition['values'] | join(',') }}"
+       {% if not _condition_met %}hidden{% endif %}>
+{% endif %}
 <label class="partner-draft-field partner-draft-field--{{ field.type }}">
   <span>
     {{ field.label }}{% if field.required %} <strong aria-label="obligatorio">*</strong>{% endif %}
@@ -36,5 +43,21 @@
     <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or '' }}">
   {% endif %}
 
+  {% if field.quick_options %}
+    <div class="partner-attribute-quick-options" data-quick-options>
+      {% for opt in field.quick_options %}
+        {% set parts = opt.split('|') %}
+        {% set chip_label = parts[0] %}
+        {% set chip_value = parts[1] if parts | length > 1 else parts[0] %}
+        <button type="button"
+                class="partner-attribute-chip"
+                data-value="{{ chip_value }}"
+                aria-pressed="{{ 'true' if value is not none and (value | string) == chip_value else 'false' }}">
+          {{ chip_label }}
+        </button>
+      {% endfor %}
+    </div>
+  {% endif %}
   {% if error %}<em class="partner-error">{{ error }}</em>{% endif %}
 </label>
+{% if field.condition %}</div>{% endif %}

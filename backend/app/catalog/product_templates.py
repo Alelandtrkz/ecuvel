@@ -39,6 +39,7 @@ class ProductTemplateField:
     help: str = ""
     unit: str = ""
     options: tuple[str, ...] = ()
+    quick_options: tuple[str, ...] = ()
     min: int | Decimal | None = None
     max: int | Decimal | None = None
     condition: dict[str, Any] | None = None
@@ -84,6 +85,7 @@ def field_def(
     help: str = "",
     unit: str = "",
     options: Iterable[str] = (),
+    quick_options: Iterable[str] = (),
     min: int | Decimal | None = None,
     max: int | Decimal | None = None,
     condition: dict[str, Any] | None = None,
@@ -101,6 +103,7 @@ def field_def(
         help=help,
         unit=unit,
         options=tuple(options),
+        quick_options=tuple(quick_options),
         min=min,
         max=max,
         condition=condition,
@@ -116,27 +119,224 @@ def _common(*fields: ProductTemplateField) -> tuple[ProductTemplateField, ...]:
 
 
 def _electronics_phone() -> tuple[ProductTemplateField, ...]:
+    _SMARTPHONE = ["Smartphone"]
+    _SMARTPHONE_BASIC = ["Smartphone", "Teléfono básico"]
+    _CHARGER = ["Cargador"]
+    _CHARGER_CABLE = ["Cargador", "Cable"]
+    _CABLE = ["Cable"]
+    _PROTECTOR = ["Protector"]
+    _PROTECTOR_SOPORTE_REPUESTO = ["Protector", "Soporte", "Repuesto"]
+    _SOPORTE = ["Soporte"]
+    _REPUESTO = ["Repuesto"]
     return _common(
-        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="tecnica", order=1, options=("Smartphone", "Teléfono básico", "Cargador", "Cable", "Protector", "Soporte", "Repuesto", "Otro")),
-        field_def("sistema_operativo", "Sistema operativo", section="tecnica", order=2),
-        field_def("ram_gb", "RAM", type="integer", section="tecnica", order=3, unit="GB", min=0, max=2048),
-        field_def("almacenamiento_gb", "Almacenamiento", type="integer", section="tecnica", order=4, unit="GB", min=0, max=8192),
-        field_def("pantalla_pulgadas", "Tamaño de pantalla", type="decimal", section="pantalla", order=5, unit="in", min=Decimal("0"), max=Decimal("30")),
-        field_def("camara_principal_mp", "Cámara principal", type="decimal", section="camara", order=6, unit="MP", min=Decimal("0"), max=Decimal("500")),
-        field_def("bateria_mah", "Batería", type="integer", section="energia", order=7, unit="mAh", min=0, max=50000),
+        # Selector principal — siempre visible
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="tecnica", order=1,
+                  options=("Smartphone", "Teléfono básico", "Cargador", "Cable", "Protector", "Soporte", "Repuesto", "Otro")),
+
+        # Smartphone / Teléfono básico
+        field_def("sistema_operativo", "Sistema operativo", section="tecnica", order=2,
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE_BASIC}),
+        field_def("ram_gb", "RAM", type="integer", section="tecnica", order=3, unit="GB", min=0, max=2048,
+                  quick_options=("4 GB|4", "6 GB|6", "8 GB|8", "12 GB|12", "16 GB|16"),
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE}),
+        field_def("almacenamiento_gb", "Almacenamiento", type="integer", section="tecnica", order=4, unit="GB", min=0, max=8192,
+                  quick_options=("64 GB|64", "128 GB|128", "256 GB|256", "512 GB|512", "1 TB|1024"),
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE_BASIC}),
+        field_def("pantalla_pulgadas", "Tamaño de pantalla", type="decimal", section="pantalla", order=5, unit="in",
+                  min=Decimal("0"), max=Decimal("30"),
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE_BASIC}),
+        field_def("camara_principal_mp", "Cámara principal", type="decimal", section="camara", order=6, unit="MP",
+                  min=Decimal("0"), max=Decimal("500"),
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE}),
+        field_def("bateria_mah", "Batería", type="integer", section="energia", order=7, unit="mAh", min=0, max=50000,
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE_BASIC}),
+
+        # Cargador
+        field_def("potencia_w", "Potencia", type="integer", section="tecnica", order=8, unit="W", min=0, max=300,
+                  quick_options=("5W|5", "10W|10", "15W|15", "18W|18", "25W|25", "45W|45", "65W|65"),
+                  condition={"field": "tipo_producto", "values": _CHARGER}),
+        field_def("voltaje", "Voltaje", type="decimal", section="tecnica", order=9, unit="V", min=Decimal("0"),
+                  condition={"field": "tipo_producto", "values": _CHARGER}),
+        field_def("corriente_a", "Corriente", type="decimal", section="tecnica", order=10, unit="A", min=Decimal("0"),
+                  condition={"field": "tipo_producto", "values": _CHARGER}),
+
+        # Cargador + Cable
+        field_def("tipo_conector_salida", "Conector de salida", type="select", section="conectividad", order=11,
+                  options=("USB-A", "USB-C", "Lightning", "Micro-USB", "Multi-puerto"),
+                  condition={"field": "tipo_producto", "values": _CHARGER_CABLE}),
+        field_def("carga_rapida", "Carga rápida", type="boolean", section="conectividad", order=12,
+                  condition={"field": "tipo_producto", "values": _CHARGER_CABLE}),
+
+        # Cable
+        field_def("longitud_cm", "Longitud", type="decimal", section="tecnica", order=13, unit="cm", min=Decimal("0"),
+                  quick_options=("100 cm|100", "150 cm|150", "200 cm|200"),
+                  condition={"field": "tipo_producto", "values": _CABLE}),
+        field_def("tipo_conector_entrada", "Conector de entrada", type="select", section="conectividad", order=14,
+                  options=("USB-A", "USB-C", "Lightning", "Micro-USB"),
+                  condition={"field": "tipo_producto", "values": _CABLE}),
+        field_def("transferencia_datos", "Transferencia de datos", type="boolean", section="conectividad", order=15,
+                  condition={"field": "tipo_producto", "values": _CABLE}),
+
+        # Protector
+        field_def("tipo_protector", "Tipo de protector", type="select", section="tecnica", order=16,
+                  options=("Vidrio templado", "Silicona", "Policarbonato", "Cuero sintético", "Otro"),
+                  condition={"field": "tipo_producto", "values": _PROTECTOR}),
+
+        # Protector / Soporte / Repuesto
+        field_def("modelo_compatible", "Modelos compatibles", section="compatibilidad", order=17,
+                  placeholder="Ej. iPhone 15, Samsung Galaxy S24",
+                  condition={"field": "tipo_producto", "values": _PROTECTOR_SOPORTE_REPUESTO}),
+
+        # Soporte
+        field_def("tipo_soporte", "Tipo de soporte", type="select", section="tecnica", order=18,
+                  options=("Mesa", "Auto", "Pared", "Cuello/Flexible", "Otro"),
+                  condition={"field": "tipo_producto", "values": _SOPORTE}),
+        field_def("ajustable", "Ajustable", type="boolean", section="tecnica", order=19,
+                  condition={"field": "tipo_producto", "values": _SOPORTE}),
+
+        # Repuesto
+        field_def("tipo_repuesto", "Tipo de repuesto", type="select", section="tecnica", order=20,
+                  options=("Pantalla", "Batería", "Carcasa", "Botón/Switch", "Puerto", "Otro"),
+                  condition={"field": "tipo_producto", "values": _REPUESTO}),
+        field_def("numero_parte", "Número de parte", section="compatibilidad", order=21,
+                  condition={"field": "tipo_producto", "values": _REPUESTO}),
+    )
+
+
+def _electronics_computer() -> tuple[ProductTemplateField, ...]:
+    _LAPTOP_DESKTOP_TABLET = ["Laptop", "Desktop", "Tablet"]
+    _LAPTOP_DESKTOP = ["Laptop", "Desktop"]
+    _LAPTOP_TABLET = ["Laptop", "Tablet"]
+    _LAPTOP = ["Laptop"]
+    _TABLET = ["Tablet"]
+    _MONITOR = ["Monitor"]
+    _ACCESORIO = ["Accesorio"]
+    return _common(
+        field_def("tipo_equipo", "Tipo de equipo", type="select", required=True, section="tecnica", order=1,
+                  options=("Laptop", "Desktop", "Tablet", "Monitor", "Accesorio")),
+
+        # Laptop / Desktop / Tablet
+        field_def("procesador", "Procesador", section="tecnica", order=2,
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP_TABLET}),
+        field_def("ram_gb", "RAM", type="integer", section="tecnica", order=3, unit="GB", min=0,
+                  quick_options=("4 GB|4", "8 GB|8", "16 GB|16", "32 GB|32", "64 GB|64"),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP_TABLET}),
+        field_def("almacenamiento_gb", "Almacenamiento", type="integer", section="tecnica", order=4, unit="GB", min=0,
+                  quick_options=("128 GB|128", "256 GB|256", "512 GB|512", "1 TB|1024", "2 TB|2048"),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP_TABLET}),
+        field_def("tipo_almacenamiento", "Tipo de almacenamiento", type="select", section="tecnica", order=5,
+                  options=("SSD", "HDD", "SSD + HDD"),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP}),
+        field_def("sistema_operativo", "Sistema operativo", section="software", order=6,
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP_TABLET}),
+
+        # Laptop / Tablet / Monitor
+        field_def("pantalla_pulgadas", "Tamaño de pantalla", type="decimal", section="pantalla", order=7, unit="in",
+                  min=Decimal("0"), max=Decimal("100"),
+                  condition={"field": "tipo_equipo", "values": ["Laptop", "Tablet", "Monitor"]}),
+
+        # Laptop / Tablet
+        field_def("bateria_mah", "Batería", type="integer", section="energia", order=8, unit="mAh", min=0,
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_TABLET}),
+
+        # Tablet
+        field_def("tiene_sim", "Ranura SIM", type="boolean", section="conectividad", order=9,
+                  condition={"field": "tipo_equipo", "values": _TABLET}),
+
+        # Monitor
+        field_def("resolucion_pantalla", "Resolución", section="pantalla", order=10,
+                  placeholder="Ej. 1920x1080, 2560x1440",
+                  condition={"field": "tipo_equipo", "values": _MONITOR}),
+        field_def("frecuencia_hz", "Frecuencia de refresco", type="integer", section="pantalla", order=11, unit="Hz", min=0,
+                  quick_options=("60 Hz|60", "75 Hz|75", "120 Hz|120", "144 Hz|144", "165 Hz|165", "240 Hz|240"),
+                  condition={"field": "tipo_equipo", "values": _MONITOR}),
+        field_def("tipo_panel", "Tipo de panel", type="select", section="pantalla", order=12,
+                  options=("IPS", "VA", "TN", "OLED"),
+                  condition={"field": "tipo_equipo", "values": _MONITOR}),
+        field_def("tipo_conexion_monitor", "Conexiones disponibles", type="chips", section="conectividad", order=13,
+                  help="Ej. HDMI, DisplayPort, VGA, USB-C",
+                  condition={"field": "tipo_equipo", "values": _MONITOR}),
+
+        # Accesorio
+        field_def("tipo_accesorio", "Tipo de accesorio", section="tecnica", order=14,
+                  placeholder="Ej. Teclado, Mouse, Hub USB",
+                  condition={"field": "tipo_equipo", "values": _ACCESORIO}),
     )
 
 
 def _electronics_camera() -> tuple[ProductTemplateField, ...]:
+    _SEGURIDAD = ["Seguridad"]
+    _FOTOGRAFICA = ["Fotográfica"]
+    _DEPORTIVA = ["Deportiva"]
+    _WEBCAM = ["Webcam"]
+    _SEG_FOT_DEP = ["Seguridad", "Fotográfica", "Deportiva"]
+    _SEG_DEP = ["Seguridad", "Deportiva"]
+    _DEP_WEB = ["Deportiva", "Webcam"]
+    _FOT_DEP = ["Fotográfica", "Deportiva"]
+    _SEG_FOT_DEP_WEB = ["Seguridad", "Fotográfica", "Deportiva", "Webcam"]
     return _common(
-        field_def("tipo_camara", "Tipo de cámara", type="select", required=True, section="imagen", order=1, options=("Seguridad", "Fotográfica", "Deportiva", "Webcam", "Otro")),
-        field_def("resolucion_mp", "Resolución", type="decimal", required=True, section="imagen", order=2, unit="MP", min=Decimal("0"), max=Decimal("500")),
-        field_def("resolucion_video", "Resolución de video", section="video", order=3, placeholder="Ej. 1920 x 1080"),
-        field_def("vision_nocturna", "Visión nocturna", type="boolean", section="deteccion", order=4),
-        field_def("deteccion_movimiento", "Detección de movimiento", type="boolean", section="deteccion", order=5),
-        field_def("conectividad", "Conectividad", type="chips", section="conectividad", order=6, help="Ej. Wi-Fi, Ethernet, Bluetooth"),
-        field_def("alimentacion", "Alimentación", section="alimentacion", order=7),
-        field_def("proteccion_ip", "Protección IP", section="proteccion", order=8, placeholder="Ej. IP66"),
+        # Siempre visibles
+        field_def("tipo_camara", "Tipo de cámara", type="select", required=True, section="imagen", order=1,
+                  options=("Seguridad", "Fotográfica", "Deportiva", "Webcam", "Otro")),
+        field_def("resolucion_mp", "Resolución", type="decimal", required=True, section="imagen", order=2,
+                  unit="MP", min=Decimal("0"), max=Decimal("500")),
+
+        # Seguridad / Fotográfica / Deportiva / Webcam
+        field_def("resolucion_video", "Resolución de video", section="video", order=3,
+                  placeholder="Ej. 1920x1080, 4K",
+                  condition={"field": "tipo_camara", "values": _SEG_FOT_DEP_WEB}),
+
+        # Seguridad
+        field_def("vision_nocturna", "Visión nocturna", type="boolean", section="deteccion", order=4,
+                  condition={"field": "tipo_camara", "values": _SEGURIDAD}),
+        field_def("deteccion_movimiento", "Detección de movimiento", type="boolean", section="deteccion", order=5,
+                  condition={"field": "tipo_camara", "values": _SEGURIDAD}),
+        field_def("alimentacion", "Alimentación", section="alimentacion", order=6,
+                  placeholder="Ej. Cable 12V, PoE, Batería",
+                  condition={"field": "tipo_camara", "values": _SEGURIDAD}),
+
+        # Seguridad / Deportiva
+        field_def("proteccion_ip", "Protección IP", section="proteccion", order=7,
+                  placeholder="Ej. IP66, IP67",
+                  condition={"field": "tipo_camara", "values": _SEG_DEP}),
+
+        # Seguridad / Fotográfica / Deportiva
+        field_def("conectividad", "Conectividad", type="chips", section="conectividad", order=8,
+                  help="Ej. Wi-Fi, Ethernet, Bluetooth, 4G",
+                  condition={"field": "tipo_camara", "values": _SEG_FOT_DEP}),
+
+        # Fotográfica
+        field_def("tipo_sensor", "Tipo de sensor", type="select", section="imagen", order=9,
+                  options=("Full Frame", "APS-C", "Micro Cuatro Tercios", "1 pulgada", "Otro"),
+                  condition={"field": "tipo_camara", "values": _FOTOGRAFICA}),
+        field_def("montura_lente", "Montura de lente", section="imagen", order=10,
+                  placeholder="Ej. Canon EF, Sony E, Nikon Z",
+                  condition={"field": "tipo_camara", "values": _FOTOGRAFICA}),
+        field_def("pantalla_abatible", "Pantalla abatible", type="boolean", section="imagen", order=11,
+                  condition={"field": "tipo_camara", "values": _FOTOGRAFICA}),
+
+        # Fotográfica / Deportiva
+        field_def("estabilizacion", "Estabilización de imagen", type="boolean", section="imagen", order=12,
+                  condition={"field": "tipo_camara", "values": _FOT_DEP}),
+
+        # Deportiva / Webcam
+        field_def("fps_video", "FPS de video", type="select", section="video", order=13,
+                  options=("24fps", "30fps", "60fps", "120fps", "240fps"),
+                  condition={"field": "tipo_camara", "values": _DEP_WEB}),
+
+        # Deportiva
+        field_def("bateria_mah", "Batería", type="integer", section="energia", order=14,
+                  unit="mAh", min=0, max=50000,
+                  condition={"field": "tipo_camara", "values": _DEPORTIVA}),
+
+        # Webcam
+        field_def("conexion_webcam", "Conexión", type="select", section="conectividad", order=15,
+                  options=("USB-A", "USB-C"),
+                  condition={"field": "tipo_camara", "values": _WEBCAM}),
+        field_def("microfono", "Micrófono integrado", type="boolean", section="audio", order=16,
+                  condition={"field": "tipo_camara", "values": _WEBCAM}),
+        field_def("autofocus", "Enfoque automático", type="boolean", section="imagen", order=17,
+                  condition={"field": "tipo_camara", "values": _WEBCAM}),
     )
 
 
@@ -193,19 +393,18 @@ def _babies_common() -> tuple[ProductTemplateField, ...]:
 
 _TEMPLATE_FIELD_SETS = {
     "electronics_phones": _electronics_phone(),
-    "electronics_computers": _common(
-        field_def("tipo_equipo", "Tipo de equipo", type="select", required=True, section="tecnica", order=1, options=("Laptop", "Desktop", "Tablet", "Monitor", "Accesorio")),
-        field_def("procesador", "Procesador", section="tecnica", order=2),
-        field_def("ram_gb", "RAM", type="integer", section="tecnica", order=3, unit="GB", min=0),
-        field_def("almacenamiento_gb", "Almacenamiento", type="integer", section="tecnica", order=4, unit="GB", min=0),
-        field_def("sistema_operativo", "Sistema operativo", section="software", order=5),
-    ),
+    "electronics_computers": _electronics_computer(),
     "electronics_headphones": _common(
         field_def("tipo", "Tipo", type="select", required=True, section="audio", order=1, options=("In-ear", "On-ear", "Over-ear", "Gaming", "Otro")),
         field_def("conexion", "Conexión", type="select", section="audio", order=2, options=("Bluetooth", "Cable", "USB", "Mixta")),
         field_def("cancelacion_activa", "Cancelación activa", type="boolean", section="audio", order=3),
         field_def("microfono", "Micrófono", type="boolean", section="audio", order=4),
         field_def("autonomia_horas", "Autonomía", type="decimal", section="energia", order=5, unit="horas", min=Decimal("0")),
+        field_def("surround", "Sonido envolvente (7.1)", type="boolean", section="audio", order=6,
+                  condition={"field": "tipo", "values": ["Gaming"]}),
+        field_def("plataformas", "Plataformas compatibles", type="chips", section="compatibilidad", order=7,
+                  help="Ej. PC, PS5, Xbox, Switch",
+                  condition={"field": "tipo", "values": ["Gaming"]}),
     ),
     "electronics_cameras": _electronics_camera(),
     "fashion_men": _fashion_common(),
@@ -272,6 +471,10 @@ def validate_template_registry() -> None:
 def validate_attributes(template: ProductTemplate, values: dict[str, Any], *, final: bool) -> dict[str, str]:
     errors: dict[str, str] = {}
     for item in template.fields:
+        if item.condition:
+            trigger_val = values.get(item.condition["field"])
+            if trigger_val not in item.condition["values"]:
+                continue
         value = values.get(item.key)
         if final and item.required and _is_empty(value):
             errors[f"attributes.{item.key}"] = f"{item.label} es obligatorio."

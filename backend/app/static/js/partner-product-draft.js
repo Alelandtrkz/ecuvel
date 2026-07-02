@@ -275,6 +275,63 @@
     });
   });
 
+  function initializeAttributeQuickOptions(rootEl) {
+    rootEl.querySelectorAll("[data-quick-options]").forEach((container) => {
+      const label = container.closest("label");
+      const input = label?.querySelector("input, select, textarea");
+      if (!input) return;
+
+      function syncChips() {
+        container.querySelectorAll(".partner-attribute-chip").forEach((chip) => {
+          chip.setAttribute("aria-pressed", String(chip.dataset.value === input.value));
+        });
+      }
+
+      container.querySelectorAll(".partner-attribute-chip").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          input.value = chip.dataset.value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+          syncChips();
+        });
+      });
+
+      input.addEventListener("input", syncChips);
+    });
+  }
+
+  initializeAttributeQuickOptions(root);
+
+  function initializeConditionalFields(rootEl) {
+    const condWrappers = rootEl.querySelectorAll("[data-condition-field]");
+    if (!condWrappers.length) return;
+
+    const triggerMap = new Map();
+    condWrappers.forEach((wrapper) => {
+      const key = wrapper.dataset.conditionField;
+      if (!triggerMap.has(key)) triggerMap.set(key, []);
+      triggerMap.get(key).push(wrapper);
+    });
+
+    triggerMap.forEach((wrappers, triggerKey) => {
+      const triggerEl = rootEl.querySelector(`[name="attributes[${triggerKey}]"]`);
+      if (!triggerEl) return;
+
+      const evaluate = () => {
+        const currentVal = triggerEl.value;
+        wrappers.forEach((wrapper) => {
+          const allowed = wrapper.dataset.conditionValues.split(",");
+          wrapper.hidden = !allowed.includes(currentVal);
+        });
+      };
+
+      triggerEl.addEventListener("change", evaluate);
+      evaluate();
+    });
+  }
+
+  initializeConditionalFields(root);
+
   document.querySelectorAll(".partner-draft-upload--document input[type='file']").forEach((input) => {
     input.addEventListener("change", () => {
       const label = input.closest("label");

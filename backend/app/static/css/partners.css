@@ -787,6 +787,41 @@
   background: #f4f7fa;
 }
 
+.partner-attribute-quick-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.partner-attribute-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 12px;
+  min-height: 30px;
+  border: 1px solid #dbe5ef;
+  border-radius: 999px;
+  background: #fff;
+  color: #374151;
+  font-size: 13px;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.partner-attribute-chip:hover {
+  background: #eff6ff;
+  border-color: #085df8;
+  color: #085df8;
+}
+
+.partner-attribute-chip[aria-pressed="true"] {
+  background: #085df8;
+  border-color: #085df8;
+  color: #fff;
+}
+
 .partner-draft-upload {
   display: flex;
   align-items: center;
