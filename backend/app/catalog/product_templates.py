@@ -38,6 +38,9 @@ class ProductTemplateField:
     placeholder: str = ""
     help: str = ""
     unit: str = ""
+    unit_label: str = ""
+    example: str = ""
+    icon: str = ""
     options: tuple[str, ...] = ()
     quick_options: tuple[str, ...] = ()
     min: int | Decimal | None = None
@@ -73,6 +76,131 @@ class ProductTemplateValidationError(ProductTemplateError):
         self.errors = errors
 
 
+_UNIT_LABELS = {
+    "GB": "GB",
+    "TB": "TB",
+    "MP": "MP",
+    "mAh": "mAh",
+    "W": "W",
+    "V": "V",
+    "A": "A",
+    "cm": "cm",
+    "Hz": "Hz",
+    "horas": "horas",
+    "in": "pulgadas",
+    "meses": "meses",
+}
+
+_FIELD_EXAMPLES = {
+    "ram_gb": "12",
+    "almacenamiento_gb": "512",
+    "pantalla_pulgadas": "6.7",
+    "camara_principal_mp": "50",
+    "resolucion_mp": "4",
+    "bateria_mah": "6000",
+    "potencia_w": "25",
+    "voltaje": "5",
+    "corriente_a": "3",
+    "longitud_cm": "100",
+    "frecuencia_hz": "120",
+    "autonomia_horas": "8",
+    "resolucion_pantalla": "1920x1080",
+    "resolucion_video": "1080p o 4K",
+    "proteccion_ip": "IP66",
+}
+
+_FIELD_HELP = {
+    "ram_gb": "Memoria RAM del equipo. Escribe solo el número; la unidad es GB.",
+    "almacenamiento_gb": "Capacidad interna de almacenamiento. Escribe solo el número; la unidad es GB.",
+    "pantalla_pulgadas": "Tamaño diagonal de la pantalla en pulgadas.",
+    "camara_principal_mp": "Resolución de la cámara principal en megapíxeles.",
+    "resolucion_mp": "Resolución de foto o sensor en megapíxeles.",
+    "bateria_mah": "Capacidad de batería en miliamperios-hora. Escribe solo el número.",
+    "potencia_w": "Potencia máxima del cargador en watts.",
+    "voltaje": "Voltaje de salida o alimentación en voltios.",
+    "corriente_a": "Corriente máxima en amperios.",
+    "longitud_cm": "Longitud del cable o accesorio en centímetros.",
+    "frecuencia_hz": "Frecuencia de refresco de pantalla en hertz.",
+    "autonomia_horas": "Duración aproximada de la batería por carga, en horas.",
+    "resolucion_pantalla": "Resolución física de pantalla. Usa ancho x alto.",
+    "resolucion_video": "Calidad máxima de video soportada, por ejemplo 1080p, 2K o 4K.",
+    "proteccion_ip": "Grado de protección contra polvo/agua, por ejemplo IP66 o IP67.",
+    "tipo_conector_salida": "Puerto que entrega energía o datos hacia el dispositivo.",
+    "tipo_conector_entrada": "Puerto que se conecta al cargador, computadora o fuente.",
+    "tipo_conexion_monitor": "Lista las entradas disponibles, separadas por coma si hace falta.",
+    "conectividad": "Indica las tecnologías compatibles, por ejemplo Wi‑Fi o Ethernet.",
+    "alimentacion": "Indica cómo se alimenta el producto: PoE, batería, cable 12V, USB, etc.",
+}
+
+_FIELD_ICONS = {
+    "sistema_operativo": "smartphone",
+    "tipo_producto": "package-search",
+    "tipo_equipo": "monitor-cog",
+    "tipo_camara": "camera",
+    "tipo": "headphones",
+    "ram_gb": "memory-stick",
+    "almacenamiento_gb": "hard-drive",
+    "tipo_almacenamiento": "database",
+    "pantalla_pulgadas": "monitor",
+    "resolucion_pantalla": "screen-share",
+    "frecuencia_hz": "activity",
+    "tipo_panel": "panel-top",
+    "camara_principal_mp": "camera",
+    "resolucion_mp": "camera",
+    "resolucion_video": "video",
+    "fps_video": "gauge",
+    "bateria_mah": "battery-charging",
+    "potencia_w": "zap",
+    "voltaje": "plug-zap",
+    "corriente_a": "gauge",
+    "tipo_conector_salida": "cable",
+    "tipo_conector_entrada": "cable",
+    "carga_rapida": "zap",
+    "longitud_cm": "ruler",
+    "transferencia_datos": "shuffle",
+    "tipo_protector": "shield",
+    "modelo_compatible": "badge-check",
+    "tipo_soporte": "smartphone-charging",
+    "ajustable": "sliders-horizontal",
+    "tipo_repuesto": "wrench",
+    "numero_parte": "barcode",
+    "procesador": "cpu",
+    "tiene_sim": "scan-line",
+    "tipo_conexion_monitor": "cable",
+    "tipo_accesorio": "keyboard",
+    "vision_nocturna": "moon",
+    "deteccion_movimiento": "radar",
+    "alimentacion": "plug",
+    "proteccion_ip": "shield-check",
+    "conectividad": "wifi",
+    "tipo_sensor": "aperture",
+    "montura_lente": "focus",
+    "pantalla_abatible": "rotate-3d",
+    "estabilizacion": "move-3d",
+    "conexion_webcam": "usb",
+    "microfono": "mic",
+    "autofocus": "scan-search",
+    "conexion": "bluetooth",
+    "cancelacion_activa": "volume-x",
+    "autonomia_horas": "clock",
+    "surround": "waves",
+    "plataformas": "gamepad-2",
+}
+
+_UNIT_ICONS = {
+    "GB": "hard-drive",
+    "MP": "camera",
+    "mAh": "battery-charging",
+    "W": "zap",
+    "V": "plug-zap",
+    "A": "gauge",
+    "cm": "ruler",
+    "Hz": "activity",
+    "horas": "clock",
+    "in": "monitor",
+}
+
+
 def field_def(
     key: str,
     label: str,
@@ -84,6 +212,9 @@ def field_def(
     placeholder: str = "",
     help: str = "",
     unit: str = "",
+    unit_label: str = "",
+    example: str = "",
+    icon: str = "",
     options: Iterable[str] = (),
     quick_options: Iterable[str] = (),
     min: int | Decimal | None = None,
@@ -92,6 +223,13 @@ def field_def(
 ) -> ProductTemplateField:
     if type not in SUPPORTED_FIELD_TYPES:
         raise ProductTemplateError(f"Tipo de campo no soportado: {type}")
+    resolved_unit_label = unit_label or _UNIT_LABELS.get(unit, unit)
+    resolved_example = example or _FIELD_EXAMPLES.get(key, "")
+    resolved_placeholder = placeholder or (f"Ej. {resolved_example}" if resolved_example else "")
+    resolved_help = help or _FIELD_HELP.get(key, "")
+    if unit and not resolved_help:
+        resolved_help = f"Ingresa el valor en {resolved_unit_label}; no incluyas la unidad."
+    resolved_icon = icon or _FIELD_ICONS.get(key, "") or _UNIT_ICONS.get(unit, "")
     return ProductTemplateField(
         key=key,
         label=label,
@@ -99,9 +237,12 @@ def field_def(
         required=required,
         section=section,
         order=order,
-        placeholder=placeholder,
-        help=help,
+        placeholder=resolved_placeholder,
+        help=resolved_help,
         unit=unit,
+        unit_label=resolved_unit_label,
+        example=resolved_example,
+        icon=resolved_icon,
         options=tuple(options),
         quick_options=tuple(quick_options),
         min=min,

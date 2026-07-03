@@ -1,5 +1,5 @@
 .store-public {
-  padding-block: var(--space-6, 48px);
+  padding-block: clamp(18px, 3vw, 34px);
 }
 
 .store-hero,
@@ -14,53 +14,59 @@
 .store-hero {
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: clamp(22px, 4vw, 34px);
-  margin-bottom: 24px;
+  gap: clamp(14px, 2vw, 20px);
+  min-height: 150px;
+  padding: clamp(18px, 3vw, 28px) clamp(22px, 4vw, 34px);
+  margin-bottom: 20px;
 }
 
 .store-hero__logo {
   display: grid;
   place-items: center;
-  width: clamp(70px, 8vw, 92px);
-  height: clamp(70px, 8vw, 92px);
+  width: clamp(64px, 6vw, 84px);
+  height: clamp(64px, 6vw, 84px);
   flex: 0 0 auto;
-  border-radius: 18px;
+  border-radius: 16px;
   color: var(--color-primary, #085df8);
   background:
-    radial-gradient(circle at 75% 22%, #f0bc61 0 12px, transparent 13px),
+    radial-gradient(circle at 75% 22%, #f0bc61 0 10px, transparent 11px),
     linear-gradient(145deg, #eaf2ff, #f8fbff);
-  font-size: clamp(28px, 5vw, 42px);
+  font-size: clamp(1.75rem, 3vw, 2.5rem);
   font-weight: 800;
 }
 
 .store-hero__body {
+  display: grid;
+  gap: 10px;
   min-width: 0;
 }
 
 .store-hero h1 {
-  margin: 0 0 10px;
+  margin: 0;
   overflow-wrap: anywhere;
-  font-size: clamp(1.8rem, 4vw, 3rem);
-  line-height: 1;
+  font-size: clamp(1.75rem, 3vw, 2.45rem);
+  line-height: 1.05;
+  letter-spacing: -0.035em;
 }
 
 .store-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
 }
 
 .store-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 7px 12px;
-  border-radius: 10px;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 9px;
   color: var(--color-text, #0c0c0c);
   background: #eef2f7;
-  font-weight: 700;
+  font-size: 0.95rem;
+  font-weight: 750;
+  line-height: 1;
   text-decoration: none;
 }
 
@@ -71,8 +77,8 @@
 }
 
 .store-chip svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 .store-chip [data-lucide="star"] {
@@ -81,11 +87,31 @@
 }
 
 .store-catalog {
-  padding: clamp(22px, 4vw, 36px);
+  padding: clamp(20px, 3vw, 30px);
 }
 
 .store-catalog__grid {
-  margin-top: 20px;
+  margin-top: 18px;
+}
+
+.store-catalog .section-heading {
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.store-catalog .section-heading h2 {
+  margin: 0;
+  font-size: clamp(1.35rem, 2vw, 1.8rem);
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+.store-catalog .section-heading__eyebrow {
+  font-size: 0.78rem;
+}
+
+.store-catalog .section-heading > p {
+  font-size: 0.9rem;
 }
 
 .store-empty {
@@ -317,15 +343,11 @@
 @media (max-width: 700px) {
   .store-hero {
     align-items: flex-start;
+    min-height: 0;
   }
 
-  .store-chips,
-  .store-chip {
-    width: 100%;
-  }
-
-  .store-chip {
-    justify-content: center;
+  .store-hero h1 {
+    font-size: clamp(1.55rem, 8vw, 2rem);
   }
 
   .store-pagination {

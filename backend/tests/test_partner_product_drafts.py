@@ -204,6 +204,45 @@ def test_template_registry_does_not_include_removed_package_content_field():
         assert "Contenido del paquete" not in {field.label for field in template.fields}
 
 
+def test_electronics_templates_expose_unit_guidance_and_icons():
+    validate_template_registry()
+    required_units = {
+        "electronics_phones": {
+            "ram_gb": "GB",
+            "almacenamiento_gb": "GB",
+            "pantalla_pulgadas": "pulgadas",
+            "camara_principal_mp": "MP",
+            "bateria_mah": "mAh",
+            "potencia_w": "W",
+            "voltaje": "V",
+            "corriente_a": "A",
+            "longitud_cm": "cm",
+        },
+        "electronics_computers": {
+            "ram_gb": "GB",
+            "almacenamiento_gb": "GB",
+            "pantalla_pulgadas": "pulgadas",
+            "bateria_mah": "mAh",
+            "frecuencia_hz": "Hz",
+        },
+        "electronics_cameras": {
+            "resolucion_mp": "MP",
+            "bateria_mah": "mAh",
+        },
+        "electronics_headphones": {
+            "autonomia_horas": "horas",
+        },
+    }
+    for template_key, fields in required_units.items():
+        template_fields = {field.key: field for field in PRODUCT_TEMPLATES[template_key].fields}
+        for field_key, unit_label in fields.items():
+            field = template_fields[field_key]
+            assert field.unit_label == unit_label
+            assert field.help
+            assert field.example
+            assert field.icon
+
+
 def test_product_draft_form_removes_highlights_and_package_content_section(client, session):
     user = _user(session)
     _enabled_store(session, user)
@@ -225,6 +264,18 @@ def test_product_draft_form_removes_highlights_and_package_content_section(clien
     assert "Código del producto" in html
     assert "Variantes" in html
     assert "Precio de venta" in html
+    assert 'data-partner-select' in html
+    assert 'class="partner-select__native"' in html
+    assert 'data-partner-select-button' in html
+    assert 'class="partner-boolean-control"' in html
+    assert 'class="partner-boolean-control__input"' in html
+    assert 'class="partner-input-with-unit"' in html
+    assert 'data-lucide="camera"' in html
+    assert 'data-lucide="battery-charging"' in html
+    assert "MP" in html
+    assert "mAh" in html
+    assert "Resolución de foto o sensor en megapíxeles." in html
+    assert "Capacidad de batería en miliamperios-hora." in html
 
 
 def test_create_and_save_draft_without_public_product_rows(client, session):

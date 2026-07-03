@@ -1,6 +1,8 @@
 {% set field_name = "attributes[" ~ field.key ~ "]" %}
 {% set value = view.draft.attributes.get(field.key) if view.draft.attributes else none %}
 {% set error = errors.get(field.key) or errors.get("attributes." ~ field.key) %}
+{% set field_placeholder = field.placeholder or (("Ej. " ~ field.example) if field.example else "") %}
+{% set field_unit = field.unit_label or field.unit %}
 {% if field.condition %}
   {% set _trigger_val = view.draft.attributes.get(field.condition.field) if view.draft.attributes else none %}
   {% set _condition_met = _trigger_val in field.condition['values'] %}
@@ -8,39 +10,97 @@
        data-condition-values="{{ field.condition['values'] | join(',') }}"
        {% if not _condition_met %}hidden{% endif %}>
 {% endif %}
-<label class="partner-draft-field partner-draft-field--{{ field.type }}">
-  <span>
-    {{ field.label }}{% if field.required %} <strong aria-label="obligatorio">*</strong>{% endif %}
+<label class="partner-draft-field partner-draft-field--{{ field.type }}{% if field_unit %} partner-draft-field--with-unit{% endif %}">
+  <span class="partner-draft-field__heading">
+    {% if field.icon %}
+      <i data-lucide="{{ field.icon }}" aria-hidden="true"></i>
+    {% endif %}
+    <span class="partner-draft-field__label-text">
+      {{ field.label }}{% if field.required %} <strong aria-label="obligatorio">*</strong>{% endif %}
+      {% if field_unit %}<span class="partner-draft-field__unit-label">{{ field_unit }}</span>{% endif %}
+    </span>
   </span>
-  {% if field.help %}
-    <small>{{ field.help }}</small>
-  {% endif %}
 
   {% if field.type in ["textarea", "repeater", "compatibility_table", "size_table"] %}
-    <textarea name="{{ field_name }}" rows="4" placeholder="{{ field.placeholder or '' }}">{{ value or '' }}</textarea>
+    <textarea name="{{ field_name }}" rows="4" placeholder="{{ field_placeholder }}">{{ value or '' }}</textarea>
   {% elif field.type in ["select", "radio"] %}
-    <select name="{{ field_name }}">
-      <option value="">Seleccione una opción</option>
-      {% for option in field.options %}
-        <option value="{{ option }}" {{ "selected" if value == option }}>{{ option }}</option>
-      {% endfor %}
-    </select>
+    {% set selected_label = value if value else "Seleccione una opción" %}
+    <div class="partner-select" data-partner-select>
+      <select class="partner-select__native" name="{{ field_name }}" data-partner-select-native>
+        <option value="">Seleccione una opción</option>
+        {% for option in field.options %}
+          <option value="{{ option }}" {{ "selected" if value == option }}>{{ option }}</option>
+        {% endfor %}
+      </select>
+      <button class="partner-select__button"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              data-partner-select-button>
+        <span data-partner-select-label>{{ selected_label }}</span>
+        <i data-lucide="chevron-down" aria-hidden="true"></i>
+      </button>
+      <div class="partner-select__menu" role="listbox" data-partner-select-menu>
+        <button class="partner-select__option"
+                type="button"
+                role="option"
+                data-value=""
+                aria-selected="{{ 'true' if not value else 'false' }}">
+          Seleccione una opción
+        </button>
+        {% for option in field.options %}
+          <button class="partner-select__option"
+                  type="button"
+                  role="option"
+                  data-value="{{ option }}"
+                  aria-selected="{{ 'true' if value == option else 'false' }}">
+            {{ option }}
+          </button>
+        {% endfor %}
+      </div>
+    </div>
   {% elif field.type in ["multiselect", "chips", "variant_attribute"] %}
-    <input type="text" name="{{ field_name }}" value="{{ (value|join(', ')) if value is sequence and value is not string else (value or '') }}" placeholder="{{ field.placeholder or 'Separe los valores con coma' }}">
+    <input type="text" name="{{ field_name }}" value="{{ (value|join(', ')) if value is sequence and value is not string else (value or '') }}" placeholder="{{ field_placeholder or 'Separe los valores con coma' }}">
   {% elif field.type == "boolean" %}
-    <input type="checkbox" name="{{ field_name }}" value="1" {{ "checked" if value }}>
+    <span class="partner-boolean-control">
+      <input class="partner-boolean-control__input" type="checkbox" name="{{ field_name }}" value="1" {{ "checked" if value }}>
+      <span class="partner-boolean-control__box" aria-hidden="true">
+        <svg viewBox="0 0 20 20" focusable="false">
+          <path d="M5 10.4 8.2 13.5 15 6.5" />
+        </svg>
+      </span>
+      <span class="partner-boolean-control__text">Sí, aplica</span>
+    </span>
   {% elif field.type == "integer" %}
-    <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or '' }}" step="1">
+    {% if field_unit %}
+      <span class="partner-input-with-unit">
+        <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="1">
+        <span class="partner-input-with-unit__suffix" aria-hidden="true">{{ field_unit }}</span>
+      </span>
+    {% else %}
+      <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="1">
+    {% endif %}
   {% elif field.type == "decimal" or field.type == "dimension" %}
-    <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or '' }}" step="0.01">
+    {% if field_unit %}
+      <span class="partner-input-with-unit">
+        <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="0.01">
+        <span class="partner-input-with-unit__suffix" aria-hidden="true">{{ field_unit }}</span>
+      </span>
+    {% else %}
+      <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="0.01">
+    {% endif %}
   {% elif field.type == "color" %}
-    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or 'Azul, negro, #085DF8...' }}">
+    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder or 'Azul, negro, #085DF8...' }}">
   {% elif field.type == "date" %}
     <input type="date" name="{{ field_name }}" value="{{ value or '' }}">
   {% elif field.type in ["file", "document"] %}
-    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or 'Referencia del documento' }}">
+    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder or 'Referencia del documento' }}">
   {% else %}
-    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field.placeholder or '' }}">
+    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}">
+  {% endif %}
+
+  {% if field.help %}
+    <small class="partner-draft-field__help">{{ field.help }}</small>
   {% endif %}
 
   {% if field.quick_options %}

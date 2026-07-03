@@ -275,6 +275,124 @@
     });
   });
 
+  function initializePartnerSelects(rootEl) {
+    const controls = Array.from(rootEl.querySelectorAll("[data-partner-select]"));
+    let openControl = null;
+
+    function close(control) {
+      if (!control) return;
+      control.classList.remove("is-open");
+      control.querySelector("[data-partner-select-button]")?.setAttribute("aria-expanded", "false");
+      if (openControl === control) openControl = null;
+    }
+
+    function focusOption(options, index) {
+      const option = options[index];
+      if (!option) return;
+      option.focus({ preventScroll: true });
+      option.scrollIntoView({ block: "nearest" });
+    }
+
+    function selectedIndex(options) {
+      const index = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+      return index >= 0 ? index : 0;
+    }
+
+    function open(control, options, preferredIndex) {
+      if (openControl && openControl !== control) close(openControl);
+      control.classList.add("is-open");
+      control.querySelector("[data-partner-select-button]")?.setAttribute("aria-expanded", "true");
+      openControl = control;
+      window.requestAnimationFrame(() => focusOption(options, preferredIndex ?? selectedIndex(options)));
+    }
+
+    controls.forEach((control, index) => {
+      const nativeSelect = control.querySelector("[data-partner-select-native]");
+      const button = control.querySelector("[data-partner-select-button]");
+      const label = control.querySelector("[data-partner-select-label]");
+      const menu = control.querySelector("[data-partner-select-menu]");
+      const options = Array.from(control.querySelectorAll(".partner-select__option"));
+      if (!nativeSelect || !button || !label || !menu || !options.length) return;
+
+      const menuId = menu.id || `partner-select-menu-${index}`;
+      menu.id = menuId;
+      button.setAttribute("aria-controls", menuId);
+      control.classList.add("is-enhanced");
+
+      function syncFromNative() {
+        const selected = nativeSelect.selectedOptions?.[0];
+        label.textContent = selected?.textContent?.trim() || "Seleccione una opción";
+        options.forEach((option) => {
+          option.setAttribute("aria-selected", String(option.dataset.value === nativeSelect.value));
+        });
+      }
+
+      function choose(option) {
+        nativeSelect.value = option.dataset.value || "";
+        syncFromNative();
+        nativeSelect.dispatchEvent(new Event("input", { bubbles: true }));
+        nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        close(control);
+        button.focus({ preventScroll: true });
+      }
+
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        if (control.classList.contains("is-open")) {
+          close(control);
+        } else {
+          open(control, options);
+        }
+      });
+
+      button.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          open(control, options, event.key === "ArrowUp" ? options.length - 1 : selectedIndex(options));
+        }
+        if (event.key === "Escape") close(control);
+      });
+
+      options.forEach((option, optionIndex) => {
+        option.addEventListener("click", (event) => {
+          event.preventDefault();
+          choose(option);
+        });
+        option.addEventListener("keydown", (event) => {
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            focusOption(options, Math.min(options.length - 1, optionIndex + 1));
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            focusOption(options, Math.max(0, optionIndex - 1));
+          } else if (event.key === "Home") {
+            event.preventDefault();
+            focusOption(options, 0);
+          } else if (event.key === "End") {
+            event.preventDefault();
+            focusOption(options, options.length - 1);
+          } else if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            choose(option);
+          } else if (event.key === "Escape") {
+            event.preventDefault();
+            close(control);
+            button.focus({ preventScroll: true });
+          }
+        });
+      });
+
+      nativeSelect.addEventListener("change", syncFromNative);
+      syncFromNative();
+    });
+
+    document.addEventListener("click", (event) => {
+      if (openControl && !openControl.contains(event.target)) close(openControl);
+    });
+  }
+
+  initializePartnerSelects(root);
+
   function initializeAttributeQuickOptions(rootEl) {
     rootEl.querySelectorAll("[data-quick-options]").forEach((container) => {
       const label = container.closest("label");

@@ -332,7 +332,31 @@ def test_cancel_keeps_product_tables_empty(client, session):
     _login(client, user)
     response = client.get("/partners/products")
     assert response.status_code == 200
-    assert "Subir producto" in response.get_data(as_text=True)
+    html = response.get_data(as_text=True)
+    assert "Subir producto" in html
+    assert "Crear producto" in html
+    assert "Empieza a vender en Ecuvel" in html
+    assert "Guía rápida" in html
+    assert "Tu tienda ya está habilitada." in html
+    assert "Guía rápida para crear tu primer producto" in html
+    assert "Elige una categoría" in html
+    assert "Completa la ficha" in html
+    assert "Sube al menos 3 imágenes" in html
+    assert "Revisa precio e inventario" in html
+    assert "Envía a revisión" in html
+    assert 'class="partner-products-hero"' in html
+    assert 'class="partner-products-metrics"' in html
+    assert 'class="partner-products-empty-state"' not in html
+    assert html.count("<dialog") == 1
+    assert "data-products-guide-open" in html
+    assert "data-products-guide-dialog" in html
+    assert 'data-lucide="package-plus"' in html
+    assert 'data-lucide="shopping-bag"' in html
+    assert 'data-lucide="list-checks"' in html
+    assert 'data-lucide="images"' in html
+    assert 'href="/partners/products/new/category"' in html
+    assert "\u00c3" not in html
+    assert "\ufffd" not in html
     assert session.scalar(select(func.count()).select_from(Product)) == 0
     assert session.scalar(select(func.count()).select_from(ProductVariant)) == 0
     assert session.scalar(select(func.count()).select_from(SellerOffer)) == 0

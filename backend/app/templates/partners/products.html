@@ -1,23 +1,120 @@
 {% extends "partners/base.html" %}
 {% block partner_title %}Productos | ECUVEL Partners{% endblock %}
 {% block content %}
-<main class="partner-page partner-page--wide">
-  <section class="partner-products-home" aria-labelledby="partner-products-title">
-    <div>
+<main class="partner-page partner-page--wide partner-products-page">
+  <section class="partner-products-hero" aria-labelledby="partner-products-title">
+    <div class="partner-products-hero__content">
       <p class="partner-eyebrow">{{ store.store_name }}</p>
-      <h1 id="partner-products-title">Productos</h1>
-      <p>Tu tienda ya está habilitada para vender. Empieza creando una publicación desde una categoría válida.</p>
+      <h1 id="partner-products-title">Empieza a vender en Ecuvel</h1>
+      <p>
+        Tu tienda ya está habilitada. Crea una publicación guiada, completa la ficha con datos claros
+        y envíala a revisión cuando esté lista.
+      </p>
+      <div class="partner-products-hero__actions">
+        <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">
+          <i data-lucide="package-plus" aria-hidden="true"></i>
+          <span>Subir producto</span>
+        </a>
+        <button class="partner-button partner-button--secondary" type="button" data-products-guide-open>
+          <i data-lucide="book-open-check" aria-hidden="true"></i>
+          <span>Guía rápida</span>
+        </button>
+      </div>
     </div>
-    <div class="partner-actions partner-actions--inline">
-      <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">Subir producto</a>
-      <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Ir al panel de productos</a>
+
+    <div class="partner-products-hero__visual" aria-hidden="true">
+      <div class="partner-products-illustration">
+        <span class="partner-products-illustration__glow"></span>
+        <span class="partner-products-illustration__bubble partner-products-illustration__bubble--top"></span>
+        <span class="partner-products-illustration__bubble partner-products-illustration__bubble--bottom"></span>
+        <div class="partner-products-illustration__card partner-products-illustration__card--main">
+          <i data-lucide="shopping-bag"></i>
+        </div>
+        <div class="partner-products-illustration__card partner-products-illustration__card--side">
+          <i data-lucide="sparkles"></i>
+          <span>Nuevo</span>
+        </div>
+        <div class="partner-products-illustration__card partner-products-illustration__card--check">
+          <i data-lucide="badge-check"></i>
+        </div>
+      </div>
     </div>
   </section>
 
-  <section class="partner-products-empty" aria-labelledby="partner-products-empty-title">
-    <h2 id="partner-products-empty-title">Aún no hay productos creados desde Partners</h2>
-    <p>La gestión completa de productos se habilitará en las siguientes fases. Por ahora puedes iniciar la selección de categoría y plantilla.</p>
-    <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">Crear producto</a>
+  <section class="partner-products-metrics" aria-label="Resumen de productos">
+    <article>
+      <span class="partner-products-metric__icon"><i data-lucide="file-pen-line" aria-hidden="true"></i></span>
+      <div>
+        <strong>Publicaciones en borrador</strong>
+        <span>Disponible en próximas fases</span>
+      </div>
+    </article>
+    <article>
+      <span class="partner-products-metric__icon"><i data-lucide="badge-check" aria-hidden="true"></i></span>
+      <div>
+        <strong>Productos en revisión</strong>
+        <span>Disponible en próximas fases</span>
+      </div>
+    </article>
+    <article>
+      <span class="partner-products-metric__icon"><i data-lucide="package-check" aria-hidden="true"></i></span>
+      <div>
+        <strong>Productos activos</strong>
+        <span>Disponible en próximas fases</span>
+      </div>
+    </article>
   </section>
+
+  <dialog class="partner-products-guide-dialog" aria-labelledby="partner-products-guide-title" data-products-guide-dialog>
+    <article class="partner-products-guide">
+      <button class="partner-products-guide__close" type="button" aria-label="Cerrar guía rápida" data-products-guide-close>
+        <i data-lucide="x" aria-hidden="true"></i>
+      </button>
+
+      <div class="partner-products-guide__intro">
+        <div class="partner-products-guide__hero-icon" aria-hidden="true">
+          <i data-lucide="sparkles"></i>
+        </div>
+        <p class="partner-eyebrow">Primer producto</p>
+        <h2 id="partner-products-guide-title">Guía rápida para crear tu primer producto</h2>
+        <p>Sigue estos pasos para preparar una publicación clara antes de enviarla a revisión.</p>
+      </div>
+
+      <ol class="partner-products-guide__steps" aria-label="Pasos para crear un producto">
+        <li class="partner-products-guide__step">
+          <span class="partner-products-guide__icon"><i data-lucide="list-checks" aria-hidden="true"></i></span>
+          <div><strong>Elige una categoría</strong><span>Selecciona la categoría y plantilla correcta para tu producto.</span></div>
+        </li>
+        <li class="partner-products-guide__step">
+          <span class="partner-products-guide__icon"><i data-lucide="file-pen-line" aria-hidden="true"></i></span>
+          <div><strong>Completa la ficha técnica</strong><span>Agrega nombre, descripción, atributos y códigos requeridos.</span></div>
+        </li>
+        <li class="partner-products-guide__step">
+          <span class="partner-products-guide__icon"><i data-lucide="images" aria-hidden="true"></i></span>
+          <div><strong>Sube al menos 3 imágenes</strong><span>La primera imagen se usará como portada del producto.</span></div>
+        </li>
+        <li class="partner-products-guide__step">
+          <span class="partner-products-guide__icon"><i data-lucide="badge-dollar-sign" aria-hidden="true"></i></span>
+          <div><strong>Revisa precio e inventario</strong><span>Confirma precio, stock y datos comerciales antes de enviar.</span></div>
+        </li>
+        <li class="partner-products-guide__step">
+          <span class="partner-products-guide__icon"><i data-lucide="send" aria-hidden="true"></i></span>
+          <div><strong>Envía a revisión</strong><span>El equipo revisará la publicación antes de hacerla visible.</span></div>
+        </li>
+      </ol>
+
+      <div class="partner-products-guide__actions">
+        <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">
+          <i data-lucide="arrow-right" aria-hidden="true"></i>
+          <span>Crear producto</span>
+        </a>
+        <button class="partner-button partner-button--secondary" type="button" data-products-guide-close>Cerrar</button>
+      </div>
+    </article>
+  </dialog>
 </main>
+{% endblock %}
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ url_for('static', filename='js/partners-products.js') }}" defer></script>
 {% endblock %}
