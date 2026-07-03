@@ -394,20 +394,28 @@
   initializePartnerSelects(root);
 
   function initializeAttributeQuickOptions(rootEl) {
-    rootEl.querySelectorAll("[data-quick-options]").forEach((container) => {
+    const chipSelector = ".partner-attribute-chip, .partner-variant-suggestion";
+    rootEl.querySelectorAll("[data-quick-options], [data-field-quick-options]").forEach((container) => {
       const label = container.closest("label");
-      const input = label?.querySelector("input, select, textarea");
+      const input = label?.querySelector("input, textarea") || label?.querySelector("select");
+      const unitSelect = label?.querySelector("[data-unit-select]");
       if (!input) return;
 
       function syncChips() {
-        container.querySelectorAll(".partner-attribute-chip").forEach((chip) => {
-          chip.setAttribute("aria-pressed", String(chip.dataset.value === input.value));
+        container.querySelectorAll(chipSelector).forEach((chip) => {
+          const valueMatches = chip.dataset.value === input.value;
+          const unitMatches = !chip.dataset.unit || !unitSelect || chip.dataset.unit === unitSelect.value;
+          chip.setAttribute("aria-pressed", String(valueMatches && unitMatches));
         });
       }
 
-      container.querySelectorAll(".partner-attribute-chip").forEach((chip) => {
+      container.querySelectorAll(chipSelector).forEach((chip) => {
         chip.addEventListener("click", () => {
           input.value = chip.dataset.value;
+          if (chip.dataset.unit && unitSelect) {
+            unitSelect.value = chip.dataset.unit;
+            unitSelect.dispatchEvent(new Event("change", { bubbles: true }));
+          }
           input.dispatchEvent(new Event("input", { bubbles: true }));
           input.dispatchEvent(new Event("change", { bubbles: true }));
           syncChips();
@@ -415,6 +423,7 @@
       });
 
       input.addEventListener("input", syncChips);
+      if (unitSelect) unitSelect.addEventListener("change", syncChips);
     });
   }
 
@@ -449,6 +458,169 @@
   }
 
   initializeConditionalFields(root);
+
+  function initializeVariantBuilder(rootEl) {
+    const section = rootEl.querySelector("[data-variants-section]");
+    if (!section) return;
+
+    const toggle = section.querySelector("[data-variants-toggle]");
+    const panel = section.querySelector("[data-variants-panel]");
+    const axesContainer = section.querySelector("[data-variant-axes]");
+    const generateBtn = section.querySelector("[data-generate-variants]");
+    const table = section.querySelector("[data-variant-table]");
+    const rowsContainer = section.querySelector("[data-variant-rows]");
+    const rowTemplate = section.querySelector("[data-variant-row-template]");
+    const message = section.querySelector("[data-variant-message]");
+    const addRowBtn = section.querySelector("[data-add-variant-row]");
+    const MAX_COMBINATIONS = 12;
+
+    if (toggle && panel) {
+      toggle.addEventListener("change", () => {
+        panel.hidden = !toggle.checked;
+      });
+    }
+
+    function showMessage(text, kind = "info") {
+      if (!message) return;
+      message.textContent = text || "";
+      message.dataset.kind = kind;
+      message.hidden = !text;
+    }
+
+    function axisValues(axis) {
+      return Array.from(axis.querySelectorAll("[data-axis-value]")).map((chip) => chip.dataset.axisValue);
+    }
+
+    function addAxisChip(axis, rawValue) {
+      const value = String(rawValue).trim();
+      if (!value) return;
+      if (axisValues(axis).includes(value)) return;
+      const chips = axis.querySelector("[data-axis-chips]");
+      const chip = document.createElement("span");
+      chip.className = "partner-variant-chip";
+      chip.dataset.axisValue = value;
+      const unit = axis.dataset.axisUnit;
+      chip.innerHTML = `<span>${value}${unit ? ` ${unit}` : ""}</span><button type="button" aria-label="Quitar ${value}">&times;</button>`;
+      chip.querySelector("button").addEventListener("click", () => chip.remove());
+      chips.appendChild(chip);
+    }
+
+    function clearAxis(axis) {
+      axis.querySelectorAll("[data-axis-value]").forEach((chip) => chip.remove());
+    }
+
+    if (axesContainer) {
+      axesContainer.querySelectorAll("[data-variant-axis]").forEach((axis) => {
+        const input = axis.querySelector("[data-axis-input]");
+        if (input) {
+          input.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === ",") {
+              event.preventDefault();
+              addAxisChip(axis, input.value.replace(/,+$/, ""));
+              input.value = "";
+            }
+          });
+          input.addEventListener("blur", () => {
+            if (input.value.trim()) {
+              addAxisChip(axis, input.value);
+              input.value = "";
+            }
+          });
+        }
+        axis.querySelectorAll("[data-axis-suggestion]").forEach((btn) => {
+          btn.addEventListener("click", () => addAxisChip(axis, btn.dataset.axisSuggestion));
+        });
+      });
+
+      // Al ocultarse un eje por condición (mismo mecanismo que los campos), limpiar sus valores
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          const axis = mutation.target;
+          if (axis.hasAttribute("hidden")) clearAxis(axis);
+        });
+      });
+      axesContainer.querySelectorAll("[data-variant-axis][data-condition-field]").forEach((axis) => {
+        observer.observe(axis, { attributes: true, attributeFilter: ["hidden"] });
+      });
+    }
+
+    function visibleAxesWithValues() {
+      if (!axesContainer) return [];
+      return Array.from(axesContainer.querySelectorAll("[data-variant-axis]"))
+        .filter((axis) => !axis.hidden)
+        .map((axis) => ({
+          label: axis.dataset.axisLabel,
+          unit: axis.dataset.axisUnit,
+          values: axisValues(axis),
+        }))
+        .filter((axis) => axis.values.length > 0);
+    }
+
+    function cartesian(axes) {
+      return axes.reduce(
+        (acc, axis) => acc.flatMap((combo) => axis.values.map((value) => [...combo, { value, unit: axis.unit }])),
+        [[]]
+      );
+    }
+
+    function existingRowData() {
+      const data = new Map();
+      rowsContainer.querySelectorAll("[data-variant-row]").forEach((row) => {
+        const name = row.querySelector("[name='variant_name[]']")?.value;
+        if (!name) return;
+        data.set(name, {
+          price: row.querySelector("[name='variant_price[]']")?.value || "",
+          stock: row.querySelector("[name='variant_stock[]']")?.value || "",
+        });
+      });
+      return data;
+    }
+
+    function buildRow(name, price, stock, readonly) {
+      const fragment = rowTemplate.content.cloneNode(true);
+      const row = fragment.querySelector("[data-variant-row]");
+      const nameInput = row.querySelector("[name='variant_name[]']");
+      nameInput.value = name;
+      if (readonly) nameInput.readOnly = true;
+      row.querySelector("[name='variant_price[]']").value = price;
+      row.querySelector("[name='variant_stock[]']").value = stock;
+      return row;
+    }
+
+    if (generateBtn) {
+      generateBtn.addEventListener("click", () => {
+        const axes = visibleAxesWithValues();
+        if (!axes.length) {
+          showMessage("Agrega al menos un valor en algún eje para generar combinaciones.", "error");
+          return;
+        }
+        const combos = cartesian(axes);
+        if (combos.length > MAX_COMBINATIONS) {
+          showMessage(`Demasiadas combinaciones (${combos.length}). El máximo es ${MAX_COMBINATIONS}; reduce los valores.`, "error");
+          return;
+        }
+        const previous = existingRowData();
+        rowsContainer.innerHTML = "";
+        combos.forEach((combo) => {
+          const name = combo.map((part) => (part.unit ? `${part.value} ${part.unit}` : part.value)).join(" / ");
+          const prev = previous.get(name) || { price: "", stock: "" };
+          rowsContainer.appendChild(buildRow(name, prev.price, prev.stock, true));
+        });
+        table.hidden = false;
+        showMessage(`${combos.length} variante${combos.length === 1 ? "" : "s"} generada${combos.length === 1 ? "" : "s"}. Completa precio y stock.`);
+        dirty = true;
+      });
+    }
+
+    if (addRowBtn) {
+      addRowBtn.addEventListener("click", () => {
+        rowsContainer.appendChild(buildRow("", "", "", false));
+        table.hidden = false;
+      });
+    }
+  }
+
+  initializeVariantBuilder(root);
 
   document.querySelectorAll(".partner-draft-upload--document input[type='file']").forEach((input) => {
     input.addEventListener("change", () => {

@@ -14,7 +14,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import create_app
-from app.extensions import db
+from app.extensions import db, limiter
 
 
 def _database_name() -> str:
@@ -44,6 +44,9 @@ def app():
     expected_database = _database_name()
     application = create_app()
     application.config["TESTING"] = True
+    application.config["WTF_CSRF_ENABLED"] = False
+    application.config["RATELIMIT_ENABLED"] = False
+    limiter.enabled = False
 
     with application.app_context():
         actual_database = db.session.execute(

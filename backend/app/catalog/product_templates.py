@@ -49,6 +49,15 @@ class ProductTemplateField:
 
 
 @dataclass(frozen=True, slots=True)
+class VariantAxis:
+    key: str
+    label: str
+    unit: str = ""
+    suggestions: tuple[str, ...] = ()
+    condition: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ProductTemplate:
     key: str
     name: str
@@ -56,6 +65,7 @@ class ProductTemplate:
     subcategory_code: str
     fields: tuple[ProductTemplateField, ...] = field(default_factory=tuple)
     required_documents: tuple[str, ...] = ()
+    variant_axes: tuple[VariantAxis, ...] = ()
 
     @property
     def sections(self) -> tuple[str, ...]:
@@ -247,6 +257,23 @@ def field_def(
         quick_options=tuple(quick_options),
         min=min,
         max=max,
+        condition=condition,
+    )
+
+
+def axis_def(
+    key: str,
+    label: str,
+    *,
+    unit: str = "",
+    suggestions: Iterable[str] = (),
+    condition: dict[str, Any] | None = None,
+) -> VariantAxis:
+    return VariantAxis(
+        key=key,
+        label=label,
+        unit=unit,
+        suggestions=tuple(suggestions),
         condition=condition,
     )
 
@@ -573,6 +600,37 @@ _TEMPLATE_FIELD_SETS = {
 }
 
 
+_TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
+    "electronics_phones": (
+        axis_def("color", "Color", suggestions=("Negro", "Blanco", "Azul", "Verde", "Morado")),
+        axis_def("almacenamiento", "Almacenamiento", unit="GB",
+                 suggestions=("64", "128", "256", "512", "1024"),
+                 condition={"field": "tipo_producto", "values": ["Smartphone", "Teléfono básico"]}),
+        axis_def("potencia", "Potencia", unit="W", suggestions=("20", "45", "65"),
+                 condition={"field": "tipo_producto", "values": ["Cargador"]}),
+        axis_def("longitud", "Longitud", unit="cm", suggestions=("100", "150", "200"),
+                 condition={"field": "tipo_producto", "values": ["Cable"]}),
+        axis_def("modelo_compatible", "Modelo compatible",
+                 condition={"field": "tipo_producto", "values": ["Protector", "Soporte", "Repuesto"]}),
+    ),
+    "electronics_computers": (
+        axis_def("color", "Color", suggestions=("Negro", "Plata", "Gris")),
+        axis_def("ram", "RAM", unit="GB", suggestions=("8", "16", "32"),
+                 condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]}),
+        axis_def("almacenamiento", "Almacenamiento", unit="GB", suggestions=("256", "512", "1024"),
+                 condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]}),
+        axis_def("tamano", "Tamaño", unit="in", suggestions=("24", "27", "32"),
+                 condition={"field": "tipo_equipo", "values": ["Monitor"]}),
+    ),
+    "electronics_headphones": (
+        axis_def("color", "Color", suggestions=("Negro", "Blanco", "Azul", "Rojo")),
+    ),
+    "electronics_cameras": (
+        axis_def("color", "Color", suggestions=("Negro", "Blanco", "Gris")),
+    ),
+}
+
+
 PRODUCT_TEMPLATES = {
     key: ProductTemplate(
         key=key,
@@ -581,6 +639,7 @@ PRODUCT_TEMPLATES = {
         subcategory_code=key.upper(),
         fields=fields,
         required_documents=("registro_sanitario",) if key.startswith("beauty_") else (),
+        variant_axes=_TEMPLATE_VARIANT_AXES.get(key, ()),
     )
     for key, fields in _TEMPLATE_FIELD_SETS.items()
 }

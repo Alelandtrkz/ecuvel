@@ -1664,7 +1664,8 @@
   gap: 6px;
 }
 
-.partner-attribute-chip {
+.partner-attribute-chip,
+.partner-variant-suggestion {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1681,13 +1682,15 @@
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.partner-attribute-chip:hover {
+.partner-attribute-chip:hover,
+.partner-variant-suggestion:hover {
   background: #eff6ff;
   border-color: #085df8;
   color: #085df8;
 }
 
-.partner-attribute-chip[aria-pressed="true"] {
+.partner-attribute-chip[aria-pressed="true"],
+.partner-variant-suggestion[aria-pressed="true"] {
   background: #085df8;
   border-color: #085df8;
   color: #fff;
@@ -1921,6 +1924,185 @@
   color: #718296;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.partner-variant-hint {
+  margin: 0 0 14px;
+  color: #718296;
+  font-size: 0.9rem;
+}
+
+.partner-draft-section-hint {
+  margin: 0 0 16px;
+  color: #718296;
+  font-size: 0.9rem;
+}
+
+.partner-unit-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.partner-unit-row > input {
+  flex: 1;
+  min-width: 0;
+}
+
+.partner-unit-row .partner-select--compact {
+  flex: 0 0 auto;
+  width: 96px;
+}
+
+.partner-unit-row .partner-select--compact .partner-select__button {
+  width: 100%;
+}
+
+.partner-unit-row .partner-select--compact .partner-select__native {
+  width: 100%;
+  height: 100%;
+}
+
+/* En el selector compacto no cabe el check; el color de fondo ya marca la opción activa */
+.partner-select--compact .partner-select__option[aria-selected="true"]::after {
+  content: none;
+}
+
+.partner-draft-collapsible {
+  margin-top: 16px;
+  border: 1px solid #e3e9f0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.partner-draft-collapsible summary {
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: #33475b;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.partner-draft-collapsible summary:hover {
+  color: #085df8;
+}
+
+.partner-draft-collapsible[open] summary {
+  border-bottom: 1px solid #e3e9f0;
+}
+
+.partner-draft-collapsible > .partner-draft-grid,
+.partner-draft-collapsible > .partner-draft-field {
+  padding: 16px;
+}
+
+.partner-draft-collapsible > .partner-draft-field--wide {
+  padding-top: 0;
+}
+
+.partner-variant-axes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.partner-variant-axis {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #e3e9f0;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.partner-variant-axis[hidden],
+.partner-variant-table[hidden] {
+  display: none;
+}
+
+.partner-variant-axis__label {
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.partner-variant-axis__label em {
+  color: #718296;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.partner-variant-axis__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.partner-variant-axis__chips:empty {
+  display: none;
+}
+
+.partner-variant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 999px;
+  background: #085df8;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.partner-variant-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.partner-variant-axis__input {
+  border: 1px solid #d8e0ea;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+.partner-variant-axis__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.partner-variant-message {
+  margin: 10px 0 0;
+  font-size: 0.88rem;
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.partner-variant-message[data-kind="error"] {
+  color: #dc2626;
+}
+
+[data-variants-panel] > .partner-variant-table {
+  margin-top: 16px;
+}
+
+[data-variants-panel] > [data-generate-variants],
+[data-variants-panel] > [data-add-variant-row] {
+  margin-top: 4px;
+}
+
+.partner-variant-row input[readonly] {
+  background: #f1f5f9;
+  color: #33475b;
+  font-weight: 600;
 }
 
 .partner-checklist__head {

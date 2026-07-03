@@ -502,6 +502,7 @@ def _apply_form_to_draft(draft: ProductDraft, template: ProductTemplate, form: M
             "package_notes",
         )
     }
+    _apply_product_weight(draft, form)
     draft.variants = _parse_variants(form, draft.seller_sku)
     if draft.title and len(draft.title) < 8:
         errors["title"] = "El título debe ser más descriptivo."
@@ -621,6 +622,30 @@ def _completion_percentage(items: tuple[ChecklistItem, ...]) -> int:
     if not required:
         return 0
     return round(100 * sum(1 for item in required if item.complete) / len(required))
+
+
+def _apply_product_weight(draft: ProductDraft, form: MultiDict) -> None:
+    # El vendedor escribe el peso en g o kg; se guarda tal cual para mostrarlo
+    # igual al recargar, y product_weight_kg queda siempre en kg (canónico).
+    weight_value = _clean_text(form.get("product_weight_value"), 40)
+    weight_unit = _clean_text(form.get("product_weight_unit"), 10)
+    if weight_unit not in ("g", "kg"):
+        weight_unit = "kg"
+    if weight_value is None:
+        if form.get("product_weight_value") is not None:
+            draft.dimensions_data["product_weight_kg"] = None
+            draft.dimensions_data["product_weight_value"] = None
+            draft.dimensions_data["product_weight_unit"] = weight_unit
+        return
+    draft.dimensions_data["product_weight_value"] = weight_value
+    draft.dimensions_data["product_weight_unit"] = weight_unit
+    number = _decimal_or_none(weight_value)
+    if number is None:
+        draft.dimensions_data["product_weight_kg"] = weight_value
+        return
+    if weight_unit == "g":
+        number = number / Decimal("1000")
+    draft.dimensions_data["product_weight_kg"] = str(number)
 
 
 def _clean_text(value: Any, max_length: int) -> str | None:

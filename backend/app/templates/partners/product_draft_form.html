@@ -100,60 +100,231 @@
           </div>
         </section>
 
-        <section class="partner-draft-card" aria-labelledby="variants-title">
+        <section class="partner-draft-card" aria-labelledby="variants-title" data-variants-section>
           <h2 id="variants-title">Variantes</h2>
           <label class="partner-switch">
-            <input type="checkbox" name="has_variants" value="1" {{ "checked" if draft.variants }}>
+            <input type="checkbox" name="has_variants" value="1" {{ "checked" if draft.variants }} data-variants-toggle>
             <span>Este producto tiene variantes</span>
           </label>
           {% if errors.variants %}<p class="partner-error">{{ errors.variants }}</p>{% endif %}
-          <div class="partner-variant-table">
-            <div class="partner-variant-table__head">
-              <span>Nombre</span><span>Precio</span><span>Stock</span>
-            </div>
-            {% for index in range(3) %}
-              {% set variant = draft.variants[index] if draft.variants and index < draft.variants|length else {} %}
-              <div class="partner-variant-row">
-                <input name="variant_name[]" value="{{ variant.get('name', '') }}" placeholder="Ej. Azul / 128GB">
-                <input name="variant_price[]" value="{{ variant.get('price', '') }}" placeholder="0.00">
-                <input name="variant_stock[]" value="{{ variant.get('stock', '') }}" placeholder="0">
+
+          <div data-variants-panel {% if not draft.variants %}hidden{% endif %}>
+            {% if view.template.variant_axes %}
+              <p class="partner-variant-hint">
+                Define los valores que varían (ej. colores, capacidades) y genera las combinaciones automáticamente.
+              </p>
+              <div class="partner-variant-axes" data-variant-axes>
+                {% for axis in view.template.variant_axes %}
+                  <div class="partner-variant-axis"
+                       data-variant-axis="{{ axis.key }}"
+                       data-axis-label="{{ axis.label }}"
+                       data-axis-unit="{{ axis.unit }}"
+                       {% if axis.condition %}
+                         data-condition-field="{{ axis.condition.field }}"
+                         data-condition-values="{{ axis.condition['values'] | join(',') }}"
+                       {% endif %}>
+                    <span class="partner-variant-axis__label">{{ axis.label }}{% if axis.unit %} <em>({{ axis.unit }})</em>{% endif %}</span>
+                    <div class="partner-variant-axis__chips" data-axis-chips></div>
+                    <input type="text" class="partner-variant-axis__input" data-axis-input
+                           placeholder="Escribe un valor y presiona Enter">
+                    {% if axis.suggestions %}
+                      <div class="partner-variant-axis__suggestions">
+                        {% for suggestion in axis.suggestions %}
+                          <button type="button" class="partner-variant-suggestion" data-axis-suggestion="{{ suggestion }}">
+                            {{ suggestion }}{% if axis.unit %} {{ axis.unit }}{% endif %}
+                          </button>
+                        {% endfor %}
+                      </div>
+                    {% endif %}
+                  </div>
+                {% endfor %}
               </div>
-            {% endfor %}
+              <button type="button" class="partner-button partner-button--secondary" data-generate-variants>
+                Generar combinaciones
+              </button>
+              <p class="partner-variant-message" data-variant-message hidden></p>
+            {% endif %}
+
+            <div class="partner-variant-table" data-variant-table {% if view.template.variant_axes and not draft.variants %}hidden{% endif %}>
+              <div class="partner-variant-table__head">
+                <span>Variante</span><span>Precio</span><span>Stock</span>
+              </div>
+              <div data-variant-rows>
+                {% for variant in draft.variants %}
+                  <div class="partner-variant-row" data-variant-row>
+                    <input name="variant_name[]" value="{{ variant.get('name', '') }}"
+                           {% if view.template.variant_axes %}readonly{% endif %}
+                           placeholder="Ej. Azul / 128 GB">
+                    <input name="variant_price[]" value="{{ variant.get('price', '') }}" placeholder="0.00" inputmode="decimal">
+                    <input name="variant_stock[]" value="{{ variant.get('stock', '') }}" placeholder="0" inputmode="numeric">
+                  </div>
+                {% endfor %}
+              </div>
+            </div>
+            {% if not view.template.variant_axes %}
+              <button type="button" class="partner-button partner-button--secondary" data-add-variant-row>
+                + Añadir variante
+              </button>
+            {% endif %}
           </div>
+
+          <template data-variant-row-template>
+            <div class="partner-variant-row" data-variant-row>
+              <input name="variant_name[]" value="" placeholder="Ej. Azul / 128 GB">
+              <input name="variant_price[]" value="" placeholder="0.00" inputmode="decimal">
+              <input name="variant_stock[]" value="" placeholder="0" inputmode="numeric">
+            </div>
+          </template>
         </section>
 
         <section class="partner-draft-card" aria-labelledby="dimensions-title">
           <h2 id="dimensions-title">Dimensiones y embalaje</h2>
-          <div class="partner-draft-grid partner-draft-grid--4">
-            {% for key, label in [
-              ("product_weight_kg", "Peso producto kg"),
-              ("product_length_cm", "Largo producto cm"),
-              ("product_width_cm", "Ancho producto cm"),
-              ("product_height_cm", "Alto producto cm"),
-              ("package_weight_kg", "Peso paquete kg"),
-              ("package_length_cm", "Largo paquete cm"),
-              ("package_width_cm", "Ancho paquete cm"),
-              ("package_height_cm", "Alto paquete cm")
-            ] %}
-              <label class="partner-draft-field">
-                <span>{{ label }}</span>
-                <input name="{{ key }}" value="{{ dimensions.get(key, '') }}" placeholder="0.00">
-                {% if errors.get(key) %}<em class="partner-error">{{ errors.get(key) }}</em>{% endif %}
-              </label>
-            {% endfor %}
+          <p class="partner-draft-section-hint">
+            El peso es obligatorio. Las dimensiones del paquete son opcionales, pero ayudan a ECUVEL
+            a calcular costos de envío más precisos para tus ventas.
+          </p>
+          <div class="partner-draft-grid partner-draft-grid--2">
+            {% set _weight_value = dimensions.get('product_weight_value') or dimensions.get('product_weight_kg', '') %}
+            {% set _weight_unit = dimensions.get('product_weight_unit') or 'kg' %}
+            <label class="partner-draft-field">
+              <span>Peso del producto&nbsp;<strong aria-label="obligatorio">*</strong></span>
+              <small>Elige un peso común o escribe el valor y su unidad.</small>
+              <div class="partner-unit-row">
+                <input name="product_weight_value" value="{{ _weight_value }}" placeholder="0.00" inputmode="decimal">
+                <div class="partner-select partner-select--compact" data-partner-select>
+                  <select class="partner-select__native" name="product_weight_unit" data-unit-select
+                          data-partner-select-native aria-label="Unidad de peso">
+                    <option value="kg" {{ "selected" if _weight_unit == "kg" }}>kg</option>
+                    <option value="g" {{ "selected" if _weight_unit == "g" }}>g</option>
+                  </select>
+                  <button class="partner-select__button"
+                          type="button"
+                          aria-haspopup="listbox"
+                          aria-expanded="false"
+                          data-partner-select-button>
+                    <span data-partner-select-label>{{ _weight_unit }}</span>
+                    <i data-lucide="chevron-down" aria-hidden="true"></i>
+                  </button>
+                  <div class="partner-select__menu" role="listbox" data-partner-select-menu>
+                    <button class="partner-select__option" type="button" role="option"
+                            data-value="kg" aria-selected="{{ 'true' if _weight_unit == 'kg' else 'false' }}">
+                      kg
+                    </button>
+                    <button class="partner-select__option" type="button" role="option"
+                            data-value="g" aria-selected="{{ 'true' if _weight_unit == 'g' else 'false' }}">
+                      g
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="partner-attribute-quick-options" data-field-quick-options>
+                {% for chip_label, chip_value, chip_unit in [
+                  ("100 g", "100", "g"), ("250 g", "250", "g"), ("500 g", "500", "g"),
+                  ("1 kg", "1", "kg"), ("2 kg", "2", "kg"), ("5 kg", "5", "kg")
+                ] %}
+                  <button type="button" class="partner-variant-suggestion"
+                          data-value="{{ chip_value }}" data-unit="{{ chip_unit }}"
+                          aria-pressed="{{ 'true' if _weight_value == chip_value and _weight_unit == chip_unit else 'false' }}">
+                    {{ chip_label }}
+                  </button>
+                {% endfor %}
+              </div>
+              {% if errors.get("product_weight_kg") %}<em class="partner-error">{{ errors.get("product_weight_kg") }}</em>{% endif %}
+            </label>
           </div>
-          <label class="partner-draft-field partner-draft-field--wide">
-            <span>Notas de embalaje</span>
-            <textarea name="package_notes" rows="3">{{ dimensions.get("package_notes", "") }}</textarea>
-          </label>
+          {% set _ns = namespace(has_optional=false) %}
+          {% for _key in ["product_length_cm", "product_width_cm", "product_height_cm",
+                          "package_weight_kg", "package_length_cm", "package_width_cm",
+                          "package_height_cm", "package_notes"] %}
+            {% if dimensions.get(_key) %}{% set _ns.has_optional = true %}{% endif %}
+          {% endfor %}
+          <details class="partner-draft-collapsible" {% if _ns.has_optional %}open{% endif %}>
+            <summary>Datos de envío (opcional)</summary>
+            <div class="partner-draft-grid partner-draft-grid--4">
+              {% for key, label in [
+                ("product_length_cm", "Largo producto cm"),
+                ("product_width_cm", "Ancho producto cm"),
+                ("product_height_cm", "Alto producto cm"),
+                ("package_weight_kg", "Peso paquete kg"),
+                ("package_length_cm", "Largo paquete cm"),
+                ("package_width_cm", "Ancho paquete cm"),
+                ("package_height_cm", "Alto paquete cm")
+              ] %}
+                <label class="partner-draft-field">
+                  <span>{{ label }}</span>
+                  <input name="{{ key }}" value="{{ dimensions.get(key, '') }}" placeholder="0.00" inputmode="decimal">
+                  {% if errors.get(key) %}<em class="partner-error">{{ errors.get(key) }}</em>{% endif %}
+                </label>
+              {% endfor %}
+            </div>
+            <label class="partner-draft-field partner-draft-field--wide">
+              <span>Notas de embalaje</span>
+              <textarea name="package_notes" rows="3">{{ dimensions.get("package_notes", "") }}</textarea>
+            </label>
+          </details>
         </section>
 
         <section class="partner-draft-card" aria-labelledby="warranty-title">
           <h2 id="warranty-title">Garantía</h2>
-          <div class="partner-draft-grid partner-draft-grid--3">
-            <label class="partner-draft-field"><span>Tipo</span><input name="warranty_type" value="{{ warranty.get('type', '') }}" placeholder="Garantía de tienda"></label>
-            <label class="partner-draft-field"><span>Duración</span><input name="warranty_duration" value="{{ warranty.get('duration', '') }}" placeholder="12"></label>
-            <label class="partner-draft-field"><span>Unidad</span><input name="warranty_unit" value="{{ warranty.get('unit', '') }}" placeholder="meses"></label>
+          {% set _warranty_type = warranty.get('type', '') %}
+          {% set _warranty_duration = warranty.get('duration', '') %}
+          {% set _warranty_unit = warranty.get('unit') or 'meses' %}
+          <div class="partner-draft-grid partner-draft-grid--2">
+            <label class="partner-draft-field">
+              <span>Tipo</span>
+              <input name="warranty_type" value="{{ _warranty_type }}" placeholder="Ej. Garantía de tienda">
+              <div class="partner-attribute-quick-options" data-field-quick-options>
+                {% for chip in ["Garantía de tienda", "Garantía de fábrica", "Sin garantía"] %}
+                  <button type="button" class="partner-variant-suggestion" data-value="{{ chip }}"
+                          aria-pressed="{{ 'true' if _warranty_type == chip else 'false' }}">
+                    {{ chip }}
+                  </button>
+                {% endfor %}
+              </div>
+            </label>
+            <label class="partner-draft-field">
+              <span>Duración</span>
+              <div class="partner-unit-row">
+                <input name="warranty_duration" value="{{ _warranty_duration }}" placeholder="12" inputmode="numeric">
+                <div class="partner-select partner-select--compact" data-partner-select>
+                  <select class="partner-select__native" name="warranty_unit" data-unit-select
+                          data-partner-select-native aria-label="Unidad de duración">
+                    <option value="meses" {{ "selected" if _warranty_unit == "meses" }}>meses</option>
+                    <option value="días" {{ "selected" if _warranty_unit == "días" }}>días</option>
+                  </select>
+                  <button class="partner-select__button"
+                          type="button"
+                          aria-haspopup="listbox"
+                          aria-expanded="false"
+                          data-partner-select-button>
+                    <span data-partner-select-label>{{ _warranty_unit }}</span>
+                    <i data-lucide="chevron-down" aria-hidden="true"></i>
+                  </button>
+                  <div class="partner-select__menu" role="listbox" data-partner-select-menu>
+                    <button class="partner-select__option" type="button" role="option"
+                            data-value="meses" aria-selected="{{ 'true' if _warranty_unit == 'meses' else 'false' }}">
+                      meses
+                    </button>
+                    <button class="partner-select__option" type="button" role="option"
+                            data-value="días" aria-selected="{{ 'true' if _warranty_unit == 'días' else 'false' }}">
+                      días
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="partner-attribute-quick-options" data-field-quick-options>
+                {% for chip_label, chip_value, chip_unit in [
+                  ("30 días", "30", "días"), ("3 meses", "3", "meses"), ("6 meses", "6", "meses"),
+                  ("12 meses", "12", "meses"), ("24 meses", "24", "meses")
+                ] %}
+                  <button type="button" class="partner-variant-suggestion"
+                          data-value="{{ chip_value }}" data-unit="{{ chip_unit }}"
+                          aria-pressed="{{ 'true' if _warranty_duration == chip_value and _warranty_unit == chip_unit else 'false' }}">
+                    {{ chip_label }}
+                  </button>
+                {% endfor %}
+              </div>
+            </label>
           </div>
           <label class="partner-draft-field partner-draft-field--wide"><span>Condiciones</span><textarea name="warranty_conditions" rows="3">{{ warranty.get("conditions", "") }}</textarea></label>
         </section>
