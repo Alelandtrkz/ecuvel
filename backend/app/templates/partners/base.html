@@ -17,6 +17,7 @@
     <a class="{{ 'is-active' if current_partner_tab|default('') == 'products' else '' }}" href="{{ url_for('partners.products') }}">Productos</a>
     <a class="{{ 'is-active' if current_partner_tab|default('') == 'my_products' else '' }}" href="{{ url_for('partners.my_products') }}">Mis productos</a>
     <a class="{{ 'is-active' if current_partner_tab|default('') == 'orders' else '' }}" href="{{ url_for('partners.partner_orders') }}">Pedidos</a>
+    <a class="{{ 'is-active' if current_partner_tab|default('') == 'sales' else '' }}" href="{{ url_for('partners.partner_sales') }}">Ventas</a>
     <a class="{{ 'is-active' if current_partner_tab|default('') == 'reviews' else '' }}" href="{{ url_for('partners.partner_reviews') }}">Reseñas</a>
     <span aria-disabled="true" title="Disponible después del onboarding">Analítica</span>
   </nav>

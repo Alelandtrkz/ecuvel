@@ -105,6 +105,11 @@ class Store(
         back_populates="store",
     )
 
+    payouts: Mapped[list["SellerPayout"]] = relationship(
+        "SellerPayout",
+        back_populates="store",
+    )
+
     product_code_counter: Mapped["StoreProductCounter | None"] = relationship(
         "StoreProductCounter",
         back_populates="store",

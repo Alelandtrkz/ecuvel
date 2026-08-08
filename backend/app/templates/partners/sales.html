@@ -1,0 +1,216 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Ventas | ECUVEL Partners{% endblock %}
+
+{% block content %}
+<main class="partner-page partner-page--wide partner-sales-page" data-sales-page>
+  <header class="partner-sales-heading">
+    <div>
+      <p class="partner-eyebrow">{{ page.store.store_name }} / Ventas</p>
+      <h1>Ventas</h1>
+      <p>Consulta el rendimiento de tu tienda, tus ingresos y los pagos realizados por ECUVEL.</p>
+    </div>
+    <div class="partner-sales-heading__actions">
+      <div class="partner-sales-period" data-sales-select>
+        <label class="visually-hidden" for="sales-period">Período</label>
+        <select id="sales-period" data-sales-select-native>
+          {% for value, label in page.period_options %}
+            <option value="{{ value }}" {{ 'selected' if page.period.key == value else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button type="button" aria-haspopup="listbox" aria-expanded="false" data-sales-select-button>
+          <i data-lucide="calendar-range" aria-hidden="true"></i>
+          <span data-sales-select-label>{{ page.period.label }}</span>
+          <i data-lucide="chevron-down" aria-hidden="true"></i>
+        </button>
+        <div class="partner-sales-period__menu" role="listbox" data-sales-select-menu hidden>
+          {% for value, label in page.period_options %}
+            <button type="button" role="option" data-value="{{ value }}" aria-selected="{{ 'true' if page.period.key == value else 'false' }}">
+              <span>{{ label }}</span>{% if page.period.key == value %}<i data-lucide="check" aria-hidden="true"></i>{% endif %}
+            </button>
+          {% endfor %}
+        </div>
+      </div>
+      <a class="partner-sales-export" href="{{ url_for('partners.partner_sales_export', period=page.period.key) }}">
+        <i data-lucide="download" aria-hidden="true"></i>Exportar reporte
+      </a>
+    </div>
+  </header>
+
+  {% if page.has_sales %}
+    <section class="partner-sales-kpis" aria-label="Indicadores principales">
+      <article class="partner-sales-kpi">
+        <div><span>Ventas de productos</span><i data-lucide="shopping-bag" aria-hidden="true"></i></div>
+        <strong>{{ page.metrics.gross_sales|money }}</strong>
+        {% if page.metrics.gross_change_percent is not none %}
+          <span class="partner-sales-trend {{ 'is-negative' if page.metrics.gross_change_percent < 0 else '' }}">
+            <i data-lucide="{{ 'trending-down' if page.metrics.gross_change_percent < 0 else 'trending-up' }}" aria-hidden="true"></i>
+            {{ '%+.1f'|format(page.metrics.gross_change_percent) }}% vs período anterior
+          </span>
+        {% else %}
+          <span class="partner-sales-trend is-neutral">Sin comparación</span>
+        {% endif %}
+        <small>Total vendido antes de descuentos y comisión.</small>
+      </article>
+      <article class="partner-sales-kpi partner-sales-kpi--primary">
+        <div><span>Neto para tu tienda</span><i data-lucide="wallet-cards" aria-hidden="true"></i></div>
+        <strong>{{ page.metrics.seller_net|money }}</strong>
+        <small>Ingresos después de descuentos y comisión.</small>
+      </article>
+      <article class="partner-sales-kpi">
+        <div><span>Pagado por ECUVEL</span><i data-lucide="circle-check-big" aria-hidden="true"></i></div>
+        <strong>{{ page.metrics.paid_by_ecuvel|money }}</strong>
+        <small>Transferencias realmente liquidadas a tu cuenta.</small>
+      </article>
+      <article class="partner-sales-kpi">
+        <div><span>Pendiente de pago</span><i data-lucide="clock-3" aria-hidden="true"></i></div>
+        <strong>{{ page.metrics.pending_payout|money }}</strong>
+        {% if page.metrics.next_payout_at %}
+          <span class="partner-sales-next"><i data-lucide="calendar-clock" aria-hidden="true"></i>Próximo pago: {{ page.metrics.next_payout_label }}</span>
+        {% else %}
+          <span class="partner-sales-next is-neutral">Sin pagos programados</span>
+        {% endif %}
+        <small>Saldo vendido que ECUVEL todavía no ha liquidado.</small>
+      </article>
+    </section>
+
+    <section class="partner-sales-secondary" aria-label="Métricas comerciales">
+      <article><span><i data-lucide="receipt-text" aria-hidden="true"></i></span><div><small>Pedidos</small><strong>{{ page.metrics.order_count }}</strong></div></article>
+      <article><span><i data-lucide="package-check" aria-hidden="true"></i></span><div><small>Unidades vendidas</small><strong>{{ page.metrics.units_sold }}</strong></div></article>
+      <article><span><i data-lucide="chart-no-axes-combined" aria-hidden="true"></i></span><div><small>Ticket promedio</small><strong>{{ page.metrics.average_ticket|money }}</strong></div></article>
+      <article><span class="is-blue"><i data-lucide="badge-percent" aria-hidden="true"></i></span><div><small>Comisión ECUVEL</small><strong class="is-blue">{{ page.metrics.commission_total|money }}</strong></div></article>
+    </section>
+  {% else %}
+    <section class="partner-sales-empty partner-sales-empty--hero">
+      <span><i data-lucide="chart-no-axes-column-increasing" aria-hidden="true"></i></span>
+      <h2>Todavía no tienes ventas</h2>
+      <p>Cuando recibas pedidos aprobados, aquí podrás consultar tu rendimiento.</p>
+    </section>
+  {% endif %}
+
+  <section class="partner-sales-main-grid">
+    <article class="partner-sales-panel partner-sales-chart-panel">
+      <header>
+        <h2>Evolución de ventas</h2>
+        <div class="partner-sales-chart-controls">
+          <div role="group" aria-label="Métrica del gráfico">
+            <button type="button" class="is-active" data-chart-series="gross">Ventas</button>
+            <button type="button" data-chart-series="net">Neto</button>
+          </div>
+          <div role="group" aria-label="Agrupación del gráfico">
+            <button type="button" class="is-active" data-chart-granularity="day">Diario</button>
+            <button type="button" data-chart-granularity="week">Semanal</button>
+            <button type="button" data-chart-granularity="month">Mensual</button>
+          </div>
+        </div>
+      </header>
+      <div class="partner-sales-chart" data-sales-chart role="img" aria-label="Evolución de ventas para {{ page.period.label }}">
+        <svg viewBox="0 0 900 320" preserveAspectRatio="none" aria-hidden="true" data-sales-chart-svg></svg>
+        <div class="partner-sales-empty" data-sales-chart-empty hidden>
+          <span><i data-lucide="bar-chart-3" aria-hidden="true"></i></span>
+          <p>Aún no hay ventas en este período.</p>
+        </div>
+      </div>
+      <script type="application/json" data-sales-chart-data>{{ page.chart_payload|tojson }}</script>
+    </article>
+
+    <article class="partner-sales-panel partner-sales-top-products">
+      <header>
+        <h2>Productos más vendidos</h2>
+        <div class="partner-sales-mini-toggle" role="group" aria-label="Orden de productos">
+          <button type="button" class="is-active" data-top-products="units">Por unidades</button>
+          <button type="button" data-top-products="revenue">Por ingresos</button>
+        </div>
+      </header>
+      <div data-top-products-list="units">
+        {% for product in page.top_products_by_units %}
+          <article class="partner-sales-product">
+            <img src="{{ product.image_url }}" alt="">
+            <div><strong>{{ product.product_name }}</strong><span>SKU: {{ product.seller_sku }}{% if product.variant_label %} · {{ product.variant_label }}{% endif %}</span></div>
+            <p><strong>{{ product.units }} un.</strong><span>+{{ product.net_revenue|money }}</span></p>
+          </article>
+        {% else %}
+          <div class="partner-sales-empty"><p>Aún no hay productos vendidos.</p></div>
+        {% endfor %}
+      </div>
+      <div data-top-products-list="revenue" hidden>
+        {% for product in page.top_products_by_revenue %}
+          <article class="partner-sales-product">
+            <img src="{{ product.image_url }}" alt="">
+            <div><strong>{{ product.product_name }}</strong><span>SKU: {{ product.seller_sku }}{% if product.variant_label %} · {{ product.variant_label }}{% endif %}</span></div>
+            <p><strong>{{ product.net_revenue|money }}</strong><span>{{ product.units }} un.</span></p>
+          </article>
+        {% else %}
+          <div class="partner-sales-empty"><p>Aún no hay productos vendidos.</p></div>
+        {% endfor %}
+      </div>
+    </article>
+  </section>
+
+  <section class="partner-sales-lower-grid">
+    <article class="partner-sales-panel partner-sales-recent">
+      <header><h2>Pedidos recientes</h2><a href="{{ url_for('partners.partner_orders') }}">Ver todos</a></header>
+      {% if page.recent_sales %}
+        <table><thead><tr><th>Pedido</th><th>Estado</th><th>Total</th></tr></thead><tbody>
+          {% for order in page.recent_sales %}
+            <tr><td><strong>#{{ order.seller_order_number }}</strong><span>{{ order.relative_date }}</span></td><td><span class="partner-sales-order-status partner-sales-order-status--{{ order.status_tone }}">{{ order.status_label }}</span></td><td><strong>{{ order.total|money }}</strong></td></tr>
+          {% endfor %}
+        </tbody></table>
+      {% else %}<div class="partner-sales-empty"><p>No hay pedidos recientes.</p></div>{% endif %}
+    </article>
+
+    <article class="partner-sales-panel partner-sales-payouts">
+      <header>
+        <h2>Pagos de ECUVEL</h2>
+        <nav aria-label="Filtrar pagos" data-payout-tabs>
+          {% for key, label in [('all', 'Todos'), ('pending', 'Pendientes'), ('scheduled', 'Programados'), ('paid', 'Pagados'), ('on_hold', 'En revisión')] %}
+            <button type="button" class="{{ 'is-active' if key == 'all' else '' }}" data-payout-tab="{{ key }}">{{ label }} <span>{{ page.payout_counts[key] }}</span></button>
+          {% endfor %}
+        </nav>
+      </header>
+      {% if page.payout_rows %}
+        <div class="partner-sales-payout-table-wrap">
+          <table class="partner-sales-payout-table">
+            <thead><tr><th>Referencia</th><th>Pedidos</th><th>Importe neto</th><th>Fecha / estimada</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {% for payout in page.payout_rows %}
+                <tr data-payout-row="{{ payout.status_key }}">
+                  <td data-label="Referencia"><strong>{{ payout.reference or '—' }}</strong></td>
+                  <td data-label="Pedidos">{{ payout.order_count }} {{ 'pedido' if payout.order_count == 1 else 'pedidos' }}</td>
+                  <td data-label="Importe neto"><strong>{{ payout.net_total|money }}</strong></td>
+                  <td data-label="Fecha / estimada">{{ payout.date_label }}</td>
+                  <td data-label="Estado"><span class="partner-sales-payout-status partner-sales-payout-status--{{ payout.status_tone }}">{{ payout.status_label }}</span></td>
+                  <td data-label="Acciones">
+                    {% if payout.can_open %}<button type="button" class="partner-sales-view-payout" aria-label="Ver {{ payout.reference }}" data-payout-detail-url="{{ url_for('partners.partner_sales_payout_detail', payout_id=payout.payout_id) }}"><i data-lucide="eye" aria-hidden="true"></i></button>{% else %}<span>—</span>{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="partner-sales-empty" data-payout-filter-empty hidden><p>No hay movimientos en este estado.</p></div>
+      {% else %}
+        <div class="partner-sales-empty"><span><i data-lucide="landmark" aria-hidden="true"></i></span><h3>Aún no tienes pagos de ECUVEL</h3><p>Las liquidaciones aparecerán cuando existan ventas entregadas y elegibles.</p></div>
+      {% endif %}
+    </article>
+  </section>
+
+  <div class="partner-sales-drawer-backdrop" data-sales-drawer-backdrop hidden></div>
+  <aside class="partner-sales-drawer" aria-labelledby="sales-drawer-title" aria-hidden="true" data-sales-drawer>
+    <header><h2 id="sales-drawer-title">Detalle de pago</h2><button type="button" aria-label="Cerrar detalle" data-sales-drawer-close><i data-lucide="x" aria-hidden="true"></i></button></header>
+    <div class="partner-sales-drawer__loading" data-sales-drawer-loading><span></span><p>Cargando liquidación…</p></div>
+    <div class="partner-sales-drawer__error" data-sales-drawer-error hidden></div>
+    <div class="partner-sales-drawer__content" data-sales-drawer-content hidden>
+      <section class="partner-sales-drawer-status"><span data-payout-status-icon><i data-lucide="clock-3" aria-hidden="true"></i></span><div><small>Estado</small><strong data-payout-status></strong></div></section>
+      <dl class="partner-sales-drawer-summary">
+        <div><dt>Referencia</dt><dd data-payout-reference></dd></div><div><dt>Fecha estimada / pagada</dt><dd data-payout-date></dd></div><div><dt>Cuenta destino</dt><dd data-payout-destination></dd></div><div><dt>Pedidos incluidos</dt><dd data-payout-orders></dd></div>
+      </dl>
+      <section class="partner-sales-breakdown"><h3>Desglose financiero</h3><dl><div><dt>Ventas brutas</dt><dd data-payout-gross></dd></div><div><dt>Descuentos aplicados</dt><dd class="is-negative" data-payout-discounts></dd></div><div><dt>Comisión ECUVEL</dt><dd class="is-negative" data-payout-commission></dd></div><div class="is-total"><dt>Total neto a recibir</dt><dd data-payout-net></dd></div></dl></section>
+    </div>
+    <footer data-sales-drawer-footer hidden><a class="partner-sales-receipt" href="#" data-payout-receipt><i data-lucide="download" aria-hidden="true"></i>Descargar comprobante</a><p data-payout-no-receipt>Comprobante no disponible</p></footer>
+  </aside>
+</main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/partners-sales.js') }}" defer></script>
+{% endblock %}

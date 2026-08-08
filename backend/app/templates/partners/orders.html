@@ -19,11 +19,15 @@
     </div>
   </header>
 
+  <p class="partner-orders-feedback" role="status" aria-live="polite" data-orders-feedback hidden></p>
+
   <section class="partner-orders-card" aria-label="Administración de pedidos">
     <nav class="partner-orders-tabs" aria-label="Estado de decisión">
       {% set tabs = [
         ('pending', 'Pendientes', page.metrics.pending),
-        ('approved', 'Aprobados', page.metrics.approved),
+        ('preparation', 'Preparación', page.metrics.preparation),
+        ('logistics', 'En logística', page.metrics.logistics),
+        ('completed', 'Finalizados', page.metrics.completed),
         ('rejected', 'Rechazados', page.metrics.rejected),
         ('all', 'Todos', page.metrics.total)
       ] %}
@@ -32,7 +36,7 @@
            href="{{ url_for('partners.partner_orders', tab=value) }}"
            {% if page.tab == value %}aria-current="page"{% endif %}>
           {{ label }}
-          {% if value == 'pending' and count %}<span data-orders-tab-pending>{{ count }}</span>{% endif %}
+          <span data-orders-tab-count="{{ value }}" {{ 'data-orders-tab-pending' if value == 'pending' else '' }}>{{ count }}</span>
         </a>
       {% endfor %}
     </nav>
@@ -102,7 +106,7 @@
           </tr></thead>
           <tbody data-orders-body>
             {% for order in page.rows %}
-              <tr data-order-row data-order-id="{{ order.seller_order_id }}">
+              <tr data-order-row data-order-id="{{ order.seller_order_id }}" data-order-workflow-stage="{{ order.workflow_stage }}">
                 <td data-label="Pedido">
                   <strong>#{{ order.seller_order_number }}</strong>
                   <span>{{ order.date_label }}<br>{{ order.time_label }}</span>
@@ -114,11 +118,13 @@
                 <td data-label="Total"><strong>${{ '%.2f'|format(order.total) }}</strong><small>{{ order.currency }}</small></td>
                 <td data-label="Pago"><span class="partner-orders-payment"><i data-lucide="circle-check" aria-hidden="true"></i>{{ order.payment_label }}</span><small>{{ order.payment_method_label }}</small></td>
                 <td data-label="Estado">
-                  <span class="partner-orders-status partner-orders-status--{{ order.decision_tone }}" data-order-status>
-                    <i data-lucide="{{ 'clock-3' if order.decision_status == 'pending' else ('circle-check' if order.decision_status == 'approved' else 'circle-x') }}" aria-hidden="true"></i>
-                    <span data-order-status-label>{{ order.decision_label }}</span>
+                  <span class="partner-orders-status partner-orders-status--{{ order.workflow_tone }}" data-order-status>
+                    <i data-lucide="{{ 'clock-3' if order.workflow_stage == 'PENDING' else ('circle-x' if order.workflow_stage == 'REJECTED' else ('triangle-alert' if order.workflow_tone == 'overdue' else 'circle-check')) }}" aria-hidden="true"></i>
+                    <span data-order-status-label>{{ order.workflow_label }}</span>
                   </span>
-                  <small data-order-logistics-label>{{ order.logistical_label }}</small>
+                  <small data-order-logistics-label>
+                    {% if order.package_count %}{{ order.packages_received_count }}/{{ order.package_count }} paquetes recibidos{% else %}{{ order.logistical_label }}{% endif %}
+                  </small>
                 </td>
                 <td data-label="Acciones">
                   <div class="partner-orders-actions">
@@ -128,6 +134,10 @@
                     {% if order.can_decide %}
                       <button type="button" class="partner-orders-approve" data-order-quick-approve>Aprobar</button>
                       <button type="button" class="partner-orders-reject" data-order-quick-reject>Rechazar</button>
+                    {% elif order.workflow_stage == 'PREPARATION' %}
+                      <button type="button" class="partner-orders-approve" data-order-open-preparation data-order-detail-url="{{ order.detail_url }}">
+                        {{ 'Preparar pedido' if order.can_prepare and not order.package_count else 'Ver paquetes' }}
+                      </button>
                     {% endif %}
                   </div>
                 </td>
@@ -164,12 +174,16 @@
     <div class="partner-order-drawer__loading" data-order-drawer-loading><span></span><p>Cargando pedido…</p></div>
     <div class="partner-order-drawer__error" data-order-drawer-error hidden></div>
     <div class="partner-order-drawer__content" data-order-drawer-content hidden>
-      <section class="partner-order-drawer__section"><h3><i data-lucide="package" aria-hidden="true"></i>Productos</h3><div data-drawer-lines></div></section>
-      <section class="partner-order-drawer__section"><h3><i data-lucide="calendar-clock" aria-hidden="true"></i>Fechas operativas</h3><dl class="partner-order-dates"><div><dt>Pago confirmado</dt><dd data-drawer-payment-date></dd></div><div><dt>Debes despachar antes de</dt><dd data-drawer-ship-by></dd></div><div><dt>Entrega estimada</dt><dd data-drawer-delivery-window></dd></div></dl><p class="partner-order-overdue" data-drawer-overdue hidden><i data-lucide="triangle-alert" aria-hidden="true"></i>Despacho atrasado</p></section>
-      <section class="partner-order-drawer__section"><h3><i data-lucide="user-round" aria-hidden="true"></i>Comprador y entrega</h3><div class="partner-order-buyer"><strong data-drawer-buyer></strong><span data-drawer-phone></span></div><div class="partner-order-delivery"><strong data-drawer-delivery-method></strong><span data-drawer-pickup-name></span><span data-drawer-pickup-address></span></div></section>
+      <section class="partner-order-drawer__section"><h3><i data-lucide="package" aria-hidden="true"></i>Productos a preparar</h3><div data-drawer-lines></div></section>
+      <section class="partner-order-drawer__section"><h3><i data-lucide="calendar-clock" aria-hidden="true"></i>Tiempo operativo</h3><dl class="partner-order-dates"><div><dt>Pago confirmado</dt><dd data-drawer-payment-date></dd></div><div><dt>Ecuvel debe recibirlo antes de</dt><dd data-drawer-ship-by></dd></div><div><dt>Entrega estimada al comprador</dt><dd data-drawer-delivery-window></dd></div></dl><p class="partner-order-overdue" data-drawer-overdue hidden><i data-lucide="triangle-alert" aria-hidden="true"></i>Entrega atrasada</p></section>
+      <section class="partner-order-drawer__section" data-drawer-dropoff hidden><h3><i data-lucide="map-pin" aria-hidden="true"></i>Entrega a Ecuvel</h3><div class="partner-order-dropoff"><strong>Entrega flexible</strong><span data-drawer-dropoff-instruction></span><small>No necesitas seleccionar un punto previamente.</small></div></section>
+      <section class="partner-order-drawer__section" data-drawer-packages hidden><h3><i data-lucide="package-check" aria-hidden="true"></i>Paquetes de entrada</h3><div class="partner-order-packages" data-drawer-package-list></div><p class="partner-order-form-error" data-package-error hidden></p></section>
+      <section class="partner-order-drawer__section" data-drawer-timeline hidden><h3><i data-lucide="route" aria-hidden="true"></i>Seguimiento</h3><ol class="partner-order-timeline" data-drawer-timeline-list></ol></section>
+      <section class="partner-order-drawer__section"><h3><i data-lucide="user-round" aria-hidden="true"></i>Comprador y entrega final</h3><div class="partner-order-buyer"><strong data-drawer-buyer></strong><span data-drawer-phone></span></div><div class="partner-order-delivery"><strong data-drawer-delivery-method></strong><span data-drawer-pickup-name></span><span data-drawer-pickup-address></span></div></section>
+      <section class="partner-order-drawer__section" data-drawer-rejection hidden><h3><i data-lucide="circle-x" aria-hidden="true"></i>Rechazo registrado</h3><div class="partner-order-rejection-detail"><strong data-drawer-rejection-reason></strong><p data-drawer-rejection-comment></p><small><span data-drawer-rejected-at></span> · <span data-drawer-rejected-by></span></small></div></section>
       <section class="partner-order-drawer__section"><h3><i data-lucide="receipt-text" aria-hidden="true"></i>Resumen</h3><dl class="partner-order-financial"><div><dt>Subtotal de productos</dt><dd data-drawer-subtotal></dd></div><div><dt>Comisión ECUVEL <button type="button" data-commission-detail>Ver desglose</button></dt><dd data-drawer-commission></dd></div><div><dt>Total neto a recibir</dt><dd data-drawer-net></dd></div></dl><p class="partner-order-refund-note" data-drawer-refund hidden>Este rechazo requiere resolución o reembolso parcial por ECUVEL.</p></section>
     </div>
-    <footer data-order-drawer-actions hidden><button type="button" class="partner-orders-reject partner-orders-reject--outline" data-drawer-reject>Rechazar</button><button type="button" class="partner-orders-approve" data-drawer-approve><i data-lucide="circle-check" aria-hidden="true"></i>Aprobar pedido</button></footer>
+    <footer data-order-drawer-actions hidden><button type="button" class="partner-orders-reject partner-orders-reject--outline" data-drawer-reject>Rechazar</button><button type="button" class="partner-orders-approve" data-drawer-approve><i data-lucide="circle-check" aria-hidden="true"></i>Aprobar pedido</button><button type="button" class="partner-orders-approve" data-drawer-create-package hidden><i data-lucide="package-plus" aria-hidden="true"></i>Crear paquete</button></footer>
   </aside>
 
   <dialog class="partner-order-dialog" data-order-approve-dialog aria-labelledby="approve-order-title">

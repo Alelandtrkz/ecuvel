@@ -44,6 +44,7 @@ services:
       - partner_contracts_data:/app/private/partner-contracts
       - partner_product_drafts_data:/app/private/partner-product-drafts
       - product_catalog_media_data:/app/private/product-catalog-media
+      - seller_payout_receipts_data:/app/private/seller-payout-receipts
     ports:
       - "8000:8000"
     depends_on:
@@ -69,6 +70,7 @@ services:
       - partner_contracts_data:/app/private/partner-contracts
       - partner_product_drafts_data:/app/private/partner-product-drafts
       - product_catalog_media_data:/app/private/product-catalog-media
+      - seller_payout_receipts_data:/app/private/seller-payout-receipts
     depends_on:
       db:
         condition: service_healthy
@@ -81,3 +83,4 @@ volumes:
   partner_contracts_data:
   partner_product_drafts_data:
   product_catalog_media_data:
+  seller_payout_receipts_data:

@@ -13,6 +13,7 @@
   const approveDialog = root.querySelector("[data-order-approve-dialog]");
   const rejectDialog = root.querySelector("[data-order-reject-dialog]");
   const commissionDialog = root.querySelector("[data-commission-dialog]");
+  const feedback = root.querySelector("[data-orders-feedback]");
   let currentDetail = null;
   let currentRow = null;
   let drawerOrigin = null;
@@ -128,6 +129,62 @@
       container.append(card);
     });
   };
+  const showFeedback = (message, tone = "success") => {
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.className = `partner-orders-feedback partner-orders-feedback--${tone}`;
+    feedback.hidden = false;
+  };
+  const renderPackages = (detail) => {
+    const section = drawer.querySelector("[data-drawer-packages]");
+    const container = drawer.querySelector("[data-drawer-package-list]");
+    section.hidden = !(detail.workflow.stage === "PREPARATION" || detail.inbound_packages.length);
+    container.replaceChildren();
+    if (!detail.inbound_packages.length) {
+      container.append(make("p", "partner-order-packages__empty", "Todavía no has creado paquetes para este pedido."));
+      return;
+    }
+    detail.inbound_packages.forEach((item) => {
+      const card = make("article", "partner-order-package-card");
+      const info = make("div", "partner-order-package-card__info");
+      info.append(
+        make("strong", "", item.package_code),
+        make("span", `partner-order-package-state partner-order-package-state--${item.status.toLowerCase()}`, item.status_label),
+      );
+      if (item.received_location) info.append(make("small", "", `Recibido en ${item.received_location}`));
+      const actions = make("div", "partner-order-package-card__actions");
+      if (item.can_print) {
+        const print = make("a", "partner-order-package-link", item.status === "CREATED" ? "Imprimir etiqueta" : "Reimprimir etiqueta");
+        print.href = item.label_url;
+        print.target = "_blank";
+        print.rel = "noopener";
+        actions.append(print);
+      }
+      if (item.can_mark_ready) {
+        const ready = make("button", "partner-order-package-ready", "Marcar listo para Drop-off");
+        ready.type = "button";
+        ready.dataset.packageReadyUrl = item.ready_url;
+        actions.append(ready);
+      }
+      card.append(info, actions);
+      container.append(card);
+    });
+  };
+  const renderTimeline = (detail) => {
+    const section = drawer.querySelector("[data-drawer-timeline]");
+    const list = drawer.querySelector("[data-drawer-timeline-list]");
+    section.hidden = !["LOGISTICS", "COMPLETED"].includes(detail.workflow.stage);
+    list.replaceChildren();
+    detail.timeline.forEach((step) => {
+      const item = make("li", step.is_complete ? "is-complete" : "");
+      const marker = make("span", "partner-order-timeline__marker", step.is_complete ? "✓" : "○");
+      const info = make("div");
+      info.append(make("strong", "", step.label));
+      if (step.date_label) info.append(make("small", "", step.date_label));
+      item.append(marker, info);
+      list.append(item);
+    });
+  };
   const renderDetail = (detail) => {
     currentDetail = detail;
     setText("[data-drawer-order-number]", `Orden #${detail.seller_order_number}`, drawer);
@@ -138,16 +195,33 @@
     drawer.querySelector("[data-drawer-overdue]").hidden = !detail.is_dispatch_overdue;
     setText("[data-drawer-buyer]", detail.buyer.name, drawer);
     setText("[data-drawer-phone]", detail.buyer.phone || "Teléfono no registrado", drawer);
-    setText("[data-drawer-delivery-method]", detail.delivery.method, drawer);
-    setText("[data-drawer-pickup-name]", detail.delivery.name, drawer);
-    setText("[data-drawer-pickup-address]", detail.delivery.address, drawer);
+    setText("[data-drawer-delivery-method]", detail.buyer_delivery.method, drawer);
+    setText("[data-drawer-pickup-name]", detail.buyer_delivery.name, drawer);
+    setText("[data-drawer-pickup-address]", detail.buyer_delivery.address, drawer);
+    setText("[data-drawer-dropoff-instruction]", detail.seller_dropoff.instruction, drawer);
+    drawer.querySelector("[data-drawer-dropoff]").hidden = detail.workflow.stage !== "PREPARATION";
+    renderPackages(detail);
+    renderTimeline(detail);
     setText("[data-drawer-subtotal]", money(detail.financials.product_subtotal, detail.financials.currency), drawer);
     setText("[data-drawer-commission]", `− ${money(detail.financials.commission_total, detail.financials.currency)}`, drawer);
     setText("[data-drawer-net]", money(detail.financials.seller_net_total, detail.financials.currency), drawer);
+    const rejection = drawer.querySelector("[data-drawer-rejection]");
+    rejection.hidden = detail.decision.status !== "REJECTED";
+    setText("[data-drawer-rejection-reason]", detail.decision.rejection_reason || "Motivo no registrado", drawer);
+    setText("[data-drawer-rejection-comment]", detail.decision.rejection_comment || "Sin comentario", drawer);
+    setText("[data-drawer-rejected-at]", detail.decision.rejected_at_label || "Fecha no registrada", drawer);
+    setText("[data-drawer-rejected-by]", detail.decision.rejected_by_name || "Sistema Ecuvel", drawer);
     drawer.querySelector("[data-drawer-refund]").hidden = !detail.decision.requires_refund_resolution;
     drawer.querySelector("[data-drawer-approve]").hidden = !detail.decision.can_approve;
     drawer.querySelector("[data-drawer-reject]").hidden = !detail.decision.can_reject;
-    drawerActions.hidden = !(detail.decision.can_approve || detail.decision.can_reject);
+    const createPackage = drawer.querySelector("[data-drawer-create-package]");
+    createPackage.hidden = !detail.workflow.can_prepare;
+    drawerActions.hidden = !(
+      detail.decision.can_approve
+      || detail.decision.can_reject
+      || detail.workflow.can_prepare
+    );
+    window.lucide?.createIcons();
   };
   const loadDetail = async (button) => {
     drawerOrigin = button;
@@ -171,6 +245,70 @@
     }
   };
   root.querySelectorAll("[data-order-detail-url]").forEach((button) => button.addEventListener("click", () => loadDetail(button)));
+
+  const refreshCurrentDetail = async () => {
+    if (!currentDetail) return;
+    const response = await fetch(`/partners/orders/${currentDetail.seller_order_id}/detail`, {
+      headers: { Accept: "application/json" },
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(payload.error || "No fue posible actualizar el pedido.");
+    renderDetail(payload.order);
+    if (currentRow) {
+      const status = currentRow.querySelector("[data-order-status]");
+      if (status) status.className = `partner-orders-status partner-orders-status--${payload.order.workflow.tone}`;
+      setText("[data-order-status-label]", payload.order.workflow.label, currentRow);
+      const received = payload.order.inbound_packages.filter((item) => item.status === "RECEIVED_BY_ECUVEL").length;
+      setText(
+        "[data-order-logistics-label]",
+        payload.order.inbound_packages.length
+          ? `${received}/${payload.order.inbound_packages.length} paquetes recibidos`
+          : payload.order.logistics.label,
+        currentRow,
+      );
+      const preparationButton = currentRow.querySelector("[data-order-open-preparation]");
+      if (preparationButton) preparationButton.textContent = "Ver paquetes";
+    }
+  };
+  const postPackageAction = async (url, submitButton, successMessage) => {
+    const errorNode = drawer.querySelector("[data-package-error]");
+    submitButton.disabled = true;
+    errorNode.hidden = true;
+    try {
+      const formData = new FormData();
+      formData.set("csrf_token", csrfToken);
+      const response = await fetch(url, {
+        method: "POST",
+        body: formData,
+        headers: { Accept: "application/json", "X-Requested-With": "XMLHttpRequest" },
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(payload.error || "No fue posible actualizar el paquete.");
+      await refreshCurrentDetail();
+      showFeedback(successMessage);
+    } catch (error) {
+      errorNode.textContent = error.message;
+      errorNode.hidden = false;
+    } finally {
+      submitButton.disabled = false;
+    }
+  };
+  drawer.querySelector("[data-drawer-create-package]")?.addEventListener("click", (event) => {
+    postPackageAction(
+      `/partners/orders/${currentDetail.seller_order_id}/packages`,
+      event.currentTarget,
+      "Paquete creado. La etiqueta ya está disponible para imprimir.",
+    );
+  });
+  drawer.querySelector("[data-drawer-package-list]")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-package-ready-url]");
+    if (!button) return;
+    postPackageAction(
+      button.dataset.packageReadyUrl,
+      button,
+      "Paquete listo para entregarlo en cualquier punto Ecuvel Drop-off.",
+    );
+  });
 
   const closeDialog = (dialog) => { if (dialog?.open) dialog.close(); };
   root.querySelectorAll("[data-dialog-close]").forEach((button) => button.addEventListener("click", () => closeDialog(button.closest("dialog"))));
@@ -225,17 +363,19 @@
 
   const updateMetrics = (metrics) => {
     setText("[data-orders-pending-count]", String(metrics.pending));
-    const tabCount = root.querySelector("[data-orders-tab-pending]");
-    if (tabCount) tabCount.textContent = String(metrics.pending);
+    ["pending", "preparation", "logistics", "completed", "rejected", "total"].forEach((key) => {
+      const tabCount = root.querySelector(`[data-orders-tab-count="${key === "total" ? "all" : key}"]`);
+      if (tabCount) tabCount.textContent = String(metrics[key]);
+    });
   };
   const applyDecision = (payload) => {
     updateMetrics(payload.metrics);
     if (!currentRow) return;
-    const rejected = payload.order.decision_status === "REJECTED";
     const status = currentRow.querySelector("[data-order-status]");
-    status.className = `partner-orders-status partner-orders-status--${rejected ? "rejected" : "approved"}`;
-    setText("[data-order-status-label]", payload.order.decision_label, currentRow);
+    status.className = `partner-orders-status partner-orders-status--${payload.order.workflow_tone}`;
+    setText("[data-order-status-label]", payload.order.workflow_label, currentRow);
     setText("[data-order-logistics-label]", payload.order.logistical_label, currentRow);
+    currentRow.dataset.orderWorkflowStage = payload.order.workflow_stage;
     currentRow.querySelectorAll("[data-order-quick-approve], [data-order-quick-reject]").forEach((button) => button.remove());
     if (root.dataset.activeTab === "pending") {
       currentRow.remove();
@@ -245,6 +385,11 @@
       currentDetail.decision.status = payload.order.decision_status;
       currentDetail.decision.can_approve = false;
       currentDetail.decision.can_reject = false;
+    }
+    if (payload.order.workflow_stage === "PREPARATION") {
+      showFeedback("Pedido aprobado. Ahora debes prepararlo para entregarlo a Ecuvel.");
+    } else if (payload.order.workflow_stage === "REJECTED") {
+      showFeedback("Pedido rechazado. Ecuvel revisará la resolución económica.", "warning");
     }
   };
   const postDecision = async (kind, formData, errorNode, submitButton) => {

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
@@ -15,6 +15,8 @@ from app.models import (
     Order,
     OrderItem,
     PaymentAttempt,
+    SellerInboundPackage,
+    SellerInboundPackageItem,
     SellerOrder,
     Store,
     StoreContractAcceptance,
@@ -25,6 +27,7 @@ from app.models import (
 from app.models.enums import (
     PaymentMethod,
     PaymentStatus,
+    SellerInboundPackageStatus,
     SellerOrderDecisionStatus,
     SellerOrderRejectionReason,
     SellerOrderStatus,
@@ -37,11 +40,23 @@ from app.services.inventory import (
     InventoryServiceError,
     release_consumed_reservation_for_seller_rejection,
 )
+from app.services.partner_order_workflow import (
+    PartnerOrderPrimaryAction,
+    PartnerOrderWorkflowStage,
+    resolve_partner_order_workflow,
+)
 
 
 PAGE_SIZE = 20
 MAX_PAGE = 1000
-VALID_TABS = {"pending", "approved", "rejected", "all"}
+VALID_TABS = {
+    "pending",
+    "preparation",
+    "logistics",
+    "completed",
+    "rejected",
+    "all",
+}
 VALID_DATE_FILTERS = {"", "today", "7d", "30d"}
 ECUADOR_TZ = ZoneInfo("America/Guayaquil")
 REJECTION_REASON_LABELS = {
@@ -91,7 +106,9 @@ class PartnerOrderStoreAccess:
 @dataclass(frozen=True, slots=True)
 class PartnerOrderMetrics:
     pending: int
-    approved: int
+    preparation: int
+    logistics: int
+    completed: int
     rejected: int
     total: int
 
@@ -114,6 +131,15 @@ class PartnerOrderRowView:
     decision_tone: str
     logistical_status: str
     logistical_label: str
+    workflow_stage: str
+    workflow_label: str
+    workflow_tone: str
+    primary_action: str
+    package_count: int
+    packages_received_count: int
+    can_prepare: bool
+    can_print_label: bool
+    can_mark_ready: bool
     date_label: str
     time_label: str
     can_decide: bool
@@ -161,6 +187,28 @@ class PartnerOrderCommissionLineView:
 
 
 @dataclass(frozen=True, slots=True)
+class PartnerInboundPackageView:
+    package_id: uuid.UUID
+    package_code: str
+    barcode: str
+    status: str
+    status_label: str
+    label_url: str
+    can_print: bool
+    can_mark_ready: bool
+    ready_for_dropoff_label: str | None
+    received_label: str | None
+    received_location: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class PartnerOrderTimelineStepView:
+    label: str
+    is_complete: bool
+    date_label: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PartnerOrderDetailView:
     seller_order_id: uuid.UUID
     seller_order_number: str
@@ -172,8 +220,8 @@ class PartnerOrderDetailView:
     delivery_window_label: str | None
     is_dispatch_overdue: bool
     delivery_method_label: str
-    pickup_point_name: str
-    pickup_point_address: str
+    buyer_pickup_point_name: str
+    buyer_pickup_point_address: str
     lines: tuple[PartnerOrderLineView, ...]
     product_subtotal: Decimal
     commission_total: Decimal
@@ -181,12 +229,20 @@ class PartnerOrderDetailView:
     currency: str
     commission_lines: tuple[PartnerOrderCommissionLineView, ...]
     commission_breakdown_available: bool
+    workflow_stage: str
+    workflow_label: str
+    workflow_tone: str
+    inbound_packages: tuple[PartnerInboundPackageView, ...]
+    timeline: tuple[PartnerOrderTimelineStepView, ...]
+    can_prepare: bool
     decision_status: str
     decision_label: str
     logistical_status: str
     logistical_label: str
     rejection_reason_label: str | None
     rejection_comment: str | None
+    rejected_at_label: str | None
+    rejected_by_name: str | None
     requires_refund_resolution: bool
     can_approve: bool
     can_reject: bool
@@ -199,6 +255,9 @@ class PartnerOrderDecisionResult:
     decision_label: str
     logistical_status: SellerOrderStatus
     logistical_label: str
+    workflow_stage: str
+    workflow_label: str
+    workflow_tone: str
     metrics: PartnerOrderMetrics
     replayed: bool
 
@@ -265,7 +324,61 @@ def _normalize_page(value: str | int | None) -> int:
 
 def _normalize_tab(value: str | None) -> str:
     candidate = (value or "pending").strip().lower()
+    if candidate == "approved":
+        return "preparation"
     return candidate if candidate in VALID_TABS else "pending"
+
+
+def _workflow_conditions():
+    active_package_exists = exists(
+        select(SellerInboundPackage.id).where(
+            SellerInboundPackage.seller_order_id == SellerOrder.id,
+            SellerInboundPackage.status != SellerInboundPackageStatus.CANCELLED,
+        )
+    )
+    unreceived_package_exists = exists(
+        select(SellerInboundPackage.id).where(
+            SellerInboundPackage.seller_order_id == SellerOrder.id,
+            SellerInboundPackage.status.in_(
+                {
+                    SellerInboundPackageStatus.CREATED,
+                    SellerInboundPackageStatus.READY_FOR_DROPOFF,
+                }
+            ),
+        )
+    )
+    pending = and_(
+        SellerOrder.decision_status == SellerOrderDecisionStatus.PENDING,
+        SellerOrder.status == SellerOrderStatus.CONFIRMED,
+    )
+    rejected = SellerOrder.decision_status == SellerOrderDecisionStatus.REJECTED
+    completed = and_(
+        SellerOrder.decision_status == SellerOrderDecisionStatus.APPROVED,
+        SellerOrder.status == SellerOrderStatus.COMPLETED,
+    )
+    operational_approved = and_(
+        SellerOrder.decision_status == SellerOrderDecisionStatus.APPROVED,
+        SellerOrder.status.not_in(
+            {SellerOrderStatus.COMPLETED, SellerOrderStatus.CANCELLED}
+        ),
+    )
+    logistics = and_(
+        operational_approved,
+        active_package_exists,
+        ~unreceived_package_exists,
+    )
+    preparation = and_(
+        operational_approved,
+        or_(~active_package_exists, unreceived_package_exists),
+    )
+    return {
+        "pending": pending,
+        "preparation": preparation,
+        "logistics": logistics,
+        "completed": completed,
+        "rejected": rejected,
+        "all": or_(pending, preparation, logistics, completed, rejected),
+    }
 
 
 def _local(value: datetime | None) -> datetime | None:
@@ -335,18 +448,14 @@ def _base_paid_statement(store_id: uuid.UUID):
 
 
 def _metrics(session: Session, store_id: uuid.UUID) -> PartnerOrderMetrics:
-    pending, approved, rejected = session.execute(
+    conditions = _workflow_conditions()
+    pending, preparation, logistics, completed, rejected = session.execute(
         select(
-            func.count(SellerOrder.id).filter(
-                SellerOrder.decision_status == SellerOrderDecisionStatus.PENDING,
-                SellerOrder.status == SellerOrderStatus.CONFIRMED,
-            ),
-            func.count(SellerOrder.id).filter(
-                SellerOrder.decision_status == SellerOrderDecisionStatus.APPROVED
-            ),
-            func.count(SellerOrder.id).filter(
-                SellerOrder.decision_status == SellerOrderDecisionStatus.REJECTED
-            ),
+            func.count(SellerOrder.id).filter(conditions["pending"]),
+            func.count(SellerOrder.id).filter(conditions["preparation"]),
+            func.count(SellerOrder.id).filter(conditions["logistics"]),
+            func.count(SellerOrder.id).filter(conditions["completed"]),
+            func.count(SellerOrder.id).filter(conditions["rejected"]),
         )
         .join(Order, Order.id == SellerOrder.order_id)
         .join(PaymentAttempt, PaymentAttempt.order_id == Order.id)
@@ -357,13 +466,23 @@ def _metrics(session: Session, store_id: uuid.UUID) -> PartnerOrderMetrics:
         )
     ).one()
     pending_count = int(pending or 0)
-    approved_count = int(approved or 0)
+    preparation_count = int(preparation or 0)
+    logistics_count = int(logistics or 0)
+    completed_count = int(completed or 0)
     rejected_count = int(rejected or 0)
     return PartnerOrderMetrics(
         pending=pending_count,
-        approved=approved_count,
+        preparation=preparation_count,
+        logistics=logistics_count,
+        completed=completed_count,
         rejected=rejected_count,
-        total=pending_count + approved_count + rejected_count,
+        total=(
+            pending_count
+            + preparation_count
+            + logistics_count
+            + completed_count
+            + rejected_count
+        ),
     )
 
 
@@ -403,20 +522,8 @@ def get_partner_orders_page(
     if selected_date not in VALID_DATE_FILTERS:
         selected_date = ""
 
-    statement = _base_paid_statement(access.store_id)
-    if active_tab == "pending":
-        statement = statement.where(
-            SellerOrder.decision_status == SellerOrderDecisionStatus.PENDING,
-            SellerOrder.status == SellerOrderStatus.CONFIRMED,
-        )
-    elif active_tab == "approved":
-        statement = statement.where(
-            SellerOrder.decision_status == SellerOrderDecisionStatus.APPROVED
-        )
-    elif active_tab == "rejected":
-        statement = statement.where(
-            SellerOrder.decision_status == SellerOrderDecisionStatus.REJECTED
-        )
+    conditions = _workflow_conditions()
+    statement = _base_paid_statement(access.store_id).where(conditions[active_tab])
     if selected_status:
         statement = statement.where(SellerOrder.status == SellerOrderStatus(selected_status))
     if normalized_query:
@@ -453,6 +560,10 @@ def get_partner_orders_page(
 
     seller_ids = [seller_order.id for seller_order, *_ in records]
     item_stats: dict[uuid.UUID, tuple[int, int]] = {}
+    packages_by_seller: dict[uuid.UUID, list[SellerInboundPackage]] = {
+        seller_id: [] for seller_id in seller_ids
+    }
+    assigned_units: dict[uuid.UUID, int] = {seller_id: 0 for seller_id in seller_ids}
     if seller_ids:
         item_stats = {
             seller_id: (int(count), int(units))
@@ -466,6 +577,47 @@ def get_partner_orders_page(
                 .group_by(OrderItem.seller_order_id)
             )
         }
+        page_packages = list(
+            session.scalars(
+                select(SellerInboundPackage)
+                .where(
+                    SellerInboundPackage.seller_order_id.in_(seller_ids),
+                    SellerInboundPackage.status
+                    != SellerInboundPackageStatus.CANCELLED,
+                )
+                .order_by(
+                    SellerInboundPackage.seller_order_id,
+                    SellerInboundPackage.created_at,
+                    SellerInboundPackage.id,
+                )
+            )
+        )
+        for package in page_packages:
+            packages_by_seller[package.seller_order_id].append(package)
+        assigned_units.update(
+            {
+                seller_id: int(units)
+                for seller_id, units in session.execute(
+                    select(
+                        SellerInboundPackage.seller_order_id,
+                        func.coalesce(
+                            func.sum(SellerInboundPackageItem.quantity), 0
+                        ),
+                    )
+                    .join(
+                        SellerInboundPackageItem,
+                        SellerInboundPackageItem.package_id
+                        == SellerInboundPackage.id,
+                    )
+                    .where(
+                        SellerInboundPackage.seller_order_id.in_(seller_ids),
+                        SellerInboundPackage.status
+                        != SellerInboundPackageStatus.CANCELLED,
+                    )
+                    .group_by(SellerInboundPackage.seller_order_id)
+                )
+            }
+        )
 
     rows: list[PartnerOrderRowView] = []
     for seller_order, order, payment, buyer in records:
@@ -474,6 +626,14 @@ def get_partner_orders_page(
         )
         local_payment = _local(payment.approved_at)
         item_count, total_units = item_stats.get(seller_order.id, (0, 0))
+        inbound_packages = packages_by_seller.get(seller_order.id, [])
+        workflow = resolve_partner_order_workflow(
+            seller_order, inbound_packages, effective_now
+        )
+        can_operate_preparation = (
+            access.can_manage
+            and workflow.stage == PartnerOrderWorkflowStage.PREPARATION
+        )
         rows.append(
             PartnerOrderRowView(
                 seller_order_id=seller_order.id,
@@ -495,6 +655,22 @@ def get_partner_orders_page(
                 decision_tone=tone,
                 logistical_status=seller_order.status.value,
                 logistical_label=STATUS_LABELS[seller_order.status],
+                workflow_stage=workflow.stage.value,
+                workflow_label=workflow.label,
+                workflow_tone=workflow.tone,
+                primary_action=workflow.primary_action.value,
+                package_count=workflow.package_count,
+                packages_received_count=workflow.packages_received_count,
+                can_prepare=(
+                    can_operate_preparation
+                    and assigned_units.get(seller_order.id, 0) < total_units
+                ),
+                can_print_label=(
+                    can_operate_preparation and workflow.package_count > 0
+                ),
+                can_mark_ready=(
+                    can_operate_preparation and workflow.has_created_packages
+                ),
                 date_label=(
                     f"{local_payment.day:02d} {_MONTHS[local_payment.month - 1]} "
                     f"{local_payment.year}" if local_payment else "Pendiente"
@@ -563,13 +739,85 @@ def _authorized_order_record(
     return record
 
 
+def _timeline(
+    seller_order: SellerOrder,
+    packages: list[SellerInboundPackage],
+    payment: PaymentAttempt,
+) -> tuple[PartnerOrderTimelineStepView, ...]:
+    active = [
+        package
+        for package in packages
+        if package.status != SellerInboundPackageStatus.CANCELLED
+    ]
+    prepared = bool(active) and all(
+        package.status
+        in {
+            SellerInboundPackageStatus.READY_FOR_DROPOFF,
+            SellerInboundPackageStatus.RECEIVED_BY_ECUVEL,
+        }
+        for package in active
+    )
+    received = bool(active) and all(
+        package.status == SellerInboundPackageStatus.RECEIVED_BY_ECUVEL
+        for package in active
+    )
+    distribution = seller_order.status in {
+        SellerOrderStatus.PICKING,
+        SellerOrderStatus.PACKED,
+        SellerOrderStatus.READY_FOR_PICKUP,
+        SellerOrderStatus.COMPLETED,
+    }
+    ecuvel_prepared = seller_order.status in {
+        SellerOrderStatus.PACKED,
+        SellerOrderStatus.READY_FOR_PICKUP,
+        SellerOrderStatus.COMPLETED,
+    }
+    available = seller_order.status in {
+        SellerOrderStatus.READY_FOR_PICKUP,
+        SellerOrderStatus.COMPLETED,
+    }
+    completed = seller_order.status == SellerOrderStatus.COMPLETED
+    latest_ready = max(
+        (package.ready_for_dropoff_at for package in active if package.ready_for_dropoff_at),
+        default=None,
+    )
+    latest_received = max(
+        (package.received_at for package in active if package.received_at),
+        default=None,
+    )
+    return (
+        PartnerOrderTimelineStepView(
+            "Pago confirmado", True, _date_label(payment.approved_at)
+        ),
+        PartnerOrderTimelineStepView(
+            "Pedido aprobado",
+            seller_order.decision_status == SellerOrderDecisionStatus.APPROVED,
+            _date_label(seller_order.approved_at) if seller_order.approved_at else None,
+        ),
+        PartnerOrderTimelineStepView(
+            "Preparado por la tienda",
+            prepared,
+            _date_label(latest_ready) if latest_ready else None,
+        ),
+        PartnerOrderTimelineStepView(
+            "Recibido por Ecuvel",
+            received,
+            _date_label(latest_received) if latest_received else None,
+        ),
+        PartnerOrderTimelineStepView("En centro de distribución", distribution),
+        PartnerOrderTimelineStepView("Preparado por Ecuvel", ecuvel_prepared),
+        PartnerOrderTimelineStepView("Disponible para retiro", available),
+        PartnerOrderTimelineStepView("Entregado", completed),
+    )
+
+
 def get_partner_order_detail(
     session: Session,
     *,
     user_id: uuid.UUID,
     seller_order_id: uuid.UUID,
-    pickup_point_name: str,
-    pickup_point_address: str,
+    buyer_pickup_point_name: str,
+    buyer_pickup_point_address: str,
     placeholder_image: str | None = None,
     now: datetime | None = None,
 ) -> PartnerOrderDetailView:
@@ -578,6 +826,14 @@ def get_partner_order_detail(
         session,
         seller_order_id=seller_order_id,
         store_id=access.store_id,
+    )
+    inbound_packages = list(
+        session.scalars(
+            select(SellerInboundPackage)
+            .options(selectinload(SellerInboundPackage.received_location))
+            .where(SellerInboundPackage.seller_order_id == seller_order.id)
+            .order_by(SellerInboundPackage.created_at, SellerInboundPackage.id)
+        )
     )
     lines = tuple(
         PartnerOrderLineView(
@@ -604,23 +860,83 @@ def get_partner_order_detail(
         line.rate is not None and line.amount is not None
         for line in commission_lines
     )
-    _, decision_label, _ = _decision_presentation(seller_order.decision_status)
     effective_now = now or datetime.now(timezone.utc)
-    overdue = bool(
-        seller_order.ship_by_at
-        and _local(effective_now) > _local(seller_order.ship_by_at)
-        and seller_order.status
-        not in {
-            SellerOrderStatus.PACKED,
-            SellerOrderStatus.READY_FOR_PICKUP,
-            SellerOrderStatus.COMPLETED,
-            SellerOrderStatus.CANCELLED,
-        }
+    workflow = resolve_partner_order_workflow(
+        seller_order, inbound_packages, effective_now
     )
+    _, decision_label, _ = _decision_presentation(seller_order.decision_status)
     can_decide = (
         access.can_manage
         and seller_order.decision_status == SellerOrderDecisionStatus.PENDING
         and seller_order.status == SellerOrderStatus.CONFIRMED
+    )
+    assigned_units = int(
+        session.scalar(
+            select(func.coalesce(func.sum(SellerInboundPackageItem.quantity), 0))
+            .join(
+                SellerInboundPackage,
+                SellerInboundPackage.id == SellerInboundPackageItem.package_id,
+            )
+            .where(
+                SellerInboundPackage.seller_order_id == seller_order.id,
+                SellerInboundPackage.status != SellerInboundPackageStatus.CANCELLED,
+            )
+        )
+        or 0
+    )
+    package_views = tuple(
+        PartnerInboundPackageView(
+            package_id=package.id,
+            package_code=package.package_code,
+            barcode=package.barcode,
+            status=package.status.value,
+            status_label=(
+                "Etiqueta lista"
+                if package.status == SellerInboundPackageStatus.CREATED
+                else (
+                    "Listo para entregar a Ecuvel"
+                    if package.status == SellerInboundPackageStatus.READY_FOR_DROPOFF
+                    else (
+                        "Recibido por Ecuvel"
+                        if package.status
+                        == SellerInboundPackageStatus.RECEIVED_BY_ECUVEL
+                        else "Cancelado"
+                    )
+                )
+            ),
+            label_url=(
+                f"/partners/orders/{seller_order.id}/packages/{package.id}/label"
+            ),
+            can_print=(
+                access.can_manage
+                and package.status != SellerInboundPackageStatus.CANCELLED
+            ),
+            can_mark_ready=(
+                access.can_manage
+                and package.status == SellerInboundPackageStatus.CREATED
+            ),
+            ready_for_dropoff_label=(
+                _date_label(package.ready_for_dropoff_at)
+                if package.ready_for_dropoff_at else None
+            ),
+            received_label=(
+                _date_label(package.received_at) if package.received_at else None
+            ),
+            received_location=(
+                package.received_location.name
+                if package.received_location is not None else None
+            ),
+        )
+        for package in inbound_packages
+    )
+    rejected_by_name = (
+        session.scalar(
+            select(User.full_name).where(
+                User.id == seller_order.rejected_by_user_id
+            )
+        )
+        if seller_order.rejected_by_user_id is not None
+        else None
     )
     return PartnerOrderDetailView(
         seller_order_id=seller_order.id,
@@ -634,10 +950,10 @@ def get_partner_order_detail(
             seller_order.estimated_delivery_from,
             seller_order.estimated_delivery_to,
         ),
-        is_dispatch_overdue=overdue,
+        is_dispatch_overdue=workflow.is_overdue,
         delivery_method_label="Retiro gratuito en punto ECUVEL",
-        pickup_point_name=pickup_point_name,
-        pickup_point_address=pickup_point_address,
+        buyer_pickup_point_name=buyer_pickup_point_name,
+        buyer_pickup_point_address=buyer_pickup_point_address,
         lines=lines,
         product_subtotal=seller_order.subtotal - seller_order.discount_total,
         commission_total=seller_order.commission_total,
@@ -645,6 +961,16 @@ def get_partner_order_detail(
         currency=order.currency,
         commission_lines=commission_lines,
         commission_breakdown_available=breakdown_available,
+        workflow_stage=workflow.stage.value,
+        workflow_label=workflow.label,
+        workflow_tone=workflow.tone,
+        inbound_packages=package_views,
+        timeline=_timeline(seller_order, inbound_packages, payment),
+        can_prepare=(
+            access.can_manage
+            and workflow.stage == PartnerOrderWorkflowStage.PREPARATION
+            and assigned_units < sum(item.quantity for item in seller_order.items)
+        ),
         decision_status=(seller_order.decision_status.value if seller_order.decision_status else ""),
         decision_label=decision_label,
         logistical_status=seller_order.status.value,
@@ -654,6 +980,11 @@ def get_partner_order_detail(
             if seller_order.rejection_reason else None
         ),
         rejection_comment=seller_order.rejection_comment,
+        rejected_at_label=(
+            _date_label(seller_order.rejected_at)
+            if seller_order.rejected_at else None
+        ),
+        rejected_by_name=rejected_by_name,
         requires_refund_resolution=seller_order.requires_refund_resolution,
         can_approve=can_decide,
         can_reject=can_decide,
@@ -668,12 +999,23 @@ def _decision_result(
     replayed: bool,
 ) -> PartnerOrderDecisionResult:
     _, label, _ = _decision_presentation(seller_order.decision_status)
+    packages = list(
+        session.scalars(
+            select(SellerInboundPackage).where(
+                SellerInboundPackage.seller_order_id == seller_order.id
+            )
+        )
+    )
+    workflow = resolve_partner_order_workflow(seller_order, packages)
     return PartnerOrderDecisionResult(
         seller_order_id=seller_order.id,
         decision_status=seller_order.decision_status,
         decision_label=label,
         logistical_status=seller_order.status,
         logistical_label=STATUS_LABELS[seller_order.status],
+        workflow_stage=workflow.stage.value,
+        workflow_label=workflow.label,
+        workflow_tone=workflow.tone,
         metrics=_metrics(session, access.store_id),
         replayed=replayed,
     )

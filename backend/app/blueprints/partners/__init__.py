@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import csv
+import io
 import uuid
 from urllib.parse import urlencode
 
@@ -49,8 +52,16 @@ from app.services.partner_product_actions import (
     prepare_product_draft_deletion,
     submit_product_draft_batch,
 )
-from app.services.private_storage import private_file_path
-from app.services.barcodes import BarcodeRenderError, render_product_code128_svg
+from app.services.private_storage import (
+    PrivateStorageError,
+    private_file_path,
+    verify_private_file,
+)
+from app.services.barcodes import (
+    BarcodeRenderError,
+    render_package_code128_svg,
+    render_product_code128_svg,
+)
 from app.services.product_drafts import (
     PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY,
     ProductDraftAccessError,
@@ -88,6 +99,19 @@ from app.services.partner_orders import (
     get_partner_order_detail,
     get_partner_orders_page,
     reject_partner_order,
+)
+from app.services.partner_sales import (
+    PartnerPayoutNotFoundError,
+    PartnerSalesAccessError,
+    get_authorized_payout_receipt,
+    get_partner_payout_detail,
+    get_partner_sales_export,
+    get_partner_sales_page,
+)
+from app.services.seller_inbound_packages import (
+    create_partner_inbound_package,
+    get_partner_inbound_package_label,
+    mark_partner_inbound_package_ready,
 )
 
 
@@ -385,6 +409,158 @@ def partner_orders():
     )
 
 
+@partners.get("/sales")
+@login_required
+def partner_sales():
+    try:
+        page = get_partner_sales_page(
+            db.session,
+            user_id=current_user.id,
+            period_key=request.args.get("period"),
+            placeholder_image=url_for(
+                "static", filename="images/placeholders/product-placeholder.svg"
+            ),
+        )
+    except PartnerSalesAccessError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("partners.dashboard"))
+    return render_template(
+        "partners/sales.html",
+        page=page,
+        current_partner_tab="sales",
+    )
+
+
+@partners.get("/sales/export.csv")
+@login_required
+def partner_sales_export():
+    try:
+        period, rows = get_partner_sales_export(
+            db.session,
+            user_id=current_user.id,
+            period_key=request.args.get("period"),
+        )
+    except PartnerSalesAccessError as exc:
+        raise NotFound(str(exc)) from exc
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow(
+        [
+            "SellerOrder",
+            "Fecha de pago del comprador",
+            "Productos",
+            "Unidades",
+            "Subtotal",
+            "Descuentos",
+            "Comisión ECUVEL",
+            "Neto",
+            "Estado logístico",
+            "Estado de liquidación",
+            "Fecha de elegibilidad",
+            "Referencia payout",
+            "Fecha de pago ECUVEL",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                _csv_safe(row.seller_order_number),
+                row.approved_at.isoformat(),
+                _csv_safe(row.products),
+                row.units,
+                f"{row.subtotal:.2f}",
+                f"{row.discounts:.2f}",
+                f"{row.commission:.2f}",
+                f"{row.net:.2f}",
+                _csv_safe(row.logistics_status),
+                _csv_safe(row.payout_status),
+                row.eligible_at.isoformat() if row.eligible_at else "",
+                _csv_safe(row.payout_reference or ""),
+                row.paid_at.isoformat() if row.paid_at else "",
+            ]
+        )
+    return Response(
+        "\ufeff" + buffer.getvalue(),
+        mimetype="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="ventas-{period.key}.csv"'
+        },
+    )
+
+
+@partners.get("/sales/payouts/<uuid:payout_id>/detail")
+@login_required
+def partner_sales_payout_detail(payout_id):
+    try:
+        detail = get_partner_payout_detail(
+            db.session,
+            user_id=current_user.id,
+            payout_id=payout_id,
+        )
+    except (PartnerSalesAccessError, PartnerPayoutNotFoundError) as exc:
+        raise NotFound(str(exc)) from exc
+    return jsonify(
+        {
+            "ok": True,
+            "payout": {
+                "id": str(detail.payout_id),
+                "reference": detail.reference,
+                "status": detail.status,
+                "status_label": detail.status_label,
+                "status_tone": detail.status_tone,
+                "date_label": detail.date_label,
+                "destination_label": detail.destination_label,
+                "order_count": detail.order_count,
+                "currency": detail.currency,
+                "gross_sales_total": _money_json(detail.gross_sales_total),
+                "discount_total": _money_json(detail.discount_total),
+                "commission_total": _money_json(detail.commission_total),
+                "net_total": _money_json(detail.net_total),
+                "receipt_available": detail.receipt_available,
+                "receipt_url": (
+                    url_for(
+                        "partners.partner_sales_payout_receipt",
+                        payout_id=detail.payout_id,
+                    )
+                    if detail.receipt_available
+                    else None
+                ),
+            },
+        }
+    )
+
+
+@partners.get("/sales/payouts/<uuid:payout_id>/receipt")
+@login_required
+def partner_sales_payout_receipt(payout_id):
+    try:
+        payout = get_authorized_payout_receipt(
+            db.session,
+            user_id=current_user.id,
+            payout_id=payout_id,
+        )
+        path = verify_private_file(
+            root=current_app.config["SELLER_PAYOUT_RECEIPT_DIR"],
+            storage_key=payout.receipt_storage_key,
+            size_bytes=payout.receipt_size_bytes,
+            sha256=payout.receipt_sha256,
+        )
+    except (
+        PartnerSalesAccessError,
+        PartnerPayoutNotFoundError,
+        PrivateStorageError,
+    ) as exc:
+        raise NotFound(str(exc)) from exc
+    return send_file(
+        path,
+        mimetype=payout.receipt_media_type,
+        as_attachment=True,
+        download_name=(
+            payout.receipt_original_filename or f"{payout.payout_number}.pdf"
+        ),
+    )
+
+
 @partners.get("/orders/<uuid:seller_order_id>/detail")
 @login_required
 def partner_order_detail(seller_order_id):
@@ -393,8 +569,8 @@ def partner_order_detail(seller_order_id):
             db.session,
             user_id=current_user.id,
             seller_order_id=seller_order_id,
-            pickup_point_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
-            pickup_point_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
+            buyer_pickup_point_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
+            buyer_pickup_point_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
             placeholder_image=url_for(
                 "static", filename="images/placeholders/product-placeholder.svg"
             ),
@@ -402,6 +578,98 @@ def partner_order_detail(seller_order_id):
     except (PartnerOrderAccessError, PartnerOrderNotFoundError) as exc:
         raise NotFound(str(exc)) from exc
     return jsonify({"ok": True, "order": _partner_order_detail_json(detail)})
+
+
+@partners.post("/orders/<uuid:seller_order_id>/packages")
+@login_required
+@limiter.limit("30 per minute")
+def partner_order_create_package(seller_order_id):
+    try:
+        result = create_partner_inbound_package(
+            db.session,
+            user_id=current_user.id,
+            seller_order_id=seller_order_id,
+        )
+        db.session.commit()
+    except PartnerOrderValidationError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 422
+    except (PartnerOrderAccessError, PartnerOrderNotFoundError) as exc:
+        db.session.rollback()
+        raise NotFound(str(exc)) from exc
+    except PartnerOrderConflictError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify(
+        {
+            "ok": True,
+            "package": {
+                "package_id": str(result.package_id),
+                "package_code": result.package_code,
+                "barcode": result.barcode,
+                "status": result.status.value,
+                "status_label": result.status_label,
+            },
+        }
+    ), 201
+
+
+@partners.post(
+    "/orders/<uuid:seller_order_id>/packages/<uuid:package_id>/ready"
+)
+@login_required
+@limiter.limit("30 per minute")
+def partner_order_package_ready(seller_order_id, package_id):
+    try:
+        result = mark_partner_inbound_package_ready(
+            db.session,
+            user_id=current_user.id,
+            seller_order_id=seller_order_id,
+            package_id=package_id,
+        )
+        db.session.commit()
+    except (PartnerOrderAccessError, PartnerOrderNotFoundError) as exc:
+        db.session.rollback()
+        raise NotFound(str(exc)) from exc
+    except PartnerOrderConflictError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify(
+        {
+            "ok": True,
+            "package": {
+                "package_id": str(result.package_id),
+                "package_code": result.package_code,
+                "status": result.status.value,
+                "status_label": result.status_label,
+                "replayed": result.replayed,
+            },
+        }
+    )
+
+
+@partners.get(
+    "/orders/<uuid:seller_order_id>/packages/<uuid:package_id>/label"
+)
+@login_required
+def partner_order_package_label(seller_order_id, package_id):
+    try:
+        label = get_partner_inbound_package_label(
+            db.session,
+            user_id=current_user.id,
+            seller_order_id=seller_order_id,
+            package_id=package_id,
+        )
+        barcode_svg = render_package_code128_svg(label.barcode)
+    except (PartnerOrderAccessError, PartnerOrderNotFoundError) as exc:
+        raise NotFound(str(exc)) from exc
+    except BarcodeRenderError as exc:
+        return Response(str(exc), status=422, mimetype="text/plain")
+    return render_template(
+        "partners/order_package_label.html",
+        label=label,
+        barcode_data=base64.b64encode(barcode_svg).decode("ascii"),
+    )
 
 
 @partners.post("/orders/<uuid:seller_order_id>/approve")
@@ -1183,6 +1451,11 @@ def _money_json(value) -> str:
     return f"{value:.2f}"
 
 
+def _csv_safe(value) -> str:
+    text = str(value or "")
+    return f"'{text}" if text.startswith(("=", "+", "-", "@")) else text
+
+
 def _partner_order_detail_json(detail) -> dict:
     return {
         "seller_order_id": str(detail.seller_order_id),
@@ -1193,10 +1466,15 @@ def _partner_order_detail_json(detail) -> dict:
         "ship_by_label": detail.ship_by_label,
         "delivery_window_label": detail.delivery_window_label,
         "is_dispatch_overdue": detail.is_dispatch_overdue,
-        "delivery": {
+        "buyer_delivery": {
             "method": detail.delivery_method_label,
-            "name": detail.pickup_point_name,
-            "address": detail.pickup_point_address,
+            "name": detail.buyer_pickup_point_name,
+            "address": detail.buyer_pickup_point_address,
+        },
+        "seller_dropoff": {
+            "instruction": (
+                "Entrega este paquete en cualquier punto Ecuvel Drop-off."
+            )
         },
         "lines": [
             {
@@ -1226,11 +1504,47 @@ def _partner_order_detail_json(detail) -> dict:
                 for line in detail.commission_lines
             ],
         },
+        "workflow": {
+            "stage": detail.workflow_stage,
+            "label": detail.workflow_label,
+            "tone": detail.workflow_tone,
+            "can_prepare": detail.can_prepare,
+        },
+        "inbound_packages": [
+            {
+                "package_id": str(package.package_id),
+                "package_code": package.package_code,
+                "barcode": package.barcode,
+                "status": package.status,
+                "status_label": package.status_label,
+                "label_url": package.label_url,
+                "ready_url": (
+                    f"/partners/orders/{detail.seller_order_id}/packages/"
+                    f"{package.package_id}/ready"
+                ),
+                "can_print": package.can_print,
+                "can_mark_ready": package.can_mark_ready,
+                "ready_for_dropoff_label": package.ready_for_dropoff_label,
+                "received_label": package.received_label,
+                "received_location": package.received_location,
+            }
+            for package in detail.inbound_packages
+        ],
+        "timeline": [
+            {
+                "label": step.label,
+                "is_complete": step.is_complete,
+                "date_label": step.date_label,
+            }
+            for step in detail.timeline
+        ],
         "decision": {
             "status": detail.decision_status,
             "label": detail.decision_label,
             "rejection_reason": detail.rejection_reason_label,
             "rejection_comment": detail.rejection_comment,
+            "rejected_at_label": detail.rejected_at_label,
+            "rejected_by_name": detail.rejected_by_name,
             "requires_refund_resolution": detail.requires_refund_resolution,
             "can_approve": detail.can_approve,
             "can_reject": detail.can_reject,
@@ -1250,11 +1564,16 @@ def _partner_order_decision_json(result) -> dict:
             "decision_label": result.decision_label,
             "logistical_status": result.logistical_status.value,
             "logistical_label": result.logistical_label,
+            "workflow_stage": result.workflow_stage,
+            "workflow_label": result.workflow_label,
+            "workflow_tone": result.workflow_tone,
             "replayed": result.replayed,
         },
         "metrics": {
             "pending": result.metrics.pending,
-            "approved": result.metrics.approved,
+            "preparation": result.metrics.preparation,
+            "logistics": result.metrics.logistics,
+            "completed": result.metrics.completed,
             "rejected": result.metrics.rejected,
             "total": result.metrics.total,
         },

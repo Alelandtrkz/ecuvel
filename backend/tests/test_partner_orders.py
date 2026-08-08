@@ -21,6 +21,8 @@ from app.models import (
     ProductMedia,
     ProductVariant,
     SellerOffer,
+    SellerInboundPackage,
+    SellerInboundPackageItem,
     SellerOrder,
     StoreContractAcceptance,
     StoreMember,
@@ -33,6 +35,7 @@ from app.models.enums import (
     PaymentMethod,
     PaymentStatus,
     ReservationStatus,
+    SellerInboundPackageStatus,
     SellerOrderDecisionStatus,
     SellerOrderRejectionReason,
     SellerOrderStatus,
@@ -57,6 +60,17 @@ from app.services.partner_orders import (
     get_partner_order_detail,
     get_partner_orders_page,
     reject_partner_order,
+)
+from app.services.partner_order_workflow import (
+    PartnerOrderWorkflowStage,
+    resolve_partner_order_workflow,
+)
+from app.services.seller_inbound_packages import (
+    SellerInboundPackageReceptionAccessError,
+    create_partner_inbound_package,
+    get_partner_inbound_package_label,
+    mark_partner_inbound_package_ready,
+    receive_seller_inbound_package,
 )
 from app.services.seller_order_logistics import build_seller_order_delivery_window
 from tests.factories import create_catalog_and_stock, create_order_items, reserve_item
@@ -136,6 +150,22 @@ def _member(session: Session, base, role: StoreMemberRole) -> User:
         role=role,
         is_active=True,
     ))
+    session.flush()
+    return user
+
+
+def _ecuvel_staff(session: Session) -> User:
+    token = uuid.uuid4().hex[:10]
+    user = User(
+        public_code=f"ECU-{token}",
+        email=f"ecuvel-operator-{token}@test.local",
+        email_normalized=f"ecuvel-operator-{token}@test.local",
+        full_name="Operador interno Ecuvel",
+        status=UserStatus.ACTIVE,
+        is_active=True,
+        is_ecuvel_staff=True,
+    )
+    session.add(user)
     session.flush()
     return user
 
@@ -254,8 +284,8 @@ def test_foreign_order_is_not_disclosed_by_service_or_route(client, session: Ses
             session,
             user_id=owner.id,
             seller_order_id=foreign_seller.id,
-            pickup_point_name="Punto ECUVEL",
-            pickup_point_address="Quito",
+            buyer_pickup_point_name="Punto ECUVEL",
+            buyer_pickup_point_address="Quito",
         )
     _login(client, owner)
     response = client.get(f"/partners/orders/{foreign_seller.id}/detail")
@@ -336,6 +366,17 @@ def test_reject_requires_reason_and_comment_and_releases_reservation(session: Se
     assert movement is not None
     assert movement.movement_type == InventoryMovementType.RELEASE
     assert movement.delta_on_hand == 0
+    detail = get_partner_order_detail(
+        session,
+        user_id=owner.id,
+        seller_order_id=seller_order.id,
+        buyer_pickup_point_name="Punto Ecuvel",
+        buyer_pickup_point_address="Quito",
+    )
+    assert detail.rejection_reason_label == "Stock agotado / No actualizado"
+    assert detail.rejection_comment == "El inventario físico no está disponible."
+    assert detail.rejected_at_label
+    assert detail.rejected_by_name == owner.full_name
 
 
 def test_rejected_seller_order_does_not_cancel_other_store_or_global_order(session: Session):
@@ -452,13 +493,13 @@ def test_legacy_order_without_line_snapshots_still_builds_detail(session: Sessio
         session,
         user_id=owner.id,
         seller_order_id=seller_order.id,
-        pickup_point_name="Punto de entrega Ecuvel",
-        pickup_point_address="Dirección configurada",
+        buyer_pickup_point_name="Punto de entrega Ecuvel",
+        buyer_pickup_point_address="Dirección configurada",
         placeholder_image="/placeholder.svg",
     )
     assert detail.lines[0].image_url == "/placeholder.svg"
     assert not detail.commission_breakdown_available
-    assert detail.pickup_point_name == "Punto de entrega Ecuvel"
+    assert detail.buyer_pickup_point_name == "Punto de entrega Ecuvel"
 
 
 def _worker(session_factory, operation):
@@ -569,6 +610,7 @@ def test_tabs_dates_and_server_side_pagination(session: Session):
     approved = get_partner_orders_page(
         session, user_id=owner.id, tab="approved"
     )
+    assert approved.tab == "preparation"
     assert approved.total_items == 1
     assert approved.rows[0].seller_order_id == old_seller.id
     recent = get_partner_orders_page(
@@ -660,3 +702,421 @@ def test_order_mutation_requires_csrf_when_enabled(client, app, session: Session
     assert response.status_code == 400
     session.expire_all()
     assert session.get(SellerOrder, seller_order.id).decision_status == SellerOrderDecisionStatus.PENDING
+
+
+def test_approval_moves_order_from_pending_to_preparation_without_side_effects(
+    session: Session,
+):
+    base = create_catalog_and_stock(session, stock=10)
+    owner = _enable_owner(session, base)
+    order, seller_order, _items, _reservations, payment = _paid_pending_order(
+        session, base, quantities=(2,)
+    )
+    balance = session.get(InventoryBalance, base.balance_id)
+    inventory_before = (balance.on_hand_quantity, balance.reserved_quantity)
+    payment_before = (payment.status, payment.approved_at, payment.amount)
+
+    result = approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+
+    assert result.workflow_stage == PartnerOrderWorkflowStage.PREPARATION.value
+    assert get_partner_orders_page(
+        session, user_id=owner.id, tab="pending"
+    ).total_items == 0
+    preparation = get_partner_orders_page(
+        session, user_id=owner.id, tab="preparation"
+    )
+    assert preparation.total_items == 1
+    assert preparation.metrics.preparation == 1
+    assert preparation.rows[0].workflow_label == "Aprobado · Pendiente de preparar"
+    assert (balance.on_hand_quantity, balance.reserved_quantity) == inventory_before
+    assert (payment.status, payment.approved_at, payment.amount) == payment_before
+    assert order.status == OrderStatus.CONFIRMED
+    assert seller_order.status == SellerOrderStatus.CONFIRMED
+
+
+def test_inbound_package_can_contain_multiple_order_items(session: Session):
+    base = create_catalog_and_stock(session, stock=20)
+    owner = _enable_owner(session, base)
+    _order, seller_order, item_ids, *_ = _paid_pending_order(
+        session, base, quantities=(1, 3)
+    )
+    approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    balance = session.get(InventoryBalance, base.balance_id)
+    inventory_before = (balance.on_hand_quantity, balance.reserved_quantity)
+
+    package = create_partner_inbound_package(
+        session,
+        user_id=owner.id,
+        seller_order_id=seller_order.id,
+    )
+
+    assert package.package_code.startswith("PKG-")
+    assert len(package.package_code) == 16
+    assert package.barcode == package.package_code
+    assert {item.order_item_id for item in package.items} == set(item_ids)
+    assert sorted(item.quantity for item in package.items) == [1, 3]
+    assert session.scalar(
+        select(func.count()).select_from(SellerInboundPackage)
+    ) == 1
+    assert session.scalar(
+        select(func.count()).select_from(SellerInboundPackageItem)
+    ) == 2
+    assert (balance.on_hand_quantity, balance.reserved_quantity) == inventory_before
+
+
+def test_inbound_packages_support_split_quantities_and_reject_overallocation(
+    session: Session,
+):
+    base = create_catalog_and_stock(session, stock=10)
+    owner = _enable_owner(session, base)
+    _order, seller_order, (item_id,), *_ = _paid_pending_order(
+        session, base, quantities=(2,)
+    )
+    approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    first = create_partner_inbound_package(
+        session,
+        user_id=owner.id,
+        seller_order_id=seller_order.id,
+        allocations=((item_id, 1),),
+    )
+    second = create_partner_inbound_package(
+        session,
+        user_id=owner.id,
+        seller_order_id=seller_order.id,
+        allocations=((item_id, 1),),
+    )
+    assert first.package_code != second.package_code
+    assert first.barcode == first.package_code
+    assert second.barcode == second.package_code
+    with pytest.raises(PartnerOrderValidationError):
+        create_partner_inbound_package(
+            session,
+            user_id=owner.id,
+            seller_order_id=seller_order.id,
+            allocations=((item_id, 1),),
+        )
+
+
+def test_inbound_package_requires_approved_owned_order_and_manage_role(
+    session: Session,
+):
+    base = create_catalog_and_stock(session)
+    owner = _enable_owner(session, base)
+    viewer = _member(session, base, StoreMemberRole.VIEWER)
+    _order, seller_order, *_ = _paid_pending_order(session, base)
+    with pytest.raises(PartnerOrderConflictError):
+        create_partner_inbound_package(
+            session, user_id=owner.id, seller_order_id=seller_order.id
+        )
+    approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    with pytest.raises(PartnerOrderAccessError):
+        create_partner_inbound_package(
+            session, user_id=viewer.id, seller_order_id=seller_order.id
+        )
+
+    _rejected_order, rejected_seller, *_ = _paid_pending_order(session, base)
+    reject_partner_order(
+        session,
+        user_id=owner.id,
+        seller_order_id=rejected_seller.id,
+        reason="OTHER",
+        comment="No será posible preparar este pedido.",
+    )
+    with pytest.raises(PartnerOrderConflictError):
+        create_partner_inbound_package(
+            session, user_id=owner.id, seller_order_id=rejected_seller.id
+        )
+
+    foreign = create_catalog_and_stock(session)
+    foreign_owner = _enable_owner(session, foreign)
+    _foreign_order, foreign_seller, *_ = _paid_pending_order(session, foreign)
+    approve_partner_order(
+        session, user_id=foreign_owner.id, seller_order_id=foreign_seller.id
+    )
+    with pytest.raises(PartnerOrderNotFoundError):
+        create_partner_inbound_package(
+            session, user_id=owner.id, seller_order_id=foreign_seller.id
+        )
+
+
+def test_concurrent_inbound_package_codes_are_unique(
+    session_factory, concurrent_runner
+):
+    with session_factory.begin() as session:
+        base = create_catalog_and_stock(session, stock=10)
+        owner = _enable_owner(session, base)
+        _order, seller_order, (item_id,), *_ = _paid_pending_order(
+            session, base, quantities=(2,)
+        )
+        approve_partner_order(
+            session, user_id=owner.id, seller_order_id=seller_order.id
+        )
+        owner_id, seller_id = owner.id, seller_order.id
+
+    operation = lambda session: create_partner_inbound_package(
+        session,
+        user_id=owner_id,
+        seller_order_id=seller_id,
+        allocations=((item_id, 1),),
+    )
+    results, errors = concurrent_runner(
+        [_worker(session_factory, operation), _worker(session_factory, operation)]
+    )
+    assert not errors
+    assert len({result.package_code for result in results}) == 2
+    assert all(result.barcode == result.package_code for result in results)
+
+
+def test_ready_and_ecuvel_receipt_drive_sla_and_logistics(session: Session):
+    base = create_catalog_and_stock(session, stock=10)
+    owner = _enable_owner(session, base)
+    staff = _ecuvel_staff(session)
+    approved_at = datetime.now(timezone.utc) - timedelta(hours=25)
+    _order, seller_order, (item_id,), *_ = _paid_pending_order(
+        session, base, quantities=(2,), approved_at=approved_at
+    )
+    approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id,
+        now=approved_at,
+    )
+    first = create_partner_inbound_package(
+        session,
+        user_id=owner.id,
+        seller_order_id=seller_order.id,
+        allocations=((item_id, 1),),
+    )
+    second = create_partner_inbound_package(
+        session,
+        user_id=owner.id,
+        seller_order_id=seller_order.id,
+        allocations=((item_id, 1),),
+    )
+    for package in (first, second):
+        ready = mark_partner_inbound_package_ready(
+            session,
+            user_id=owner.id,
+            seller_order_id=seller_order.id,
+            package_id=package.package_id,
+        )
+        replay = mark_partner_inbound_package_ready(
+            session,
+            user_id=owner.id,
+            seller_order_id=seller_order.id,
+            package_id=package.package_id,
+        )
+        assert ready.status == SellerInboundPackageStatus.READY_FOR_DROPOFF
+        assert replay.replayed
+        stored = session.get(SellerInboundPackage, package.package_id)
+        assert stored.received_location_id is None
+        assert stored.received_at is None
+
+    packages = list(session.scalars(
+        select(SellerInboundPackage).where(
+            SellerInboundPackage.seller_order_id == seller_order.id
+        )
+    ))
+    overdue = resolve_partner_order_workflow(
+        seller_order, packages, datetime.now(timezone.utc)
+    )
+    assert overdue.stage == PartnerOrderWorkflowStage.PREPARATION
+    assert overdue.is_overdue
+    product_code = session.get(OrderItem, item_id).seller_sku_snapshot
+
+    with pytest.raises(SellerInboundPackageReceptionAccessError):
+        receive_seller_inbound_package(
+            session,
+            package_code=first.package_code,
+            received_location_id=base.receiving_location_id,
+            actor_user_id=owner.id,
+            verified_product_codes=(product_code,),
+        )
+    with pytest.raises(PartnerOrderValidationError):
+        receive_seller_inbound_package(
+            session,
+            package_code=first.package_code,
+            received_location_id=base.receiving_location_id,
+            actor_user_id=staff.id,
+            verified_product_codes=(),
+        )
+    receive_seller_inbound_package(
+        session,
+        package_code=first.package_code,
+        received_location_id=base.receiving_location_id,
+        actor_user_id=staff.id,
+        verified_product_codes=(product_code,),
+    )
+    packages = list(session.scalars(
+        select(SellerInboundPackage).where(
+            SellerInboundPackage.seller_order_id == seller_order.id
+        )
+    ))
+    partial = resolve_partner_order_workflow(seller_order, packages)
+    assert partial.stage == PartnerOrderWorkflowStage.PREPARATION
+    assert partial.packages_received_count == 1
+
+    received = receive_seller_inbound_package(
+        session,
+        package_code=second.package_code,
+        received_location_id=base.receiving_location_id,
+        actor_user_id=staff.id,
+        verified_product_codes=(product_code,),
+    )
+    replay = receive_seller_inbound_package(
+        session,
+        package_code=second.package_code,
+        received_location_id=base.receiving_location_id,
+        actor_user_id=staff.id,
+        verified_product_codes=(product_code,),
+    )
+    assert received.received_location_id == base.receiving_location_id
+    assert replay.replayed
+    stored_second = session.get(SellerInboundPackage, second.package_id)
+    assert stored_second.received_by_user_id == staff.id
+    assert stored_second.received_at is not None
+    packages = list(session.scalars(
+        select(SellerInboundPackage).where(
+            SellerInboundPackage.seller_order_id == seller_order.id
+        )
+    ))
+    logistics = resolve_partner_order_workflow(seller_order, packages)
+    assert logistics.stage == PartnerOrderWorkflowStage.LOGISTICS
+    assert not logistics.is_overdue
+    assert get_partner_orders_page(
+        session, user_id=owner.id, tab="logistics"
+    ).total_items == 1
+    assert get_partner_orders_page(
+        session, user_id=owner.id, tab="preparation"
+    ).total_items == 0
+
+    seller_order.status = SellerOrderStatus.COMPLETED
+    session.flush()
+    completed = get_partner_orders_page(
+        session, user_id=owner.id, tab="completed"
+    )
+    assert completed.total_items == 1
+    assert completed.rows[0].workflow_label == "Entregado"
+
+
+def test_label_is_private_minimal_and_reprinting_is_idempotent(
+    client, session: Session
+):
+    base = create_catalog_and_stock(session)
+    owner = _enable_owner(session, base)
+    order, seller_order, *_ = _paid_pending_order(session, base)
+    approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    package = create_partner_inbound_package(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    label = get_partner_inbound_package_label(
+        session,
+        user_id=owner.id,
+        seller_order_id=seller_order.id,
+        package_id=package.package_id,
+    )
+    session.commit()
+    _login(client, owner)
+    url = (
+        f"/partners/orders/{seller_order.id}/packages/"
+        f"{package.package_id}/label"
+    )
+    first = client.get(url)
+    second = client.get(url)
+    assert first.status_code == second.status_code == 200
+    body = first.get_data(as_text=True)
+    assert label.package_code in body
+    assert order.order_number in body
+    assert "data:image/svg+xml;base64" in body
+    assert "150mm 100mm" in body
+    assert "QR" not in body
+    assert "Teléfono" not in body
+    assert "Dirección" not in body
+    assert "$" not in body
+    assert session.scalar(
+        select(func.count()).select_from(SellerInboundPackage)
+    ) == 1
+
+
+def test_foreign_package_label_is_404(client, session: Session):
+    own = create_catalog_and_stock(session)
+    owner = _enable_owner(session, own)
+    foreign = create_catalog_and_stock(session)
+    foreign_owner = _enable_owner(session, foreign)
+    _order, seller_order, *_ = _paid_pending_order(session, foreign)
+    approve_partner_order(
+        session, user_id=foreign_owner.id, seller_order_id=seller_order.id
+    )
+    package = create_partner_inbound_package(
+        session,
+        user_id=foreign_owner.id,
+        seller_order_id=seller_order.id,
+    )
+    session.commit()
+    _login(client, owner)
+    response = client.get(
+        f"/partners/orders/{seller_order.id}/packages/{package.package_id}/label"
+    )
+    assert response.status_code == 404
+
+
+def test_viewer_cannot_print_or_mutate_inbound_package(session: Session):
+    base = create_catalog_and_stock(session)
+    owner = _enable_owner(session, base)
+    viewer = _member(session, base, StoreMemberRole.VIEWER)
+    _order, seller_order, *_ = _paid_pending_order(session, base)
+    approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    package = create_partner_inbound_package(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    with pytest.raises(PartnerOrderAccessError):
+        get_partner_inbound_package_label(
+            session,
+            user_id=viewer.id,
+            seller_order_id=seller_order.id,
+            package_id=package.package_id,
+        )
+    with pytest.raises(PartnerOrderAccessError):
+        mark_partner_inbound_package_ready(
+            session,
+            user_id=viewer.id,
+            seller_order_id=seller_order.id,
+            package_id=package.package_id,
+        )
+
+
+def test_package_routes_create_and_mark_ready(client, session: Session):
+    base = create_catalog_and_stock(session)
+    owner = _enable_owner(session, base)
+    _order, seller_order, *_ = _paid_pending_order(session, base)
+    approve_partner_order(
+        session, user_id=owner.id, seller_order_id=seller_order.id
+    )
+    session.commit()
+    _login(client, owner)
+
+    created = client.post(f"/partners/orders/{seller_order.id}/packages")
+    assert created.status_code == 201
+    package_payload = created.get_json()["package"]
+    assert package_payload["barcode"] == package_payload["package_code"]
+    package_id = package_payload["package_id"]
+
+    ready = client.post(
+        f"/partners/orders/{seller_order.id}/packages/{package_id}/ready"
+    )
+    replay = client.post(
+        f"/partners/orders/{seller_order.id}/packages/{package_id}/ready"
+    )
+    assert ready.status_code == replay.status_code == 200
+    assert ready.get_json()["package"]["status"] == "READY_FOR_DROPOFF"
+    assert replay.get_json()["package"]["replayed"] is True

@@ -29,6 +29,7 @@ services:
       PARTNER_CONTRACT_UPLOAD_DIR: /tmp/partner-contracts
       PARTNER_PRODUCT_DRAFT_UPLOAD_DIR: /tmp/partner-product-drafts
       PRODUCT_CATALOG_MEDIA_DIR: /tmp/product-catalog-media
+      SELLER_PAYOUT_RECEIPT_DIR: /tmp/seller-payout-receipts
     command: ["pytest", "-q"]
     volumes:
       - ./backend:/app
@@ -39,6 +40,7 @@ services:
       - /tmp/partner-contracts
       - /tmp/partner-product-drafts
       - /tmp/product-catalog-media
+      - /tmp/seller-payout-receipts
     depends_on:
       db_test:
         condition: service_healthy
@@ -59,6 +61,7 @@ services:
       PARTNER_CONTRACT_UPLOAD_DIR: /tmp/partner-contracts
       PARTNER_PRODUCT_DRAFT_UPLOAD_DIR: /tmp/partner-product-drafts
       PRODUCT_CATALOG_MEDIA_DIR: /tmp/product-catalog-media
+      SELLER_PAYOUT_RECEIPT_DIR: /tmp/seller-payout-receipts
     command:
       - sh
       - -c
@@ -72,6 +75,7 @@ services:
       - /tmp/partner-contracts
       - /tmp/partner-product-drafts
       - /tmp/product-catalog-media
+      - /tmp/seller-payout-receipts
     depends_on:
       db_test:
         condition: service_healthy

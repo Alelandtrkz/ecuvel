@@ -187,6 +187,17 @@ No usar opciones en negrita ni el azul nativo del navegador como estilo final.
 - Acciones secundarias dentro de un menú horizontal de tres puntos.
 - En móvil cada fila se convierte en tarjeta etiquetada; no se comprime hasta hacer ilegible el contenido.
 
+### Dashboards financieros de Partners
+
+- El azul ECUVEL `#085DF8` identifica la tarjeta principal, las series del gráfico, tabs activos y acciones de consulta.
+- Los importes usan Onest, peso `700` y dos decimales; el color no sustituye el signo ni la etiqueta del concepto.
+- Las cuatro tarjetas KPI se muestran en una fila en escritorio, en cuadrícula `2×2` en tablet y apiladas en móvil.
+- La tarjeta de neto puede usar fondo azul suave `#EDF4FF`; las demás permanecen blancas.
+- Pagado usa verde semántico, programado usa amarillo, en revisión usa violeta suave y cancelado usa rojo.
+- Los gráficos deben ser SVG accesibles alimentados por datos del backend; no derivan importes ni reglas financieras en JavaScript.
+- El detalle de una liquidación abre un drawer a la derecha y ocupa todo el ancho en móvil. Debe cerrar con botón, `Escape` y clic en el backdrop, restaurando el foco.
+- Nunca se muestra una cuenta bancaria completa: solo banco y últimos cuatro caracteres.
+
 ### Badges, chips y selección
 
 - Usar radio pill.
@@ -287,4 +298,3 @@ Los diseños de Stitch, Ozon u otras plataformas pueden orientar estructura, jer
 - [ ] El teclado y el foco visible permiten completar toda la interacción.
 - [ ] Se respeta `prefers-reduced-motion`.
 - [ ] El resultado se compara con los componentes existentes de ECUVEL antes de aprobarse.
-

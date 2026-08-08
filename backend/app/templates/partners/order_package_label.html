@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Etiqueta {{ label.package_code }} | ECUVEL</title>
+  <style>
+    @page { size: 150mm 100mm; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; color: #000; background: #eef2f5; font-family: Arial, sans-serif; }
+    .print-controls { display: flex; justify-content: center; gap: 12px; padding: 18px; }
+    .print-controls button,
+    .print-controls a { min-height: 42px; padding: 0 18px; border: 1px solid #b9c3cd; border-radius: 8px; color: #172033; background: #fff; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+    .print-controls button { border-color: #085df8; color: #fff; background: #085df8; }
+    .thermal-label { display: grid; place-content: center; justify-items: center; width: 150mm; height: 100mm; margin: 0 auto 24px; padding: 11mm 12mm; overflow: hidden; background: #fff; text-align: center; }
+    .thermal-label img { display: block; width: 122mm; max-height: 53mm; object-fit: contain; }
+    .thermal-label__code { margin: 3mm 0 0; font-family: "Courier New", monospace; font-size: 18pt; font-weight: 700; letter-spacing: .08em; }
+    .thermal-label__order { margin: 5mm 0 0; font-size: 14pt; font-weight: 700; }
+    @media print {
+      html, body { width: 150mm; height: 100mm; background: #fff; }
+      .print-controls { display: none !important; }
+      .thermal-label { margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <nav class="print-controls" aria-label="Controles de impresión">
+    <a href="{{ url_for('partners.partner_orders', tab='preparation') }}">Volver a Pedidos</a>
+    <button type="button" onclick="window.print()">Imprimir etiqueta</button>
+  </nav>
+  <main class="thermal-label" aria-label="Etiqueta térmica del paquete">
+    <img src="data:image/svg+xml;base64,{{ barcode_data }}" alt="Código de barras {{ label.barcode }}">
+    <p class="thermal-label__code">{{ label.package_code }}</p>
+    <p class="thermal-label__order">Pedido: {{ label.order_number }}</p>
+  </main>
+</body>
+</html>

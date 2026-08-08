@@ -295,6 +295,16 @@ class Config:
         "PARTNER_CONTRACT_UPLOAD_DIR",
         "/app/private/partner-contracts",
     )
+    SELLER_PAYOUT_RECEIPT_DIR = os.getenv(
+        "SELLER_PAYOUT_RECEIPT_DIR",
+        "/app/private/seller-payout-receipts",
+    )
+    SELLER_PAYOUT_RECEIPT_MAX_BYTES = _environment_int_range(
+        "SELLER_PAYOUT_RECEIPT_MAX_BYTES",
+        10 * 1024 * 1024,
+        1024,
+        20 * 1024 * 1024,
+    )
     PARTNER_CONTRACT_VERSION = os.getenv("PARTNER_CONTRACT_VERSION", "2026-06")
     PARTNER_CONTRACT_ANNEX_VERSION = os.getenv(
         "PARTNER_CONTRACT_ANNEX_VERSION",

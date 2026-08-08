@@ -9,8 +9,10 @@ from app.models import ProductDraft, Store, StoreProductCounter
 
 
 PRODUCT_SEQUENCE_MAX = 999_999
+SELLER_INBOUND_PACKAGE_SEQUENCE_MAX = 999_999_999_999
 _PREFIX_RE = re.compile(r"^[A-Z0-9]{3}$")
 _PRODUCT_CODE_RE = re.compile(r"^[A-Z0-9]{3}-\d{8}-\d{6}$")
+_SELLER_INBOUND_PACKAGE_CODE_RE = re.compile(r"^PKG-\d{12}$")
 
 
 class PublicIdentifierError(Exception):
@@ -62,6 +64,21 @@ def format_product_code(
 
 def is_product_code(value: str | None) -> bool:
     return bool(value and _PRODUCT_CODE_RE.match(value))
+
+
+def format_seller_inbound_package_code(sequence_value: int) -> str:
+    if (
+        sequence_value < 1
+        or sequence_value > SELLER_INBOUND_PACKAGE_SEQUENCE_MAX
+    ):
+        raise PublicIdentifierError(
+            "Se alcanzó el límite de identificadores de paquetes de entrada."
+        )
+    return f"PKG-{sequence_value:012d}"
+
+
+def is_seller_inbound_package_code(value: str | None) -> bool:
+    return bool(value and _SELLER_INBOUND_PACKAGE_CODE_RE.fullmatch(value))
 
 
 def ensure_store_public_identity(store: Store) -> None:

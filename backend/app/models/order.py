@@ -253,6 +253,12 @@ class SellerOrder(
     requires_refund_resolution: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false", index=True
     )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    payout_eligible_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     subtotal: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
@@ -304,6 +310,18 @@ class SellerOrder(
         cascade="all, delete-orphan",
     )
 
+    inbound_packages: Mapped[list["SellerInboundPackage"]] = relationship(
+        "SellerInboundPackage",
+        back_populates="seller_order",
+        cascade="all, delete-orphan",
+    )
+
+    payout_item: Mapped["SellerPayoutItem | None"] = relationship(
+        "SellerPayoutItem",
+        back_populates="seller_order",
+        uselist=False,
+    )
+
     __table_args__ = (
         UniqueConstraint(
             "order_id",
@@ -349,6 +367,14 @@ class SellerOrder(
             "estimated_delivery_from IS NULL OR estimated_delivery_to IS NULL "
             "OR estimated_delivery_from <= estimated_delivery_to",
             name="seller_order_delivery_window_valid",
+        ),
+        CheckConstraint(
+            "payout_eligible_at IS NULL OR delivered_at IS NOT NULL",
+            name="seller_order_payout_requires_delivery",
+        ),
+        CheckConstraint(
+            "payout_eligible_at IS NULL OR payout_eligible_at >= delivered_at",
+            name="seller_order_payout_after_delivery",
         ),
     )
 

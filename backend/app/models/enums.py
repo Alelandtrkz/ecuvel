@@ -120,6 +120,13 @@ class SellerOrderRejectionReason(StrEnum):
     OTHER = "OTHER"
 
 
+class SellerPayoutStatus(StrEnum):
+    SCHEDULED = "SCHEDULED"
+    PAID = "PAID"
+    ON_HOLD = "ON_HOLD"
+    CANCELLED = "CANCELLED"
+
+
 class PaymentMethod(StrEnum):
     BANK_TRANSFER = "BANK_TRANSFER"
     CARD = "CARD"
@@ -186,6 +193,13 @@ class PackageStatus(StrEnum):
     PACKED = "PACKED"
     READY_FOR_PICKUP = "READY_FOR_PICKUP"
     HANDED_OVER = "HANDED_OVER"
+    CANCELLED = "CANCELLED"
+
+
+class SellerInboundPackageStatus(StrEnum):
+    CREATED = "CREATED"
+    READY_FOR_DROPOFF = "READY_FOR_DROPOFF"
+    RECEIVED_BY_ECUVEL = "RECEIVED_BY_ECUVEL"
     CANCELLED = "CANCELLED"
 
 

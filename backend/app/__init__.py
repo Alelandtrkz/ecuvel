@@ -54,6 +54,7 @@ def create_app() -> Flask:
         list_unverified_users_command,
         verify_user_email_command,
     )
+    from app.commands.seller_payouts import seller_payouts_command
     from app.blueprints.auth import auth
     from app.blueprints.account import account
     from app.blueprints.partners import partners
@@ -101,6 +102,7 @@ def create_app() -> Flask:
     app.cli.add_command(create_customer_user_command)
     app.cli.add_command(verify_user_email_command)
     app.cli.add_command(list_unverified_users_command)
+    app.cli.add_command(seller_payouts_command)
 
     app.register_blueprint(auth)
     app.register_blueprint(account)

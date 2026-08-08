@@ -957,6 +957,20 @@ def handover_order_packages(
 
         session.flush()
 
+    # La entrega al comprador es el Ãºnico hito que inicia la espera de
+    # liquidaciÃ³n. Se sincroniza tambiÃ©n en replays para reparar Ã³rdenes
+    # histÃ³ricas que tengan evidencia completa pero no los timestamps.
+    from app.services.seller_payouts import synchronize_seller_order_delivery
+
+    for seller_order_id in sorted(
+        {item.seller_order_id for item in order_items}, key=str
+    ):
+        synchronize_seller_order_delivery(
+            session,
+            seller_order_id=seller_order_id,
+            lock=True,
+        )
+
     result_items = tuple(
         HandedOverPackageItem(
             package_id=package.id,
