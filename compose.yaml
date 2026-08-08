@@ -43,6 +43,7 @@ services:
       - partner_documents_data:/app/private/partner-documents
       - partner_contracts_data:/app/private/partner-contracts
       - partner_product_drafts_data:/app/private/partner-product-drafts
+      - product_catalog_media_data:/app/private/product-catalog-media
     ports:
       - "8000:8000"
     depends_on:
@@ -67,6 +68,7 @@ services:
       - partner_documents_data:/app/private/partner-documents
       - partner_contracts_data:/app/private/partner-contracts
       - partner_product_drafts_data:/app/private/partner-product-drafts
+      - product_catalog_media_data:/app/private/product-catalog-media
     depends_on:
       db:
         condition: service_healthy
@@ -78,3 +80,4 @@ volumes:
   partner_documents_data:
   partner_contracts_data:
   partner_product_drafts_data:
+  product_catalog_media_data:

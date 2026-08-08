@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import json
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -154,6 +156,43 @@ def _category_tree(session):
     return electronics, cameras
 
 
+def _phone_category_tree(session):
+    existing = session.scalar(select(Category).where(Category.code == "ELECTRONICS_PHONES"))
+    if existing is not None:
+        return existing.parent, existing
+    electronics = Category(
+        code="ELECTRONICS",
+        name="Electrónicos",
+        slug=f"electronicos-{uuid.uuid4().hex[:6]}",
+        is_active=True,
+        sort_order=1,
+    )
+    phones = Category(
+        code="ELECTRONICS_PHONES",
+        name="Teléfonos y Accesorios",
+        slug=f"telefonos-{uuid.uuid4().hex[:6]}",
+        parent=electronics,
+        is_active=True,
+        sort_order=1,
+    )
+    session.add_all([electronics, phones])
+    session.flush()
+    return electronics, phones
+
+
+def _create_phone_draft(client, session, user: User) -> ProductDraft:
+    category, subcategory = _phone_category_tree(session)
+    session.commit()
+    _login(client, user)
+    response = client.post(
+        "/partners/products/drafts",
+        data={"category_id": str(category.id), "subcategory_id": str(subcategory.id)},
+        follow_redirects=False,
+    )
+    draft_id = uuid.UUID(response.headers["Location"].rstrip("/").rsplit("/", 1)[-1])
+    return session.get(ProductDraft, draft_id)
+
+
 def _create_draft_via_selector(client, session, user: User) -> ProductDraft:
     category, subcategory = _category_tree(session)
     session.commit()
@@ -263,6 +302,14 @@ def test_product_draft_form_removes_highlights_and_package_content_section(clien
     assert "Galería Multimedia" in html
     assert "Código del producto" in html
     assert "Variantes" in html
+    assert "Administrar variantes" in html
+    assert "Galerías por color" in html
+    assert "data-variant-axis-select-button" in html
+    assert "data-variant-axis-select-menu" in html
+    assert "Estado</span><span>Variante</span><span>SKU" in html
+    assert "Presentación individual" in html
+    assert "Agregar variante" in html
+    assert "Generar combinaciones" not in html
     assert "Precio de venta" in html
     assert 'data-partner-select' in html
     assert 'class="partner-select__native"' in html
@@ -276,6 +323,229 @@ def test_product_draft_form_removes_highlights_and_package_content_section(clien
     assert "mAh" in html
     assert "Resolución de foto o sensor en megapíxeles." in html
     assert "Capacidad de batería en miliamperios-hora." in html
+
+
+def test_family_variants_do_not_write_default_values_or_inventory_to_mother(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_phone_draft(client, session, user)
+    configuration = {
+        "version": 4,
+        "enabled": True,
+        "mode": "family",
+        "axes": [{"key": "color_principal"}, {"key": "almacenamiento_gb"}],
+        "default_variant_id": "green-512",
+    }
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "title": "iPhone 17 Pro Max",
+            "brand": "Apple",
+            "model_number": "17 Pro Max",
+            "attributes[tipo_producto]": "Smartphone",
+            "attributes[color_principal]": "Azul",
+            "attributes[almacenamiento_gb]": "256",
+            "price": "999",
+            "compare_at_price": "1099",
+            "stock_quantity": "8",
+            "has_variants": "1",
+            "variant_configuration": json.dumps(configuration),
+            "variant_id[]": "green-512",
+            "variant_options[]": json.dumps({
+                "color_principal": {"label": "Verde", "swatch": "#16A34A"},
+                "almacenamiento_gb": {"label": "512"},
+            }),
+            "variant_combination_key[]": "",
+            "variant_price[]": "1199",
+            "variant_compare_at_price[]": "1299",
+            "variant_stock[]": "3",
+            "variant_enabled[]": "1",
+            "variant_default_choice": "green-512",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    session.expire_all()
+    saved = session.get(ProductDraft, draft.id)
+    assert saved.variant_configuration["version"] == 4
+    assert saved.variant_configuration["mode"] == "family"
+    assert saved.attributes["color_principal"] is None
+    assert saved.attributes["almacenamiento_gb"] is None
+    assert saved.pricing_data["price"] is None
+    assert saved.inventory_data["stock_quantity"] is None
+    assert saved.variant_configuration["source_snapshot"]["attributes"] == {
+        "color_principal": "Azul",
+        "almacenamiento_gb": "256",
+    }
+    assert saved.variants[0]["attributes"] == {
+        "color_principal": "Verde",
+        "almacenamiento_gb": "512",
+    }
+    assert saved.variants[0]["compare_at_price"] == "1299"
+    editor = client.get(f"/partners/products/drafts/{draft.id}")
+    editor_html = editor.get_data(as_text=True)
+    assert editor.status_code == 200
+    assert "partner-variant-gallery-accordion" in editor_html
+    assert "0 imágenes" in editor_html
+    assert "1 variante" in editor_html
+    assert "3 en stock" in editor_html
+    preview = client.get(f"/partners/products/drafts/{draft.id}/preview")
+    assert preview.status_code == 200
+    preview_html = preview.get_data(as_text=True)
+    assert "Resumen del borrador" in preview_html
+    assert "Familia" in preview_html
+    assert 'role="tablist"' in preview_html
+    assert 'aria-selected="true"' in preview_html
+
+
+def test_private_storefront_preview_selects_variants_and_isolates_color_media(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_phone_draft(client, session, user)
+    configuration = {
+        "version": 4,
+        "enabled": True,
+        "mode": "family",
+        "axes": [{"key": "color_principal"}],
+        "default_variant_id": "blue-256",
+    }
+    saved = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "title": "iPhone 17 Pro Max",
+            "description": "Descripción suficientemente completa para la vista previa privada.",
+            "attributes[tipo_producto]": "Smartphone",
+            "has_variants": "1",
+            "variant_configuration": json.dumps(configuration),
+            "variant_id[]": ["blue-256", "red-256"],
+            "variant_options[]": [
+                json.dumps({"color_principal": {"label": "Azul", "swatch": "#085DF8"}}),
+                json.dumps({"color_principal": {"label": "Rojo", "swatch": "#DC2626"}}),
+            ],
+            "variant_combination_key[]": ["", ""],
+            "variant_price[]": ["999", "1049"],
+            "variant_compare_at_price[]": ["1099", ""],
+            "variant_stock[]": ["0", "4"],
+            "variant_enabled[]": ["1", "1"],
+            "variant_default_choice": "blue-256",
+        },
+        follow_redirects=False,
+    )
+    assert saved.status_code == 302
+    for filename, value_key in (("blue.png", "azul"), ("red.png", "rojo")):
+        upload = client.post(
+            f"/partners/products/drafts/{draft.id}/files",
+            data={
+                "kind": "IMAGE",
+                "file": _image_tuple(filename),
+                "variant_axis_key": "color_principal",
+                "variant_value_key": value_key,
+            },
+            content_type="multipart/form-data",
+            headers={"Accept": "application/json"},
+        )
+        assert upload.status_code == 200
+    session.expire_all()
+    draft = session.get(ProductDraft, draft.id)
+    images = session.scalars(
+        select(ProductDraftFile)
+        .where(ProductDraftFile.draft_id == draft.id)
+        .order_by(ProductDraftFile.position)
+    ).all()
+    assert len(images) == 2
+    session.expire_all()
+    draft = session.get(ProductDraft, draft.id)
+
+    default_preview = client.get(
+        f"/partners/products/drafts/{draft.id}/preview?view=storefront"
+    )
+    default_html = default_preview.get_data(as_text=True)
+    assert default_preview.status_code == 200
+    default_title = re.search(r'<h1 id="product-title">([^<]+)</h1>', default_html)
+    assert default_title is not None
+    assert default_title.group(1) == "iPhone 17 Pro Max — Rojo"
+    assert default_html.count(str(images[1].id)) > default_html.count(str(images[0].id))
+
+    blue_sku = f"{draft.seller_sku}-V01"
+    selected_preview = client.get(
+        f"/partners/products/drafts/{draft.id}/preview?view=storefront&variant={blue_sku}"
+    )
+    selected_html = selected_preview.get_data(as_text=True)
+    assert selected_preview.status_code == 200
+    selected_title = re.search(r'<h1 id="product-title">([^<]+)</h1>', selected_html)
+    assert selected_title is not None
+    assert selected_title.group(1) == "iPhone 17 Pro Max — Azul"
+    assert selected_html.count(str(images[0].id)) > selected_html.count(str(images[1].id))
+    assert "Producto agotado" in selected_html
+    assert 'data-preview-commercial' in selected_html
+    assert 'class="purchase-card__cart-form" method="post"' not in selected_html
+    assert 'data-favorite-form' not in selected_html
+    assert "Disponible cuando el producto sea publicado" in selected_html
+
+
+def test_incomplete_simple_draft_still_renders_storefront_placeholders(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+
+    response = client.get(
+        f"/partners/products/drafts/{draft.id}/preview?view=storefront"
+    )
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Producto sin título" in html
+    assert "Precio pendiente" in html
+    assert "Stock pendiente" in html
+    assert "Imagen de presentación" in html
+    assert "Descripción pendiente" in html
+    assert 'data-preview-commercial' in html
+
+
+def test_family_activation_recovers_saved_mother_values_when_variant_inputs_are_omitted(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_phone_draft(client, session, user)
+    first_save = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "title": "iPhone 17 Pro Max",
+            "attributes[tipo_producto]": "Smartphone",
+            "attributes[color_principal]": "Azul",
+            "attributes[almacenamiento_gb]": "256",
+            "price": "999",
+            "compare_at_price": "1099",
+            "stock_quantity": "8",
+        },
+    )
+    assert first_save.status_code == 302
+
+    family_save = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "title": "iPhone 17 Pro Max",
+            "attributes[tipo_producto]": "Smartphone",
+            "has_variants": "1",
+            "variant_configuration": json.dumps({
+                "version": 4,
+                "enabled": True,
+                "mode": "family",
+                "axes": [
+                    {"key": "color_principal"},
+                    {"key": "almacenamiento_gb"},
+                ],
+                "source_snapshot": {},
+            }),
+        },
+    )
+    assert family_save.status_code == 302
+    session.expire_all()
+    saved = session.get(ProductDraft, draft.id)
+    assert saved.variant_configuration["source_snapshot"] == {
+        "attributes": {"color_principal": "Azul", "almacenamiento_gb": "256"},
+        "price": "999",
+        "compare_at_price": "1099",
+        "stock": "8",
+    }
 
 
 def test_create_and_save_draft_without_public_product_rows(client, session):
@@ -403,6 +673,79 @@ def test_valid_draft_submits_without_highlights_or_package_contents(client, sess
     assert submitted.completion_percentage == 100
     assert submitted.highlights == []
     assert submitted.package_contents == []
+
+
+def test_saved_draft_can_be_submitted_from_summary_without_creating_catalog_rows(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    upload = client.post(
+        f"/partners/products/drafts/{draft.id}/files",
+        data={
+            "kind": "IMAGE",
+            "files": [_image_tuple(f"saved-{index}.png") for index in range(3)],
+        },
+        content_type="multipart/form-data",
+        headers={"Accept": "application/json"},
+    )
+    assert upload.status_code == 200
+    saved = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "title": "Cámara de seguridad exterior 4MP",
+            "brand": "Hikvision",
+            "model_number": "DS-DEMO",
+            "description": "Borrador listo con una descripción suficientemente detallada.",
+            "attributes[tipo_camara]": "Seguridad",
+            "attributes[resolucion_mp]": "4",
+            "price": "45.00",
+            "stock_quantity": "5",
+            "product_weight_kg": "0.5",
+        },
+        follow_redirects=False,
+    )
+    assert saved.status_code == 302
+
+    summary = client.get(f"/partners/products/drafts/{draft.id}/preview")
+    summary_html = summary.get_data(as_text=True)
+    assert summary.status_code == 200
+    assert "Enviar a revisión" in summary_html
+    assert f'/partners/products/drafts/{draft.id}/submit-saved' in summary_html
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/submit-saved",
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    assert "view=summary" in response.headers["Location"]
+    session.expire_all()
+    submitted = session.get(ProductDraft, draft.id)
+    assert submitted.status == ProductDraftStatus.SUBMITTED
+    assert submitted.completion_percentage == 100
+    assert session.scalar(select(func.count()).select_from(Product)) == 0
+    assert session.scalar(select(func.count()).select_from(ProductVariant)) == 0
+    assert session.scalar(select(func.count()).select_from(SellerOffer)) == 0
+
+
+def test_submit_saved_rejects_incomplete_draft_without_overwriting_it(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    draft.title = "Título persistido incompleto"
+    session.commit()
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/submit-saved",
+        follow_redirects=True,
+    )
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "Revisa la información del producto" in html
+    assert "Completa los pendientes antes de enviar" in html
+    session.expire_all()
+    persisted = session.get(ProductDraft, draft.id)
+    assert persisted.title == "Título persistido incompleto"
+    assert persisted.status != ProductDraftStatus.SUBMITTED
 
 
 def test_valid_image_upload_is_private_and_authorized(client, session):
@@ -612,8 +955,102 @@ def test_gallery_markup_uses_new_slots_without_separate_upload_button(client, se
     assert "Galería Multimedia (0/6)" in html
     assert "data-draft-gallery" in html
     assert "data-open-gallery" in html
+    assert html.count("data-open-gallery") == 6
     assert "Subir imagen" not in html
     assert "Añadir portada" in html
+
+
+def test_unassigned_image_can_be_moved_to_a_color_without_data_loss(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    client.post(
+        f"/partners/products/drafts/{draft.id}/files",
+        data={"kind": "IMAGE", "file": _image_tuple("recoverable.png")},
+        content_type="multipart/form-data",
+    )
+    session.expire_all()
+    draft = session.get(ProductDraft, draft.id)
+    draft.variant_configuration = {
+        "version": 2,
+        "visual_axis_key": "color_principal",
+        "axes": [
+            {
+                "key": "color_principal",
+                "label": "Color",
+                "is_visual": True,
+                "values": [
+                    {"key": "negro", "label": "Negro"},
+                    {"key": "azul", "label": "Azul"},
+                ],
+            }
+        ],
+    }
+    session.commit()
+    image = session.scalar(
+        select(ProductDraftFile).where(ProductDraftFile.draft_id == draft.id)
+    )
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/files/{image.id}/assign",
+        data={
+            "variant_axis_key": "color_principal",
+            "variant_value_key": "azul",
+        },
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 200
+    session.expire_all()
+    moved = session.get(ProductDraftFile, image.id)
+    assert moved.status == ProductDraftFileStatus.ACTIVE
+    assert moved.variant_axis_key == "color_principal"
+    assert moved.variant_value_key == "azul"
+    assert moved.is_cover is True
+    assert moved.storage_key == image.storage_key
+    assert "Azul" in response.json["gallery_html"]
+
+
+def test_color_gallery_can_be_permanently_deleted_after_explicit_request(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    client.post(
+        f"/partners/products/drafts/{draft.id}/files",
+        data={"kind": "IMAGE", "file": _image_tuple("blue.png")},
+        content_type="multipart/form-data",
+    )
+    session.expire_all()
+    draft = session.get(ProductDraft, draft.id)
+    draft.variant_configuration = {
+        "version": 4,
+        "enabled": True,
+        "mode": "family",
+        "visual_axis_key": "color_principal",
+        "axes": [{
+            "key": "color_principal",
+            "label": "Color",
+            "is_visual": True,
+            "values": [{"key": "azul", "label": "Azul"}],
+        }],
+    }
+    session.commit()
+    image = session.scalar(select(ProductDraftFile).where(ProductDraftFile.draft_id == draft.id))
+    client.post(
+        f"/partners/products/drafts/{draft.id}/files/{image.id}/assign",
+        data={"variant_axis_key": "color_principal", "variant_value_key": "azul"},
+        headers={"Accept": "application/json"},
+    )
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/variant-media/delete",
+        data={"variant_axis_key": "color_principal", "variant_value_key": "azul"},
+        headers={"Accept": "application/json"},
+    )
+    assert response.status_code == 200
+    assert response.json["deleted_count"] == 1
+    session.expire_all()
+    assert session.get(ProductDraftFile, image.id).status == ProductDraftFileStatus.DELETED
 
 
 def test_foreign_user_cannot_open_draft_or_file(client, session):
@@ -628,6 +1065,10 @@ def test_foreign_user_cannot_open_draft_or_file(client, session):
 
     response = client.get(f"/partners/products/drafts/{draft.id}")
     assert response.status_code == 404
+    preview = client.get(f"/partners/products/drafts/{draft.id}/preview")
+    assert preview.status_code == 404
+    submit = client.post(f"/partners/products/drafts/{draft.id}/submit-saved")
+    assert submit.status_code == 404
 
 
 def test_product_code_is_generated_once_and_increments_per_store(client, session):

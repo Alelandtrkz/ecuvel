@@ -120,13 +120,15 @@ def _truncate_application_tables(engine: Engine) -> None:
 
 @pytest.fixture(autouse=True)
 def clean_database(engine: Engine):
+    db.session.remove()
     _truncate_application_tables(engine)
     yield
+    db.session.remove()
     _truncate_application_tables(engine)
 
 
 @pytest.fixture
-def session(session_factory) -> Session:
+def session(session_factory, clean_database) -> Session:
     database_session = session_factory()
 
     try:

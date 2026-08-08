@@ -304,7 +304,21 @@ def test_public_review_uses_safe_identity_date_variant_and_horizontal_stars(clie
     assert "Variante: Azul demo" in body
     assert "review-card__rating" in body
     assert 'aria-label="5 de 5 estrellas"' in body
-    assert "jun." in body or "ene." in body or "feb." in body or "mar." in body
+    spanish_months = (
+        "ene.",
+        "feb.",
+        "mar.",
+        "abr.",
+        "may.",
+        "jun.",
+        "jul.",
+        "ago.",
+        "sept.",
+        "oct.",
+        "nov.",
+        "dic.",
+    )
+    assert any(month in body for month in spanish_months)
     assert "review-card__gallery" not in body
 
 

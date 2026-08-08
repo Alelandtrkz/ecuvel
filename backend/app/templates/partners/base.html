@@ -15,6 +15,8 @@
   <nav class="partner-tabs" aria-label="Navegación de partners">
     <a class="{{ 'is-active' if current_partner_tab|default('main') == 'main' else '' }}" href="{{ url_for('partners.dashboard') }}">Main</a>
     <a class="{{ 'is-active' if current_partner_tab|default('') == 'products' else '' }}" href="{{ url_for('partners.products') }}">Productos</a>
+    <a class="{{ 'is-active' if current_partner_tab|default('') == 'my_products' else '' }}" href="{{ url_for('partners.my_products') }}">Mis productos</a>
+    <a class="{{ 'is-active' if current_partner_tab|default('') == 'reviews' else '' }}" href="{{ url_for('partners.partner_reviews') }}">Reseñas</a>
     <span aria-disabled="true" title="Disponible después del onboarding">Analítica</span>
   </nav>
 </header>

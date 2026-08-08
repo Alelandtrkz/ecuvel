@@ -55,6 +55,10 @@ class VariantAxis:
     unit: str = ""
     suggestions: tuple[str, ...] = ()
     condition: dict[str, Any] | None = None
+    source_field: str = ""
+    value_type: str = "text"
+    default_for: tuple[str, ...] = ()
+    is_visual: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +272,10 @@ def axis_def(
     unit: str = "",
     suggestions: Iterable[str] = (),
     condition: dict[str, Any] | None = None,
+    source_field: str = "",
+    value_type: str = "text",
+    default_for: Iterable[str] = (),
+    is_visual: bool = False,
 ) -> VariantAxis:
     return VariantAxis(
         key=key,
@@ -275,6 +283,10 @@ def axis_def(
         unit=unit,
         suggestions=tuple(suggestions),
         condition=condition,
+        source_field=source_field or key,
+        value_type=value_type,
+        default_for=tuple(default_for),
+        is_visual=is_visual,
     )
 
 
@@ -602,31 +614,86 @@ _TEMPLATE_FIELD_SETS = {
 
 _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
     "electronics_phones": (
-        axis_def("color", "Color", suggestions=("Negro", "Blanco", "Azul", "Verde", "Morado")),
-        axis_def("almacenamiento", "Almacenamiento", unit="GB",
-                 suggestions=("64", "128", "256", "512", "1024"),
-                 condition={"field": "tipo_producto", "values": ["Smartphone", "Teléfono básico"]}),
-        axis_def("potencia", "Potencia", unit="W", suggestions=("20", "45", "65"),
-                 condition={"field": "tipo_producto", "values": ["Cargador"]}),
-        axis_def("longitud", "Longitud", unit="cm", suggestions=("100", "150", "200"),
-                 condition={"field": "tipo_producto", "values": ["Cable"]}),
-        axis_def("modelo_compatible", "Modelo compatible",
-                 condition={"field": "tipo_producto", "values": ["Protector", "Soporte", "Repuesto"]}),
+        axis_def(
+            "color_principal", "Color", suggestions=("Negro", "Blanco", "Azul", "Verde", "Morado"),
+            condition={"field": "tipo_producto", "values": ["Smartphone", "Teléfono básico", "Cargador", "Cable", "Protector", "Soporte", "Repuesto", "Otro"]},
+            default_for=("Smartphone", "Teléfono básico", "Cargador", "Cable", "Protector", "Soporte", "Otro"),
+            is_visual=True,
+        ),
+        axis_def(
+            "almacenamiento_gb", "Almacenamiento", unit="GB", value_type="integer",
+            suggestions=("64", "128", "256", "512", "1024"),
+            condition={"field": "tipo_producto", "values": ["Smartphone", "Teléfono básico"]},
+            default_for=("Smartphone", "Teléfono básico"),
+        ),
+        axis_def(
+            "ram_gb", "RAM", unit="GB", value_type="integer",
+            suggestions=("4", "6", "8", "12", "16"),
+            condition={"field": "tipo_producto", "values": ["Smartphone"]},
+        ),
+        axis_def(
+            "pantalla_pulgadas", "Tamaño de pantalla", unit="in", value_type="decimal",
+            suggestions=("5.5", "6.1", "6.5", "6.7", "6.9"),
+            condition={"field": "tipo_producto", "values": ["Smartphone", "Teléfono básico"]},
+        ),
+        axis_def(
+            "potencia_w", "Potencia", unit="W", value_type="integer", suggestions=("5", "10", "15", "18", "20", "25", "45", "65"),
+            condition={"field": "tipo_producto", "values": ["Cargador"]}, default_for=("Cargador",),
+        ),
+        axis_def(
+            "longitud_cm", "Longitud", unit="cm", value_type="decimal", suggestions=("100", "150", "200"),
+            condition={"field": "tipo_producto", "values": ["Cable"]}, default_for=("Cable",),
+        ),
+        axis_def(
+            "tipo_conector_salida", "Conector de salida", value_type="select",
+            suggestions=("USB-A", "USB-C", "Lightning", "Micro-USB", "Multi-puerto"),
+            condition={"field": "tipo_producto", "values": ["Cargador", "Cable"]},
+        ),
+        axis_def(
+            "tipo_conector_entrada", "Conector de entrada", value_type="select",
+            suggestions=("USB-A", "USB-C", "Lightning", "Micro-USB"),
+            condition={"field": "tipo_producto", "values": ["Cable"]},
+        ),
+        axis_def(
+            "modelo_compatible", "Modelo compatible",
+            condition={"field": "tipo_producto", "values": ["Protector", "Soporte", "Repuesto"]},
+            default_for=("Protector", "Soporte", "Repuesto"),
+        ),
+        axis_def(
+            "material", "Material",
+            condition={"field": "tipo_producto", "values": ["Protector", "Soporte", "Otro"]},
+            default_for=("Otro",),
+        ),
+        axis_def(
+            "tipo_protector", "Tipo de protector", value_type="select",
+            suggestions=("Vidrio templado", "Silicona", "Policarbonato", "Cuero sintético", "Otro"),
+            condition={"field": "tipo_producto", "values": ["Protector"]},
+        ),
+        axis_def(
+            "tipo_soporte", "Tipo de soporte", value_type="select",
+            suggestions=("Mesa", "Auto", "Pared", "Cuello/Flexible", "Otro"),
+            condition={"field": "tipo_producto", "values": ["Soporte"]},
+        ),
+        axis_def(
+            "tipo_repuesto", "Tipo de repuesto", value_type="select",
+            suggestions=("Pantalla", "Batería", "Carcasa", "Botón/Switch", "Puerto", "Otro"),
+            condition={"field": "tipo_producto", "values": ["Repuesto"]},
+        ),
     ),
     "electronics_computers": (
-        axis_def("color", "Color", suggestions=("Negro", "Plata", "Gris")),
-        axis_def("ram", "RAM", unit="GB", suggestions=("8", "16", "32"),
+        axis_def("color", "Color", source_field="color_principal", suggestions=("Negro", "Plata", "Gris")),
+        axis_def("ram", "RAM", unit="GB", source_field="ram_gb", value_type="integer", suggestions=("8", "16", "32"),
                  condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]}),
-        axis_def("almacenamiento", "Almacenamiento", unit="GB", suggestions=("256", "512", "1024"),
+        axis_def("almacenamiento", "Almacenamiento", unit="GB", source_field="almacenamiento_gb", value_type="integer", suggestions=("256", "512", "1024"),
                  condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]}),
-        axis_def("tamano", "Tamaño", unit="in", suggestions=("24", "27", "32"),
+        axis_def("tamano", "Tamaño", unit="in", source_field="pantalla_pulgadas", value_type="decimal", suggestions=("24", "27", "32"),
                  condition={"field": "tipo_equipo", "values": ["Monitor"]}),
     ),
     "electronics_headphones": (
-        axis_def("color", "Color", suggestions=("Negro", "Blanco", "Azul", "Rojo")),
+        axis_def("color", "Color", source_field="color_principal", suggestions=("Negro", "Blanco", "Azul", "Rojo")),
     ),
     "electronics_cameras": (
-        axis_def("color", "Color", suggestions=("Negro", "Blanco", "Gris")),
+        axis_def("color", "Color", source_field="color_principal", suggestions=("Negro", "Blanco", "Gris")),
     ),
 }
 
@@ -652,6 +719,33 @@ def get_product_template(template_key: str) -> ProductTemplate:
         raise ProductTemplateError(f"No existe plantilla para {template_key}.") from exc
 
 
+def variant_axes_for_product_type(
+    template: ProductTemplate,
+    product_type: str | None,
+) -> tuple[VariantAxis, ...]:
+    """Return only axes explicitly allowed for the selected product type."""
+    return tuple(
+        axis
+        for axis in template.variant_axes
+        if not axis.condition
+        or (
+            axis.condition.get("field") == "tipo_producto"
+            and product_type in axis.condition.get("values", ())
+        )
+    )
+
+
+def default_variant_axes_for_product_type(
+    template: ProductTemplate,
+    product_type: str | None,
+) -> tuple[VariantAxis, ...]:
+    return tuple(
+        axis
+        for axis in variant_axes_for_product_type(template, product_type)
+        if product_type in axis.default_for
+    )
+
+
 def validate_template_registry() -> None:
     errors: dict[str, str] = {}
     for key, template in PRODUCT_TEMPLATES.items():
@@ -664,13 +758,32 @@ def validate_template_registry() -> None:
             if item.type in {"select", "multiselect", "radio"} and not item.options:
                 errors[f"{key}.{item.key}"] = "Opciones requeridas."
             seen.add(item.key)
+        field_keys = {item.key for item in template.fields}
+        axis_keys: set[str] = set()
+        for axis in template.variant_axes:
+            if axis.key in axis_keys:
+                errors[f"{key}.variant.{axis.key}"] = "Eje duplicado."
+            if axis.source_field not in field_keys:
+                errors[f"{key}.variant.{axis.key}"] = "El eje no corresponde a un campo de la plantilla."
+            if axis.value_type not in {"text", "integer", "decimal", "select"}:
+                errors[f"{key}.variant.{axis.key}"] = "Tipo de valor de variante inválido."
+            axis_keys.add(axis.key)
     if errors:
         raise ProductTemplateValidationError(errors)
 
 
-def validate_attributes(template: ProductTemplate, values: dict[str, Any], *, final: bool) -> dict[str, str]:
+def validate_attributes(
+    template: ProductTemplate,
+    values: dict[str, Any],
+    *,
+    final: bool,
+    excluded_keys: set[str] | None = None,
+) -> dict[str, str]:
     errors: dict[str, str] = {}
+    excluded_keys = excluded_keys or set()
     for item in template.fields:
+        if item.key in excluded_keys:
+            continue
         if item.condition:
             trigger_val = values.get(item.condition["field"])
             if trigger_val not in item.condition["values"]:

@@ -263,6 +263,10 @@ class Config:
         "PARTNER_PRODUCT_DRAFT_UPLOAD_DIR",
         "/app/private/partner-product-drafts",
     )
+    PRODUCT_CATALOG_MEDIA_DIR = os.getenv(
+        "PRODUCT_CATALOG_MEDIA_DIR",
+        "/app/private/product-catalog-media",
+    )
     PARTNER_PRODUCT_IMAGE_MAX_BYTES = _environment_int_range(
         "PARTNER_PRODUCT_IMAGE_MAX_BYTES",
         5 * 1024 * 1024,

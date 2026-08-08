@@ -1,6 +1,6 @@
 # Contexto permanente de ECUVEL
 
-Última actualización: 2026-07-01.
+Última actualización: 2026-08-05.
 
 Este archivo resume el estado funcional y técnico de ECUVEL para que una persona o agente pueda orientarse rápido antes de trabajar. No reemplaza las migraciones, pruebas ni el código fuente. Debe mantenerse como una memoria viva del proyecto.
 
@@ -25,7 +25,7 @@ El producto prioriza flujos reales y auditables sobre simulaciones: los precios,
 
 ### Storefront público
 
-Incluye portada, detalle de producto, carrito, checkout, transferencia, pedidos, favoritos, reseñas públicas y tienda pública. Usa Jinja, CSS propio, JavaScript progresivo y datos reales del catálogo. Las tarjetas de producto consumen oferta canónica, disponibilidad vendible, favoritos y reseñas agregadas.
+Incluye portada, detalle de producto, carrito, checkout, transferencia, pedidos, favoritos, reseñas públicas y tienda pública. Usa Jinja, CSS propio, JavaScript progresivo y datos reales del catálogo. El detalle admite variantes estructuradas de una misma tienda: el selector actualiza oferta, URL, galería, precio, SKU y stock sin recargar. Las tarjetas de producto consumen oferta canónica, disponibilidad vendible, favoritos y reseñas agregadas.
 
 ### Autenticación y perfil
 
@@ -106,9 +106,11 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 1. Vendedor selecciona categoría y subcategoría.
 2. Se crea o recupera un `ProductDraft`.
 3. El código público del producto se genera automáticamente.
-4. La galería admite hasta 6 imágenes y requiere mínimo 3 para enviar.
-5. El formulario guarda datos incompletos como borrador.
-6. Enviar a revisión marca el borrador como `SUBMITTED`, sin publicar nada.
+4. Las variantes V4 usan modo `family`: la publicación madre solo conserva información compartida y cada presentación controla opciones, precio, precio anterior, stock, SKU e imágenes por color. Admiten hasta 3 campos, 12 valores distintos por campo y 50 filas, sin producto cartesiano.
+5. En Electronics Phones, Color es el único eje visual y admite una galería independiente de 1 a 6 imágenes por valor, con mínimo 3 imágenes totales.
+6. Las imágenes que pierden su color pasan a una bandeja sin asignar y pueden moverse a otro color sin borrar archivos.
+7. El formulario guarda datos incompletos como borrador e integra variantes y galerías con autoguardado y checklist.
+8. Enviar a revisión marca el borrador como `SUBMITTED`, sin publicar nada.
 
 ## Reglas importantes del proyecto
 
@@ -121,6 +123,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - En Partners, el código de producto vive actualmente en `ProductDraft.seller_sku`; `ProductDraft.barcode` debe reflejar el mismo valor.
 - La condición de borradores de producto queda fija en `NEW`.
 - Los borradores no publican productos ni ofertas.
+- Existe un contrato puro de conversión de borrador V4 (con migración diferida no destructiva de V2/V3) y modelos públicos `ProductMedia`/configuración de variantes, pero la aprobación administrativa final continúa fuera de alcance.
 - Los archivos privados no deben ir bajo `static`.
 - Los GET públicos o de cliente no deben mutar pagos, pedidos, reservas, inventario ni fulfillment.
 - Revisión administrativa sensible sigue siendo por CLI, no por panel web, hasta existir autenticación/roles administrativos adecuados.

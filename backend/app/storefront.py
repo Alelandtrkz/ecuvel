@@ -37,6 +37,7 @@ from app.models import (
     PaymentAttempt,
     PaymentProof,
     Product,
+    ProductMedia,
     ProductReviewImage,
     ProductVariant,
     SellerOffer,
@@ -216,6 +217,7 @@ class ProductDetailViewModel:
     low_stock: bool
     availability_message: str
     is_favorite: bool
+    variant_payload: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,6 +373,7 @@ def _canonical_offers_subquery():
                 "manufacturer_barcode"
             ),
             ProductVariant.attributes.label("variant_attributes"),
+            ProductVariant.combination_key.label("combination_key"),
             ProductVariant.weight_grams.label("weight_grams"),
             ProductVariant.length_mm.label("length_mm"),
             ProductVariant.width_mm.label("width_mm"),
@@ -614,6 +617,89 @@ def _build_product_gallery_images(
         )
 
     return tuple(images)
+
+
+def _variant_value_key(configuration: dict[str, Any], attributes: dict[str, Any], axis_key: str) -> str | None:
+    raw = attributes.get(axis_key)
+    if raw is None:
+        return None
+    for axis in configuration.get("axes") or []:
+        if axis.get("key") != axis_key:
+            continue
+        for value in axis.get("values") or []:
+            if raw in {value.get("key"), value.get("label")}:
+                return str(value.get("key"))
+    return str(raw)
+
+
+def _media_urls_for_variant(
+    *,
+    product: Product,
+    attributes: dict[str, Any],
+) -> tuple[str, ...]:
+    configuration = product.variant_configuration or {}
+    visual_key = configuration.get("visual_axis_key")
+    value_key = _variant_value_key(configuration, attributes or {}, str(visual_key)) if visual_key else None
+    selected = [
+        media
+        for media in product.media
+        if media.is_active
+        and media.variant_axis_key == visual_key
+        and media.variant_value_key == value_key
+    ] if value_key else []
+    if not selected:
+        selected = [
+            media
+            for media in product.media
+            if media.is_active and media.variant_axis_key is None
+        ]
+    selected.sort(key=lambda media: (not media.is_cover, media.position, media.created_at, media.id))
+    return tuple(
+        url_for(
+            "storefront.product_media",
+            product_slug=product.slug,
+            public_id=media.public_id,
+        )
+        for media in selected
+    )
+
+
+def _build_variant_payload(
+    *,
+    product: Product,
+    rows: list[Any],
+    availability: dict[uuid.UUID, int],
+    selected_catalog_sku: str,
+) -> dict[str, Any]:
+    variants = []
+    for row in rows:
+        quantity = max(0, availability.get(row.offer_id, 0))
+        max_quantity, low_stock, availability_label, availability_message = _stock_presentation(quantity)
+        variants.append({
+            "catalog_sku": row.catalog_sku,
+            "combination_key": row.combination_key,
+            "attributes": dict(row.variant_attributes or {}),
+            "name": row.variant_title or "",
+            "seller_sku": row.seller_sku,
+            "offer_id": str(row.offer_id),
+            "currency": row.currency,
+            "price": str(row.price),
+            "compare_at_price": str(_visible_compare_at_price(row)) if _visible_compare_at_price(row) is not None else None,
+            "available_quantity": quantity,
+            "max_quantity": max_quantity,
+            "is_available": quantity > 0,
+            "low_stock": low_stock,
+            "availability_label": availability_label,
+            "availability_message": availability_message,
+            "images": list(_media_urls_for_variant(product=product, attributes=row.variant_attributes or {})),
+        })
+    return {
+        "base_title": product.title,
+        "axes": list((product.variant_configuration or {}).get("axes") or []),
+        "visual_axis_key": (product.variant_configuration or {}).get("visual_axis_key"),
+        "selected_catalog_sku": selected_catalog_sku,
+        "variants": variants,
+    }
 
 
 def _build_specifications(
@@ -2385,12 +2471,60 @@ def product_detail(product_slug: str) -> str:
     if row is None:
         abort(404)
 
+    product_record = db.session.scalar(
+        select(Product)
+        .options(selectinload(Product.media))
+        .where(Product.id == row.product_id)
+    )
+    if product_record is None:
+        abort(404)
+
+    variant_rows = list(
+        db.session.execute(
+            select(canonical_offers).where(
+                canonical_offers.c.product_id == row.product_id,
+                canonical_offers.c.store_id == row.store_id,
+            )
+        ).all()
+    )
+    availability_by_offer = _availability_by_offer_ids(
+        {item.offer_id for item in variant_rows}
+    )
+    requested_sku = (request.args.get("variant") or "").strip()
+    default_key = (product_record.variant_configuration or {}).get(
+        "default_combination_key"
+    )
+    selected_row = next(
+        (item for item in variant_rows if item.catalog_sku == requested_sku),
+        None,
+    )
+    if selected_row is None and default_key:
+        selected_row = next(
+            (
+                item
+                for item in variant_rows
+                if item.combination_key == default_key
+                and availability_by_offer.get(item.offer_id, 0) > 0
+            ),
+            None,
+        )
+    if selected_row is None:
+        selected_row = next(
+            (
+                item
+                for item in variant_rows
+                if availability_by_offer.get(item.offer_id, 0) > 0
+            ),
+            variant_rows[0] if variant_rows else row,
+        )
+    row = selected_row
+
     placeholder_image = url_for(
         "static",
         filename="images/placeholders/product-placeholder.svg",
     )
     available_quantity = max(
-        0, _availability_by_offer_ids({row.offer_id}).get(row.offer_id, 0)
+        0, availability_by_offer.get(row.offer_id, 0)
     )
     (
         max_quantity,
@@ -2408,11 +2542,17 @@ def product_detail(product_slug: str) -> str:
         page_size=current_app.config["PRODUCT_REVIEWS_PAGE_SIZE"],
     )
     store_stats = review_stats_for_store_ids(db.session, {row.store_id}).get(row.store_id)
+    family_title = (
+        f"{row.product_title} — {row.variant_title}"
+        if (product_record.variant_configuration or {}).get("mode") == "family"
+        and row.variant_title
+        else row.product_title
+    )
     product = ProductDetailViewModel(
         offer_id=row.offer_id,
         product_id=row.product_id,
         public_identifier=row.product_slug,
-        name=row.product_title,
+        name=family_title,
         description=row.product_description,
         category_name=row.category_name,
         category_url=url_for(
@@ -2433,7 +2573,10 @@ def product_detail(product_slug: str) -> str:
         offer_status=row.offer_status,
         gallery_images=_build_product_gallery_images(
             row.product_title,
-            (),
+            _media_urls_for_variant(
+                product=product_record,
+                attributes=row.variant_attributes or {},
+            ),
         ),
         gallery_placeholder_url=placeholder_image,
         specifications=specifications,
@@ -2448,6 +2591,12 @@ def product_detail(product_slug: str) -> str:
         low_stock=low_stock,
         availability_message=availability_message,
         is_favorite=row.product_id in favorite_ids,
+        variant_payload=_build_variant_payload(
+            product=product_record,
+            rows=variant_rows,
+            availability=availability_by_offer,
+            selected_catalog_sku=row.catalog_sku,
+        ),
     )
 
     recommendation_rows = db.session.execute(
@@ -2481,6 +2630,27 @@ def product_detail(product_slug: str) -> str:
         query_text="",
         selected_category="",
     )
+
+
+@storefront.get("/productos/<string:product_slug>/media/<string:public_id>")
+def product_media(product_slug: str, public_id: str):
+    media = db.session.scalar(
+        select(ProductMedia)
+        .join(Product, Product.id == ProductMedia.product_id)
+        .where(
+            Product.slug == product_slug,
+            Product.is_active.is_(True),
+            ProductMedia.public_id == public_id,
+            ProductMedia.is_active.is_(True),
+        )
+    )
+    if media is None:
+        abort(404)
+    path = private_file_path(current_app.config["PRODUCT_CATALOG_MEDIA_DIR"], media.storage_key)
+    response = send_file(path, mimetype=media.media_type, conditional=True, max_age=31536000)
+    response.cache_control.public = True
+    response.cache_control.max_age = 31536000
+    return response
 
 
 @storefront.app_errorhandler(404)

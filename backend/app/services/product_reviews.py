@@ -23,6 +23,7 @@ from app.models import (
     Product,
     ProductReview,
     ProductReviewImage,
+    ProductReviewReply,
     ProductVariant,
     SellerOffer,
     SellerOrder,
@@ -107,6 +108,14 @@ class PublicReviewImageView:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicProductReviewReplyView:
+    store_name: str
+    body: str
+    date_label: str
+    is_edited: bool
+
+
+@dataclass(frozen=True, slots=True)
 class PublicProductReviewView:
     review_public_id: str
     rating: int
@@ -119,6 +128,7 @@ class PublicProductReviewView:
     verified_purchase: bool
     variant_label: str | None
     images: tuple[PublicReviewImageView, ...]
+    reply: PublicProductReviewReplyView | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +220,10 @@ def _public_date_label(value: datetime | None) -> str:
     return f"{value.day} {_SPANISH_MONTHS_ABBR[value.month]} {value.year}"
 
 
+def public_review_date_label(value: datetime | None) -> str:
+    return _public_date_label(value)
+
+
 def _public_reviewer_identity(user: User) -> tuple[str, str]:
     name = (user.full_name or "").strip()
     if name:
@@ -243,6 +257,10 @@ def _public_variant_label(snapshot: dict | None) -> str | None:
         if len(pairs) == 3:
             break
     return " · ".join(pairs) if pairs else None
+
+
+def public_review_variant_label(snapshot: dict | None) -> str | None:
+    return _public_variant_label(snapshot)
 
 
 def _public_review_images(
@@ -715,7 +733,10 @@ def published_reviews_for_product(
         select(ProductReview, User, OrderItem)
         .join(User, User.id == ProductReview.user_id)
         .join(OrderItem, OrderItem.id == ProductReview.order_item_id)
-        .options(selectinload(ProductReview.images))
+        .options(
+            selectinload(ProductReview.images),
+            selectinload(ProductReview.reply).selectinload(ProductReviewReply.store),
+        )
         .where(
             ProductReview.product_id == product_id,
             ProductReview.status == ProductReviewStatus.PUBLISHED,
@@ -742,6 +763,16 @@ def published_reviews_for_product(
                 verified_purchase=True,
                 variant_label=_public_variant_label(item.variant_snapshot),
                 images=_public_review_images(review.images),
+                reply=(
+                    PublicProductReviewReplyView(
+                        store_name=review.reply.store.name,
+                        body=review.reply.body,
+                        date_label=_public_date_label(review.reply.updated_at),
+                        is_edited=review.reply.updated_at > review.reply.created_at,
+                    )
+                    if review.reply
+                    else None
+                ),
             )
         )
     return ProductReviewsPage(

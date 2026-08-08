@@ -117,6 +117,13 @@ class ProductReview(
         cascade="all, delete-orphan",
         order_by="ProductReviewImage.sort_order",
     )
+    reply: Mapped["ProductReviewReply | None"] = relationship(
+        "ProductReviewReply",
+        back_populates="review",
+        cascade="all, delete-orphan",
+        uselist=False,
+        single_parent=True,
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -131,6 +138,65 @@ class ProductReview(
         CheckConstraint(
             "char_length(body) >= 1 AND char_length(body) <= 2000",
             name="product_review_body_length",
+        ),
+    )
+
+
+class ProductReviewReply(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    db.Model,
+):
+    __tablename__ = "product_review_replies"
+
+    review_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("product_reviews.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    store_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stores.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    body: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    review: Mapped["ProductReview"] = relationship(
+        "ProductReview",
+        back_populates="reply",
+    )
+    store: Mapped["Store"] = relationship("Store")
+    created_by: Mapped["User | None"] = relationship(
+        "User",
+        foreign_keys=[created_by_user_id],
+    )
+    updated_by: Mapped["User | None"] = relationship(
+        "User",
+        foreign_keys=[updated_by_user_id],
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(btrim(body)) >= 1 AND char_length(body) <= 500",
+            name="product_review_reply_body_length",
         ),
     )
 

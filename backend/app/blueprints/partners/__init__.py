@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import uuid
+from urllib.parse import urlencode
 
 from flask import (
     Blueprint,
     Response,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -42,6 +44,11 @@ from app.services.partner_product_categories import (
     save_product_category_selection,
     validate_category_selection,
 )
+from app.services.partner_product_catalog import get_partner_product_catalog
+from app.services.partner_product_actions import (
+    prepare_product_draft_deletion,
+    submit_product_draft_batch,
+)
 from app.services.private_storage import private_file_path
 from app.services.barcodes import BarcodeRenderError, render_product_code128_svg
 from app.services.product_drafts import (
@@ -50,16 +57,27 @@ from app.services.product_drafts import (
     ProductDraftError,
     ProductDraftStateError,
     ProductDraftValidationError,
+    assign_product_draft_image,
     attach_product_draft_file,
     attach_product_draft_files,
     build_product_draft_view,
     create_or_reuse_draft_from_selection,
     delete_product_draft_file,
+    delete_product_draft_color_media,
     get_product_draft_for_user,
     reorder_product_draft_images,
     save_product_draft,
     set_cover_image,
     stage_product_draft_upload,
+    submit_saved_product_draft,
+)
+from app.services.product_draft_preview import build_product_draft_preview
+from app.services.partner_reviews import (
+    PartnerReviewAccessError,
+    PartnerReviewConflictError,
+    PartnerReviewValidationError,
+    get_partner_reviews_page,
+    save_partner_review_reply,
 )
 
 
@@ -309,6 +327,229 @@ def products():
     )
 
 
+@partners.get("/my-products")
+@login_required
+def my_products():
+    try:
+        store = require_partner_catalog_store(db.session, current_user.id)
+    except PartnerProductAccessError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("partners.dashboard"))
+    catalog = get_partner_product_catalog(
+        db.session,
+        store_id=store.store_id,
+        store_name=store.store_name,
+        query=request.args.get("q"),
+        status=request.args.get("status"),
+        category=request.args.get("category"),
+        page=request.args.get("page"),
+    )
+    return render_template(
+        "partners/my_products.html",
+        catalog=catalog,
+        batch_result=browser_session.pop("partner_catalog_batch_result", None),
+        current_partner_tab="my_products",
+    )
+
+
+@partners.get("/reviews")
+@login_required
+def partner_reviews():
+    try:
+        page = get_partner_reviews_page(
+            db.session,
+            user_id=current_user.id,
+            query=request.args.get("q"),
+            statuses=request.args.getlist("status"),
+            ratings=request.args.getlist("rating"),
+            sort=request.args.get("sort"),
+            page=request.args.get("page"),
+        )
+    except PartnerReviewAccessError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("partners.dashboard"))
+    return render_template(
+        "partners/reviews.html",
+        page=page,
+        previous_url=_partner_reviews_page_url(page.page - 1) if page.has_previous else None,
+        next_url=_partner_reviews_page_url(page.page + 1) if page.has_next else None,
+        current_partner_tab="reviews",
+    )
+
+
+@partners.post("/reviews/<uuid:review_id>/reply")
+@login_required
+@limiter.limit("30 per minute")
+def partner_review_reply(review_id):
+    wants_json = (
+        request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        or request.accept_mimetypes.best == "application/json"
+    )
+    try:
+        result = save_partner_review_reply(
+            db.session,
+            user_id=current_user.id,
+            review_id=review_id,
+            body=request.form.get("body"),
+            expected_updated_at=request.form.get("expected_updated_at"),
+        )
+        db.session.commit()
+    except PartnerReviewValidationError as exc:
+        db.session.rollback()
+        if wants_json:
+            return jsonify({"ok": False, "error": str(exc)}), 422
+        flash(str(exc), "error")
+        return _partner_reviews_form_redirect(review_id)
+    except PartnerReviewConflictError as exc:
+        db.session.rollback()
+        if wants_json:
+            return jsonify({"ok": False, "error": str(exc), "conflict": True}), 409
+        flash(str(exc), "error")
+        return _partner_reviews_form_redirect(review_id)
+    except PartnerReviewAccessError as exc:
+        db.session.rollback()
+        raise NotFound(str(exc)) from exc
+
+    if wants_json:
+        return jsonify(
+            {
+                "ok": True,
+                "created": result.created,
+                "review_id": str(result.review_id),
+                "reply": {
+                    "body": result.reply.body,
+                    "created_date_label": result.reply.created_date_label,
+                    "updated_date_label": result.reply.updated_date_label,
+                    "is_edited": result.reply.is_edited,
+                    "version": result.reply.version,
+                },
+                "metrics": {
+                    "total_reviews": result.metrics.total_reviews,
+                    "answered_reviews": result.metrics.answered_reviews,
+                    "unanswered_reviews": result.metrics.unanswered_reviews,
+                    "response_rate": result.metrics.response_rate,
+                },
+            }
+        )
+    flash("Respuesta publicada correctamente.", "success")
+    return _partner_reviews_form_redirect(review_id)
+
+
+@partners.post("/products/drafts/<uuid:draft_id>/delete")
+@login_required
+def delete_product_draft_route(draft_id):
+    prepared = None
+    try:
+        db.session.remove()
+        with db.session.begin():
+            prepared = prepare_product_draft_deletion(
+                db.session,
+                user_id=current_user.id,
+                draft_ids=[draft_id],
+                root=current_app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"],
+            )
+        prepared.finalize()
+        if browser_session.get(PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY) == str(draft_id):
+            browser_session.pop(PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY, None)
+        flash("Borrador eliminado permanentemente.", "success")
+    except PartnerProductAccessError as exc:
+        if prepared:
+            prepared.restore()
+        raise NotFound(str(exc)) from exc
+    except ProductDraftAccessError as exc:
+        if prepared:
+            prepared.restore()
+        raise NotFound(str(exc)) from exc
+    except ProductDraftStateError as exc:
+        if prepared:
+            prepared.restore()
+        db.session.rollback()
+        flash(str(exc), "error")
+    except Exception:
+        if prepared:
+            prepared.restore()
+        db.session.rollback()
+        raise
+    return _my_products_redirect()
+
+
+@partners.post("/my-products/bulk/delete")
+@login_required
+def bulk_delete_product_drafts_route():
+    prepared = None
+    try:
+        db.session.remove()
+        with db.session.begin():
+            prepared = prepare_product_draft_deletion(
+                db.session,
+                user_id=current_user.id,
+                draft_ids=request.form.getlist("draft_ids"),
+                root=current_app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"],
+            )
+        prepared.finalize()
+        deleted_ids = {str(draft_id) for draft_id in prepared.summary.draft_ids}
+        if browser_session.get(PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY) in deleted_ids:
+            browser_session.pop(PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY, None)
+        count = len(prepared.summary.draft_ids)
+        flash(
+            f"{count} {'borrador eliminado' if count == 1 else 'borradores eliminados'} permanentemente.",
+            "success",
+        )
+    except (PartnerProductAccessError, ProductDraftAccessError) as exc:
+        if prepared:
+            prepared.restore()
+        raise NotFound(str(exc)) from exc
+    except ProductDraftStateError as exc:
+        if prepared:
+            prepared.restore()
+        db.session.rollback()
+        flash(str(exc), "error")
+    except Exception:
+        if prepared:
+            prepared.restore()
+        db.session.rollback()
+        raise
+    return _my_products_redirect()
+
+
+@partners.post("/my-products/bulk/submit")
+@login_required
+@limiter.limit("12 per hour")
+def bulk_submit_product_drafts_route():
+    try:
+        db.session.remove()
+        with db.session.begin():
+            result = submit_product_draft_batch(
+                db.session,
+                user_id=current_user.id,
+                draft_ids=request.form.getlist("draft_ids"),
+            )
+        browser_session["partner_catalog_batch_result"] = {
+            "kind": "submit",
+            "submitted_count": len(result.submitted_ids),
+            "failures": [
+                {
+                    "draft_id": str(failure.draft_id),
+                    "title": failure.title,
+                    "message": failure.message,
+                }
+                for failure in result.failures
+            ],
+        }
+        if result.submitted_ids:
+            flash(
+                f"{len(result.submitted_ids)} "
+                f"{'producto enviado' if len(result.submitted_ids) == 1 else 'productos enviados'} a revisión.",
+                "success",
+            )
+    except (PartnerProductAccessError, ProductDraftAccessError) as exc:
+        raise NotFound(str(exc)) from exc
+    except ProductDraftStateError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    return _my_products_redirect()
+
+
 @partners.get("/products/new")
 @login_required
 def new_product():
@@ -430,9 +671,14 @@ def save_product_draft_route(draft_id):
                 form=request.form,
                 final=False,
             )
-        flash("Borrador guardado.", "success")
         if _wants_json():
-            return {"ok": True, "draft_id": str(draft.id), "completion_percentage": draft.completion_percentage}
+            payload = _product_draft_gallery_payload(draft.id)
+            payload.update({
+                "draft_id": str(draft.id),
+                "completion_percentage": draft.completion_percentage,
+            })
+            return payload
+        flash("Borrador guardado.", "success")
         return redirect(url_for("partners.product_draft", draft_id=draft.id))
     except ProductDraftValidationError as exc:
         db.session.rollback()
@@ -495,11 +741,63 @@ def product_draft_preview(draft_id):
         draft = get_product_draft_for_user(db.session, user_id=current_user.id, draft_id=draft_id)
     except ProductDraftAccessError as exc:
         raise NotFound(str(exc)) from exc
+    view = build_product_draft_view(draft)
+    preview = build_product_draft_preview(
+        view,
+        requested_sku=request.args.get("variant"),
+        selected_view=request.args.get("view"),
+    )
     return render_template(
         "partners/product_draft_preview.html",
-        view=build_product_draft_view(draft),
+        view=view,
+        preview=preview,
         current_partner_tab="products",
     )
+
+
+@partners.post("/products/drafts/<uuid:draft_id>/submit-saved")
+@login_required
+@limiter.limit("12 per hour")
+def submit_saved_product_draft_route(draft_id):
+    try:
+        db.session.remove()
+        with db.session.begin():
+            draft = submit_saved_product_draft(
+                db.session,
+                user_id=current_user.id,
+                draft_id=draft_id,
+            )
+        flash("Producto enviado a revisión. Aún no está publicado.", "success")
+        return redirect(
+            url_for(
+                "partners.product_draft_preview",
+                draft_id=draft.id,
+                view="summary",
+            )
+        )
+    except ProductDraftValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        for message in dict.fromkeys(exc.errors.values()):
+            flash(message, "error")
+        return redirect(
+            url_for(
+                "partners.product_draft_preview",
+                draft_id=draft_id,
+                view="summary",
+            )
+        )
+    except ProductDraftAccessError as exc:
+        raise NotFound(str(exc)) from exc
+    except ProductDraftStateError as exc:
+        flash(str(exc), "warning")
+        return redirect(
+            url_for(
+                "partners.product_draft_preview",
+                draft_id=draft_id,
+                view="summary",
+            )
+        )
 
 
 @partners.get("/products/drafts/<uuid:draft_id>/barcode.svg")
@@ -564,6 +862,8 @@ def upload_product_draft_file(draft_id):
                 document_type=request.form.get("document_type"),
                 root=storage_root,
                 max_images=current_app.config["PARTNER_PRODUCT_MAX_IMAGES"],
+                variant_axis_key=request.form.get("variant_axis_key") or None,
+                variant_value_key=request.form.get("variant_value_key") or None,
             )
         flash("Imágenes cargadas." if kind == ProductDraftFileKind.IMAGE else "Archivo cargado.", "success")
         if _wants_json():
@@ -645,6 +945,56 @@ def set_product_draft_cover_route(draft_id, file_id):
     return redirect(url_for("partners.product_draft", draft_id=draft_id))
 
 
+@partners.post("/products/drafts/<uuid:draft_id>/files/<uuid:file_id>/assign")
+@login_required
+def assign_product_draft_image_route(draft_id, file_id):
+    try:
+        db.session.remove()
+        with db.session.begin():
+            assign_product_draft_image(
+                db.session,
+                user_id=current_user.id,
+                draft_id=draft_id,
+                file_id=file_id,
+                variant_axis_key=request.form.get("variant_axis_key") or "",
+                variant_value_key=request.form.get("variant_value_key") or "",
+                max_images=current_app.config["PARTNER_PRODUCT_MAX_IMAGES"],
+            )
+        if _wants_json():
+            return _product_draft_gallery_payload(draft_id)
+        flash("Imagen asignada al color.", "success")
+    except ProductDraftAccessError as exc:
+        raise NotFound(str(exc)) from exc
+    except ProductDraftError as exc:
+        if _wants_json():
+            return {"ok": False, "errors": {"images": str(exc)}}, 422
+        flash(str(exc), "error")
+    return redirect(url_for("partners.product_draft", draft_id=draft_id))
+
+
+@partners.post("/products/drafts/<uuid:draft_id>/variant-media/delete")
+@login_required
+def delete_product_draft_variant_media_route(draft_id):
+    try:
+        db.session.remove()
+        with db.session.begin():
+            count = delete_product_draft_color_media(
+                db.session,
+                user_id=current_user.id,
+                draft_id=draft_id,
+                variant_axis_key=request.form.get("variant_axis_key") or "",
+                variant_value_key=request.form.get("variant_value_key") or "",
+                root=current_app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"],
+            )
+        payload = _product_draft_gallery_payload(draft_id)
+        payload["deleted_count"] = count
+        return payload
+    except ProductDraftAccessError as exc:
+        raise NotFound(str(exc)) from exc
+    except ProductDraftError as exc:
+        return {"ok": False, "errors": {"images": str(exc)}}, 422
+
+
 @partners.post("/products/drafts/<uuid:draft_id>/files/reorder")
 @login_required
 def reorder_product_draft_files_route(draft_id):
@@ -718,3 +1068,49 @@ def _category_json(categories):
 
 def _wants_json() -> bool:
     return "application/json" in request.headers.get("Accept", "")
+
+
+def _my_products_redirect():
+    return redirect(
+        url_for(
+            "partners.my_products",
+            q=(request.form.get("return_q") or "").strip()[:160] or None,
+            status=(request.form.get("return_status") or "").strip()[:40] or None,
+            category=(request.form.get("return_category") or "").strip()[:40] or None,
+            page=(request.form.get("return_page") or "").strip()[:8] or None,
+        )
+    )
+
+
+def _partner_reviews_page_url(page: int) -> str:
+    pairs: list[tuple[str, str]] = []
+    for key, values in request.args.lists():
+        if key == "page":
+            continue
+        pairs.extend((key, value) for value in values if value is not None)
+    pairs.append(("page", str(max(1, page))))
+    return f"{url_for('partners.partner_reviews')}?{urlencode(pairs)}"
+
+
+def _partner_reviews_form_redirect(review_id: uuid.UUID):
+    pairs: list[tuple[str, str]] = []
+    query = " ".join((request.form.get("return_q") or "").split())[:160]
+    if query:
+        pairs.append(("q", query))
+    for status in request.form.getlist("return_status"):
+        if status in {"unanswered", "answered"}:
+            pairs.append(("status", status))
+    for rating in request.form.getlist("return_rating"):
+        if rating in {"1", "2", "3", "4", "5"}:
+            pairs.append(("rating", rating))
+    sort = request.form.get("return_sort")
+    if sort in {"newest", "oldest", "rating_high", "rating_low"}:
+        pairs.append(("sort", sort))
+    page = request.form.get("return_page")
+    if page and page.isdigit():
+        pairs.append(("page", page))
+    query_string = urlencode(pairs)
+    target = url_for("partners.partner_reviews")
+    if query_string:
+        target = f"{target}?{query_string}"
+    return redirect(f"{target}#review-{review_id}")

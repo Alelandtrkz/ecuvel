@@ -8,6 +8,8 @@
 {% set inventory = draft.inventory_data or {} %}
 {% set dimensions = draft.dimensions_data or {} %}
 {% set warranty = draft.warranty_data or {} %}
+{% set variant_config = draft.variant_configuration or {} %}
+{% set family_enabled = variant_config and (variant_config.get('version', 1) < 4 or variant_config.get('enabled') == true) %}
 <main class="partner-page partner-page--draft">
   <div class="partner-draft-layout" data-product-draft>
     <header class="partner-draft-hero">
@@ -23,13 +25,15 @@
     </header>
 
     <div class="partner-draft-main">
-      {% include "partners/_product_draft_gallery.html" %}
+      <div data-general-gallery-host>{% include "partners/_product_draft_gallery.html" %}</div>
 
-      <form id="partner-product-draft-form" class="partner-draft-form" method="post" action="{{ url_for('partners.save_product_draft_route', draft_id=draft.id) }}">
+      <form id="partner-product-draft-form" class="partner-draft-form" method="post"
+            action="{{ url_for('partners.save_product_draft_route', draft_id=draft.id) }}"
+            data-autosave-url="{{ url_for('partners.save_product_draft_route', draft_id=draft.id) }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <section class="partner-draft-card" aria-labelledby="product-info-title">
-          <h2 id="product-info-title">Información del producto</h2>
+          <h2 id="product-info-title">Información compartida del producto</h2>
           <div class="partner-draft-grid partner-draft-grid--2">
             <label class="partner-draft-field partner-draft-field--wide">
               <span>Título del producto</span>
@@ -100,81 +104,101 @@
           </div>
         </section>
 
-        <section class="partner-draft-card" aria-labelledby="variants-title" data-variants-section>
-          <h2 id="variants-title">Variantes</h2>
-          <label class="partner-switch">
-            <input type="checkbox" name="has_variants" value="1" {{ "checked" if draft.variants }} data-variants-toggle>
-            <span>Este producto tiene variantes</span>
-          </label>
-          {% if errors.variants %}<p class="partner-error">{{ errors.variants }}</p>{% endif %}
-
-          <div data-variants-panel {% if not draft.variants %}hidden{% endif %}>
-            {% if view.template.variant_axes %}
-              <p class="partner-variant-hint">
-                Define los valores que varían (ej. colores, capacidades) y genera las combinaciones automáticamente.
-              </p>
-              <div class="partner-variant-axes" data-variant-axes>
-                {% for axis in view.template.variant_axes %}
-                  <div class="partner-variant-axis"
-                       data-variant-axis="{{ axis.key }}"
-                       data-axis-label="{{ axis.label }}"
-                       data-axis-unit="{{ axis.unit }}"
-                       {% if axis.condition %}
-                         data-condition-field="{{ axis.condition.field }}"
-                         data-condition-values="{{ axis.condition['values'] | join(',') }}"
-                       {% endif %}>
-                    <span class="partner-variant-axis__label">{{ axis.label }}{% if axis.unit %} <em>({{ axis.unit }})</em>{% endif %}</span>
-                    <div class="partner-variant-axis__chips" data-axis-chips></div>
-                    <input type="text" class="partner-variant-axis__input" data-axis-input
-                           placeholder="Escribe un valor y presiona Enter">
-                    {% if axis.suggestions %}
-                      <div class="partner-variant-axis__suggestions">
-                        {% for suggestion in axis.suggestions %}
-                          <button type="button" class="partner-variant-suggestion" data-axis-suggestion="{{ suggestion }}">
-                            {{ suggestion }}{% if axis.unit %} {{ axis.unit }}{% endif %}
-                          </button>
-                        {% endfor %}
-                      </div>
-                    {% endif %}
-                  </div>
-                {% endfor %}
-              </div>
-              <button type="button" class="partner-button partner-button--secondary" data-generate-variants>
-                Generar combinaciones
-              </button>
-              <p class="partner-variant-message" data-variant-message hidden></p>
-            {% endif %}
-
-            <div class="partner-variant-table" data-variant-table {% if view.template.variant_axes and not draft.variants %}hidden{% endif %}>
-              <div class="partner-variant-table__head">
-                <span>Variante</span><span>Precio</span><span>Stock</span>
-              </div>
-              <div data-variant-rows>
-                {% for variant in draft.variants %}
-                  <div class="partner-variant-row" data-variant-row>
-                    <input name="variant_name[]" value="{{ variant.get('name', '') }}"
-                           {% if view.template.variant_axes %}readonly{% endif %}
-                           placeholder="Ej. Azul / 128 GB">
-                    <input name="variant_price[]" value="{{ variant.get('price', '') }}" placeholder="0.00" inputmode="decimal">
-                    <input name="variant_stock[]" value="{{ variant.get('stock', '') }}" placeholder="0" inputmode="numeric">
-                  </div>
-                {% endfor %}
+        <section class="partner-draft-card partner-manual-variants" aria-labelledby="variants-title" data-variants-section
+                 data-max-axes="3" data-max-values="12" data-max-combinations="50"
+                 data-delete-color-media-url="{{ url_for('partners.delete_product_draft_variant_media_route', draft_id=draft.id) }}">
+          <header class="partner-variant-module-header">
+            <div class="partner-variant-module-title">
+              <span class="partner-variant-module-icon"><i data-lucide="layers-3" aria-hidden="true"></i></span>
+              <div>
+                <h2 id="variants-title">Variantes del producto</h2>
+                <p>Administra cada presentación, su inventario y sus imágenes.</p>
               </div>
             </div>
-            {% if not view.template.variant_axes %}
-              <button type="button" class="partner-button partner-button--secondary" data-add-variant-row>
-                + Añadir variante
-              </button>
-            {% endif %}
+            <label class="partner-variant-master-toggle">
+              <span>Administrar variantes</span>
+              <input type="checkbox" name="has_variants" value="1" {{ "checked" if family_enabled }} data-variants-toggle>
+              <span class="partner-variant-master-toggle__track" aria-hidden="true"></span>
+            </label>
+          </header>
+          {% if errors.variants %}<p class="partner-error">{{ errors.variants }}</p>{% endif %}
+          <script type="application/json" data-available-variant-axes>{{ view.available_variant_axes|tojson }}</script>
+          <script type="application/json" data-existing-variants>{{ (draft.variants or [])|tojson }}</script>
+          <input type="hidden" name="variant_configuration" data-variant-configuration value="{{ (draft.variant_configuration or {})|tojson|forceescape }}">
+          <input type="hidden" name="variant_convert_base" value="0" data-variant-convert-base>
+
+          <div class="partner-variant-activation" data-variant-activation hidden>
+            <div>
+              <strong>La publicación será una familia</strong>
+              <p>Los datos compartidos se conservan, pero cada presentación tendrá precio, stock e imágenes propios.</p>
+            </div>
+            <div>
+              <button type="button" class="partner-button partner-button--secondary" data-start-empty-variants>Crear desde cero</button>
+              <button type="button" class="partner-button partner-button--primary" data-convert-base-variant>Convertir datos actuales</button>
+            </div>
           </div>
 
-          <template data-variant-row-template>
-            <div class="partner-variant-row" data-variant-row>
-              <input name="variant_name[]" value="" placeholder="Ej. Azul / 128 GB">
-              <input name="variant_price[]" value="" placeholder="0.00" inputmode="decimal">
-              <input name="variant_stock[]" value="" placeholder="0" inputmode="numeric">
+          <div data-variants-panel {% if not family_enabled %}hidden{% endif %}>
+            <p class="partner-variant-hint">Crea únicamente las presentaciones que realmente vendes. Cada variante tendrá un solo valor por campo.</p>
+            {% if draft.variants and (not draft.variant_configuration or draft.variant_configuration.get('version', 1) < 3) %}
+              <p class="partner-variant-migration" data-legacy-variants>Importaremos las variantes existentes como filas manuales y conservaremos sus SKU, precios y stock.</p>
+            {% endif %}
+
+            <div class="partner-variant-fields-bar">
+              <div><strong>Campos que cambian</strong><span>Selecciona hasta tres.</span></div>
+              <div class="partner-variant-field-chips" data-selected-variant-fields></div>
+              <div class="partner-variant-field-add">
+                <div class="partner-select partner-variant-axis-select is-enhanced" data-variant-axis-select>
+                  <select class="partner-select__native" data-add-axis-select aria-label="Campo de variante"></select>
+                  <button class="partner-select__button" type="button" aria-haspopup="listbox" aria-expanded="false" data-variant-axis-select-button>
+                    <span data-variant-axis-select-label>Selecciona un campo</span>
+                    <i data-lucide="chevron-down" aria-hidden="true"></i>
+                  </button>
+                  <div class="partner-select__menu" role="listbox" data-variant-axis-select-menu></div>
+                </div>
+                <button type="button" class="partner-button partner-button--secondary" data-add-axis>Agregar campo</button>
+              </div>
             </div>
-          </template>
+
+            <p class="partner-variant-message" data-variant-message hidden></p>
+
+            <div class="partner-variant-list-heading">
+              <div><h3>Variantes creadas</h3><span class="partner-variant-count-badge" data-manual-variant-count>{{ draft.variants|length }} variante{{ '' if draft.variants|length == 1 else 's' }}</span></div>
+              <button type="button" class="partner-button partner-button--primary partner-variant-add-button" data-open-variant-editor><i data-lucide="plus" aria-hidden="true"></i>Nueva variante</button>
+            </div>
+            <div class="partner-variant-table partner-variant-table--manual" data-variant-table {% if not draft.variants %}hidden{% endif %}>
+              <div class="partner-variant-table__head">
+                <span>Estado</span><span>Variante</span><span>SKU</span><span>Stock</span><span>Precio</span><span>Imágenes</span><span aria-hidden="true"></span>
+              </div>
+              <div data-variant-rows></div>
+            </div>
+
+            <section class="partner-variant-colors" aria-labelledby="variant-colors-title">
+              <div class="partner-variant-list-heading partner-variant-gallery-heading">
+                <div>
+                  <span class="partner-variant-gallery-heading__icon"><i data-lucide="palette" aria-hidden="true"></i></span>
+                  <div><h3 id="variant-colors-title">Galerías por color</h3><span>Las variantes del mismo color comparten una galería.</span></div>
+                </div>
+              </div>
+              <div data-variant-gallery-host></div>
+            </section>
+
+            <div class="partner-variant-drawer-backdrop" data-variant-drawer-backdrop hidden></div>
+            <aside class="partner-variant-editor partner-variant-drawer" data-variant-editor aria-labelledby="variant-editor-title" hidden>
+              <div class="partner-variant-editor__heading">
+                <div><span>Presentación individual</span><h3 id="variant-editor-title" data-variant-editor-title>Nueva variante</h3></div>
+                <button type="button" class="partner-variant-editor__cancel" data-cancel-variant-edit aria-label="Cerrar editor"><i data-lucide="x" aria-hidden="true"></i></button>
+              </div>
+              <div class="partner-variant-editor__options" data-variant-option-fields></div>
+              <div class="partner-variant-batch" data-variant-batch hidden></div>
+              <div class="partner-variant-editor__commercial">
+                <label><span>Precio (USD)</span><input data-new-variant-price inputmode="decimal" placeholder="0.00"></label>
+                <label><span>Precio anterior</span><input data-new-variant-compare-price inputmode="decimal" placeholder="Opcional"></label>
+                <label><span>Stock</span><input data-new-variant-stock inputmode="numeric" placeholder="0"></label>
+                <button type="button" class="partner-button partner-button--primary" data-save-manual-variant>Agregar variante</button>
+              </div>
+            </aside>
+          </div>
         </section>
 
         <section class="partner-draft-card" aria-labelledby="dimensions-title">
@@ -381,7 +405,13 @@
     <aside class="partner-draft-sidebar" aria-label="Estado del borrador">
       <section class="partner-draft-card partner-draft-card--sticky">
         <h2>Precio e inventario</h2>
-        <div class="partner-draft-grid">
+        <div class="partner-family-commercial-summary" data-family-commercial-summary {% if not family_enabled %}hidden{% endif %}>
+          <div><strong data-family-active-count>0</strong><span>Variantes activas</span></div>
+          <div><strong data-family-price-range>Sin precios</strong><span>Rango de precios</span></div>
+          <div><strong data-family-stock-total>0</strong><span>Stock total</span></div>
+          <div><strong data-family-sold-out>0</strong><span>Agotadas</span></div>
+        </div>
+        <div class="partner-draft-grid" data-single-commercial-fields {% if family_enabled %}hidden{% endif %}>
           <label class="partner-draft-field">
             <span>Precio de venta (USD)</span>
             <input form="partner-product-draft-form" name="price" value="{{ price.get('price', '') }}" placeholder="$ 0.00">
@@ -403,15 +433,17 @@
         </div>
       </section>
 
-      <section class="partner-draft-card partner-draft-card--sticky partner-checklist">
+      <section class="partner-draft-card partner-draft-card--sticky partner-checklist" data-checklist>
         <div class="partner-checklist__head">
           <h2>Checklist</h2>
-          <strong>{{ draft.completion_percentage or 0 }}%</strong>
+          <strong data-checklist-percent>{{ draft.completion_percentage or 0 }}%</strong>
         </div>
-        <progress value="{{ draft.completion_percentage or 0 }}" max="100">{{ draft.completion_percentage or 0 }}%</progress>
+        <progress data-checklist-progress value="{{ draft.completion_percentage or 0 }}" max="100">{{ draft.completion_percentage or 0 }}%</progress>
         <ul>
           {% for item in view.checklist %}
-            <li class="{{ 'is-complete' if item.complete }}">
+            <li class="{{ 'is-complete' if item.complete }}"
+                data-checklist-item="{{ item.key }}"
+                data-checklist-optional="{{ '1' if item.optional else '0' }}">
               <i data-lucide="{{ 'check-circle-2' if item.complete else 'circle' }}" aria-hidden="true"></i>
               <span>{{ item.label }}</span>
               <small>{{ item.message }}</small>
@@ -423,7 +455,10 @@
   </div>
 
   <footer class="partner-draft-bar">
-    <span>Estado: {{ draft.status.value.replace("_", " ")|title }} · {{ "Sin publicar" }}</span>
+    <span>
+      Estado: {{ draft.status.value.replace("_", " ")|title }} · {{ "Sin publicar" }}
+      <em class="partner-autosave-status" data-autosave-status aria-live="polite"></em>
+    </span>
     <div>
       <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Cancelar</a>
       <button class="partner-button partner-button--secondary" form="partner-product-draft-form" type="submit">Guardar borrador</button>

@@ -1,0 +1,263 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Reseñas | ECUVEL Partners{% endblock %}
+
+{% macro return_fields(page) -%}
+  <input type="hidden" name="return_q" value="{{ page.query }}">
+  {% for status in page.selected_statuses %}<input type="hidden" name="return_status" value="{{ status }}">{% endfor %}
+  {% for rating in page.selected_ratings %}<input type="hidden" name="return_rating" value="{{ rating }}">{% endfor %}
+  <input type="hidden" name="return_sort" value="{{ page.selected_sort }}">
+  <input type="hidden" name="return_page" value="{{ page.page }}">
+{%- endmacro %}
+
+{% set sort_options = (
+  ('newest', 'Más recientes'),
+  ('oldest', 'Más antiguas'),
+  ('rating_high', 'Mayor calificación'),
+  ('rating_low', 'Menor calificación')
+) %}
+
+{% block content %}
+<main class="partner-page partner-page--wide partner-reviews-page"
+      data-partner-reviews
+      data-remove-on-answer="{{ 'true' if page.selected_statuses == ('unanswered',) else 'false' }}">
+  <header class="partner-reviews-heading">
+    <div>
+      <p class="partner-eyebrow">{{ page.store.store_name }}</p>
+      <h1>Reseñas y comentarios</h1>
+      <p>Conoce la experiencia de tus compradores y responde en nombre de tu tienda.</p>
+    </div>
+  </header>
+
+  <section class="partner-review-metrics" aria-label="Resumen de reseñas">
+    <article class="partner-review-metric">
+      <div class="partner-review-metric__heading">
+        <span>Calificación promedio</span>
+        <span class="partner-review-metric__icon"><i data-lucide="star" aria-hidden="true"></i></span>
+      </div>
+      <div class="partner-review-metric__value">
+        <strong>{{ "%.1f"|format(page.metrics.average_rating) if page.metrics.average_rating is not none else "0.0" }}</strong>
+        <span>/ 5.0</span>
+      </div>
+      <p><i data-lucide="badge-check" aria-hidden="true"></i> Basada en compras verificadas</p>
+    </article>
+
+    <article class="partner-review-metric">
+      <div class="partner-review-metric__heading">
+        <span>Total de reseñas</span>
+        <span class="partner-review-metric__icon"><i data-lucide="messages-square" aria-hidden="true"></i></span>
+      </div>
+      <div class="partner-review-metric__value">
+        <strong data-review-total>{{ page.metrics.total_reviews }}</strong>
+      </div>
+      <p><i data-lucide="calendar-plus" aria-hidden="true"></i> {{ page.metrics.new_this_week }} nuevas esta semana</p>
+    </article>
+
+    <article class="partner-review-metric">
+      <div class="partner-review-metric__heading">
+        <span>Tasa de respuesta</span>
+        <span class="partner-review-metric__icon"><i data-lucide="reply-all" aria-hidden="true"></i></span>
+      </div>
+      <div class="partner-review-metric__value">
+        <strong><span data-review-rate>{{ page.metrics.response_rate }}</span>%</strong>
+      </div>
+      <div class="partner-review-metric__progress" role="progressbar" aria-label="Tasa de respuesta" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ page.metrics.response_rate }}" data-review-rate-progress>
+        <span style="width: {{ page.metrics.response_rate }}%" data-review-rate-bar></span>
+      </div>
+      <p><span data-review-answered>{{ page.metrics.answered_reviews }}</span> de {{ page.metrics.total_reviews }} respondidas</p>
+    </article>
+  </section>
+
+  <button class="partner-review-filter-toggle" type="button" aria-expanded="false" aria-controls="partner-review-filters" data-review-filter-toggle>
+    <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
+    Filtros
+    <i data-lucide="chevron-down" aria-hidden="true"></i>
+  </button>
+
+  <section class="partner-reviews-workspace">
+    <aside class="partner-review-filters" id="partner-review-filters" aria-label="Filtros de reseñas" data-review-filters>
+      <div class="partner-review-filters__heading">
+        <h2>Filtros</h2>
+        {% if page.query or page.selected_statuses or page.selected_ratings or page.selected_sort != 'newest' %}
+          <a href="{{ url_for('partners.partner_reviews') }}">Limpiar</a>
+        {% endif %}
+      </div>
+      <form method="get" action="{{ url_for('partners.partner_reviews') }}" data-review-filter-form>
+        {% if page.query %}<input type="hidden" name="q" value="{{ page.query }}">{% endif %}
+        <input type="hidden" name="sort" value="{{ page.selected_sort }}">
+        <fieldset>
+          <legend>Estado</legend>
+          <label>
+            <input type="checkbox" name="status" value="unanswered" {{ 'checked' if 'unanswered' in page.selected_statuses }} data-review-filter>
+            <span>Sin responder</span>
+            <strong data-review-unanswered-count>{{ page.status_counts.unanswered }}</strong>
+          </label>
+          <label>
+            <input type="checkbox" name="status" value="answered" {{ 'checked' if 'answered' in page.selected_statuses }} data-review-filter>
+            <span>Respondidas</span>
+            <strong data-review-answered-count>{{ page.status_counts.answered }}</strong>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Calificación</legend>
+          {% for rating in range(5, 0, -1) %}
+            <label>
+              <input type="checkbox" name="rating" value="{{ rating }}" {{ 'checked' if rating in page.selected_ratings }} data-review-filter>
+              <span>{{ rating }} <i data-lucide="star" aria-hidden="true"></i></span>
+              <strong>{{ page.rating_counts[rating] }}</strong>
+            </label>
+          {% endfor %}
+        </fieldset>
+      </form>
+    </aside>
+
+    <div class="partner-review-results">
+      <form class="partner-review-toolbar" method="get" action="{{ url_for('partners.partner_reviews') }}" role="search" data-review-search-form>
+        {% for status in page.selected_statuses %}<input type="hidden" name="status" value="{{ status }}">{% endfor %}
+        {% for rating in page.selected_ratings %}<input type="hidden" name="rating" value="{{ rating }}">{% endfor %}
+        <label class="partner-review-search">
+          <span class="visually-hidden">Buscar reseñas</span>
+          <i data-lucide="search" aria-hidden="true"></i>
+          <input type="search" name="q" value="{{ page.query }}" maxlength="160" placeholder="Buscar por producto, SKU o comentario..." autocomplete="off">
+        </label>
+        <button class="partner-review-search__submit" type="submit">Buscar</button>
+        <div class="partner-review-sort">
+          <span>Ordenar:</span>
+          <div class="partner-select" data-review-select>
+            <select class="partner-select__native" name="sort" data-review-sort data-review-select-native aria-label="Ordenar reseñas">
+              {% for value, label in sort_options %}<option value="{{ value }}" {{ 'selected' if page.selected_sort == value }}>{{ label }}</option>{% endfor %}
+            </select>
+            <button class="partner-select__button" type="button" aria-haspopup="listbox" aria-expanded="false" data-review-select-button>
+              <span data-review-select-label>Más recientes</span>
+              <i data-lucide="chevron-down" aria-hidden="true"></i>
+            </button>
+            <div class="partner-select__menu" role="listbox" data-review-select-menu>
+              {% for value, label in sort_options %}
+                <button class="partner-select__option" type="button" role="option" data-value="{{ value }}" aria-selected="{{ 'true' if page.selected_sort == value else 'false' }}">{{ label }}</button>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div class="partner-review-results__summary" aria-live="polite">
+        {% if page.total_items %}
+          Mostrando <strong>{{ page.first_item }}–{{ page.last_item }}</strong> de <strong data-review-filtered-total>{{ page.total_items }}</strong> reseñas
+        {% else %}
+          <strong data-review-filtered-total>0</strong> reseñas encontradas
+        {% endif %}
+      </div>
+
+      {% if not page.metrics.total_reviews %}
+        <section class="partner-review-empty">
+          <span><i data-lucide="message-square-heart" aria-hidden="true"></i></span>
+          <h2>Aún no tienes reseñas</h2>
+          <p>Las opiniones publicadas de compras verificadas aparecerán aquí.</p>
+        </section>
+      {% elif not page.reviews %}
+        <section class="partner-review-empty">
+          <span><i data-lucide="search-x" aria-hidden="true"></i></span>
+          <h2>No encontramos coincidencias</h2>
+          <p>Prueba otra búsqueda o limpia los filtros seleccionados.</p>
+          <a class="partner-button partner-button--secondary" href="{{ url_for('partners.partner_reviews') }}">Limpiar filtros</a>
+        </section>
+      {% else %}
+        <div class="partner-review-list" data-review-list>
+          {% for review in page.reviews %}
+            <article class="partner-review-card" id="review-{{ review.review_id }}" data-review-card data-review-id="{{ review.review_id }}">
+              <header class="partner-review-card__product">
+                <img src="{{ review.thumbnail_url or url_for('static', filename='images/placeholders/product-placeholder.svg') }}" alt="" width="58" height="58" loading="lazy">
+                <div>
+                  <a href="{{ url_for('storefront.product_detail', product_slug=review.product_slug) }}" target="_blank" rel="noopener">{{ review.product_title }}</a>
+                  <p>SKU: <code>{{ review.seller_sku }}</code>{% if review.variant_label %}<span>· {{ review.variant_label }}</span>{% endif %}</p>
+                </div>
+                <span class="partner-review-status partner-review-status--{{ 'answered' if review.is_answered else 'unanswered' }}" data-review-status>
+                  <i data-lucide="{{ 'circle-check' if review.is_answered else 'clock-3' }}" aria-hidden="true"></i>
+                  <span>{{ 'Respondida' if review.is_answered else 'Sin responder' }}</span>
+                </span>
+              </header>
+
+              <div class="partner-review-card__meta">
+                <div class="partner-review-stars" aria-label="{{ review.rating }} de 5 estrellas">
+                  {% for value in range(1, 6) %}<i data-lucide="star" class="{{ 'is-active' if value <= review.rating }}" aria-hidden="true"></i>{% endfor %}
+                </div>
+                <strong>{{ review.buyer_name }}</strong>
+                <span><i data-lucide="badge-check" aria-hidden="true"></i> Compra verificada</span>
+                <time>{{ review.published_date_label }}</time>
+              </div>
+              <p class="partner-review-card__body">{{ review.body }}</p>
+
+              {% if review.images %}
+                <div class="partner-review-card__gallery" aria-label="Fotos de la reseña">
+                  {% for image in review.images %}
+                    <button type="button" data-partner-review-image data-src="{{ image.url }}" data-alt="Foto {{ loop.index }} de la reseña de {{ review.product_title }}">
+                      <img src="{{ image.url }}" alt="Foto {{ loop.index }} de la reseña" width="{{ image.width }}" height="{{ image.height }}" loading="lazy">
+                    </button>
+                  {% endfor %}
+                </div>
+              {% endif %}
+
+              <section class="partner-review-reply-view" data-review-reply-view {{ 'hidden' if not review.reply }}>
+                <div class="partner-review-reply-view__heading">
+                  <div><i data-lucide="store" aria-hidden="true"></i><strong>Respuesta oficial de {{ page.store.store_name }}</strong></div>
+                  <button type="button" data-review-edit><i data-lucide="pencil" aria-hidden="true"></i> Editar</button>
+                </div>
+                <p data-review-reply-body>{{ review.reply.body if review.reply else '' }}</p>
+                <small data-review-reply-date>
+                  {% if review.reply %}{{ review.reply.updated_date_label }}{{ ' · Editada' if review.reply.is_edited }}{% endif %}
+                </small>
+              </section>
+
+              <form class="partner-review-reply-form" method="post" action="{{ url_for('partners.partner_review_reply', review_id=review.review_id) }}" data-review-reply-form {{ 'hidden' if review.reply }}>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="expected_updated_at" value="{{ review.reply.version if review.reply else '' }}" data-review-version>
+                {{ return_fields(page) }}
+                <div class="partner-review-quick-replies">
+                  <span>Respuestas rápidas</span>
+                  <div>
+                    {% for reply in review.quick_replies %}
+                      <button type="button" data-review-quick-reply data-quick-text="{{ reply }}">{{ reply }}</button>
+                    {% endfor %}
+                  </div>
+                </div>
+                <div class="partner-review-reply-editor">
+                  <label>
+                    <span class="visually-hidden">Respuesta oficial</span>
+                    <textarea name="body" maxlength="500" rows="3" placeholder="Escribe una respuesta pública..." data-review-reply-input>{{ review.reply.body if review.reply else '' }}</textarea>
+                  </label>
+                  <div class="partner-review-reply-editor__footer">
+                    <span><strong data-review-character-count>{{ review.reply.body|length if review.reply else 0 }}</strong>/500</span>
+                    <p role="alert" data-review-reply-error hidden></p>
+                    <button type="button" class="partner-review-reply-cancel" data-review-cancel {{ 'hidden' if not review.reply }}>Cancelar</button>
+                    <button type="submit" class="partner-review-reply-submit" data-review-submit>
+                      <i data-lucide="send" aria-hidden="true"></i>
+                      <span>{{ 'Guardar cambios' if review.reply else 'Responder' }}</span>
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </article>
+          {% endfor %}
+        </div>
+
+        {% if page.total_pages > 1 %}
+          <nav class="partner-review-pagination" aria-label="Paginación de reseñas">
+            {% if previous_url %}<a href="{{ previous_url }}"><i data-lucide="chevron-left" aria-hidden="true"></i> Anterior</a>{% else %}<span aria-disabled="true"><i data-lucide="chevron-left" aria-hidden="true"></i> Anterior</span>{% endif %}
+            <strong>Página {{ page.page }} de {{ page.total_pages }}</strong>
+            {% if next_url %}<a href="{{ next_url }}">Siguiente <i data-lucide="chevron-right" aria-hidden="true"></i></a>{% else %}<span aria-disabled="true">Siguiente <i data-lucide="chevron-right" aria-hidden="true"></i></span>{% endif %}
+          </nav>
+        {% endif %}
+      {% endif %}
+    </div>
+  </section>
+
+  <dialog class="partner-review-lightbox" aria-label="Foto de reseña" data-partner-review-lightbox>
+    <button type="button" aria-label="Cerrar foto" data-partner-review-lightbox-close><i data-lucide="x" aria-hidden="true"></i></button>
+    <img src="" alt="" data-partner-review-lightbox-image>
+  </dialog>
+</main>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ url_for('static', filename='js/partner-reviews.js') }}" defer></script>
+{% endblock %}

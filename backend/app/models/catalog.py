@@ -141,6 +141,13 @@ class Product(
         nullable=True,
     )
 
+    variant_configuration: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -157,6 +164,13 @@ class Product(
         "ProductVariant",
         back_populates="product",
         cascade="all, delete-orphan",
+    )
+
+    media: Mapped[list["ProductMedia"]] = relationship(
+        "ProductMedia",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        order_by="ProductMedia.position",
     )
 
     favorites: Mapped[list["Favorite"]] = relationship(
@@ -213,6 +227,12 @@ class ProductVariant(
         server_default=text("'{}'::jsonb"),
     )
 
+    combination_key: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        index=True,
+    )
+
     weight_grams: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
@@ -251,6 +271,11 @@ class ProductVariant(
     )
 
     __table_args__ = (
+        UniqueConstraint(
+            "product_id",
+            "combination_key",
+            name="uq_product_variants_product_combination",
+        ),
         CheckConstraint(
             "weight_grams IS NULL OR weight_grams >= 0",
             name="variant_weight_nonnegative",
@@ -374,5 +399,48 @@ class SellerOffer(
         CheckConstraint(
             "commission_rate >= 0 AND commission_rate <= 100",
             name="seller_offer_commission_valid",
+        ),
+    )
+
+
+class ProductMedia(
+    UUIDPrimaryKeyMixin,
+    TimestampMixin,
+    db.Model,
+):
+    __tablename__ = "product_media"
+
+    product_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    public_id: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        unique=True,
+        index=True,
+        default=lambda: uuid.uuid4().hex,
+    )
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    media_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    is_cover: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    variant_axis_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    variant_value_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+
+    product: Mapped[Product] = relationship("Product", back_populates="media")
+
+    __table_args__ = (
+        CheckConstraint("size_bytes > 0", name="product_media_size_positive"),
+        CheckConstraint("position >= 0", name="product_media_position_nonnegative"),
+        CheckConstraint(
+            "(variant_axis_key IS NULL) = (variant_value_key IS NULL)",
+            name="product_media_variant_binding_complete",
         ),
     )

@@ -1,74 +1,195 @@
 {% extends "partners/base.html" %}
+{% from "components/product_overview.html" import product_overview %}
+{% from "components/product_specs.html" import product_specs %}
+
 {% block partner_title %}Vista previa del borrador | ECUVEL Partners{% endblock %}
+
+{% block styles %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/product-detail.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/reviews.css') }}">
+{% endblock %}
 
 {% block content %}
 {% set draft = view.draft %}
-{% set price = draft.pricing_data or {} %}
-<main class="partner-page partner-page--wide">
-  <section class="partner-draft-preview" aria-labelledby="draft-preview-title">
-    <header>
-      <p class="partner-eyebrow">Vista privada · No publicado</p>
-      <h1 id="draft-preview-title">{{ draft.title or "Producto sin título" }}</h1>
-      <p>Esta vista previa sirve para revisar el contenido antes de enviarlo a revisión. Aún no existe producto público, oferta ni inventario físico.</p>
-      <div class="partner-actions partner-actions--inline">
-        <a class="partner-button partner-button--secondary" href="{{ url_for('partners.product_draft', draft_id=draft.id) }}">Volver a editar</a>
-        <a class="partner-button partner-button--primary" href="{{ url_for('partners.product_draft', draft_id=draft.id) }}">Revisar checklist</a>
+{% set dashboard = preview.dashboard %}
+{% set product = preview.product %}
+{% set editable = draft.status.value in ['DRAFT', 'INCOMPLETE', 'READY_FOR_REVIEW', 'CHANGES_REQUESTED'] %}
+{% set status_labels = {
+  'DRAFT': 'Borrador',
+  'INCOMPLETE': 'Incompleto',
+  'READY_FOR_REVIEW': 'Listo para revisión',
+  'SUBMITTED': 'Enviado a revisión',
+  'CHANGES_REQUESTED': 'Cambios solicitados',
+  'APPROVED': 'Aprobado',
+  'REJECTED': 'Rechazado'
+} %}
+<main class="partner-page partner-page--preview">
+  <section class="partner-preview-shell" aria-labelledby="draft-preview-title">
+    <header class="partner-preview-header">
+      <div>
+        <p class="partner-eyebrow"><i data-lucide="lock-keyhole" aria-hidden="true"></i> Vista privada · No publicado</p>
+        <h1 id="draft-preview-title">{{ draft.title or "Producto sin título" }}</h1>
+        <p>Revisa la información guardada y comprueba cómo se verá el producto antes de enviarlo.</p>
       </div>
+      {% if editable %}
+        <a class="partner-button partner-button--secondary" href="{{ url_for('partners.product_draft', draft_id=draft.id) }}">
+          <i data-lucide="pencil" aria-hidden="true"></i> Volver a editar
+        </a>
+      {% endif %}
     </header>
 
-    <div class="partner-preview-grid">
-      <section class="partner-draft-card">
-        <h2>Galería</h2>
-        <div class="partner-gallery-grid partner-gallery-grid--preview">
-          {% for file in view.image_files %}
-            <img src="{{ url_for('partners.product_draft_file', draft_id=draft.id, file_id=file.id) }}" alt="Imagen del borrador {{ loop.index }}">
+    <nav class="partner-preview-tabs" role="tablist" aria-label="Secciones de vista previa">
+      <a
+        id="preview-summary-tab"
+        role="tab"
+        aria-selected="{{ 'true' if preview.selected_view == 'summary' else 'false' }}"
+        aria-controls="preview-summary-panel"
+        class="{{ 'is-active' if preview.selected_view == 'summary' }}"
+        href="{{ url_for('partners.product_draft_preview', draft_id=draft.id, view='summary', variant=product.catalog_sku) }}"
+      ><i data-lucide="layout-dashboard" aria-hidden="true"></i> Resumen</a>
+      <a
+        id="preview-storefront-tab"
+        role="tab"
+        aria-selected="{{ 'true' if preview.selected_view == 'storefront' else 'false' }}"
+        aria-controls="preview-storefront-panel"
+        class="{{ 'is-active' if preview.selected_view == 'storefront' }}"
+        href="{{ url_for('partners.product_draft_preview', draft_id=draft.id, view='storefront', variant=product.catalog_sku) }}"
+      ><i data-lucide="store" aria-hidden="true"></i> Vista previa</a>
+    </nav>
+
+    {% if preview.selected_view == 'summary' %}
+    <section id="preview-summary-panel" class="partner-preview-panel" role="tabpanel" aria-labelledby="preview-summary-tab">
+      <div class="partner-preview-dashboard-heading">
+        <div>
+          <span>Estado de la publicación</span>
+          <h2>Resumen del borrador</h2>
+        </div>
+        <span class="partner-preview-status partner-preview-status--{{ draft.status.value|lower }}">{{ status_labels.get(draft.status.value, draft.status.value) }}</span>
+      </div>
+
+      <section class="partner-preview-progress" aria-labelledby="preview-progress-title">
+        <div class="partner-preview-progress__value">
+          <div>
+            <span id="preview-progress-title">Avance de la publicación</span>
+            <strong>{{ draft.completion_percentage or 0 }}%</strong>
+          </div>
+          <progress value="{{ draft.completion_percentage or 0 }}" max="100">{{ draft.completion_percentage or 0 }}%</progress>
+        </div>
+        <div class="partner-preview-progress__action">
+          {% if editable and dashboard.can_submit %}
+            <form method="post" action="{{ url_for('partners.submit_saved_product_draft_route', draft_id=draft.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="partner-button partner-button--primary" type="submit">
+                Enviar a revisión <i data-lucide="send" aria-hidden="true"></i>
+              </button>
+            </form>
+            <small>El servidor volverá a validar todos los datos.</small>
+          {% elif editable %}
+            <button class="partner-button partner-button--primary" type="button" disabled>Enviar a revisión</button>
+            <small>Completa los pendientes antes de enviar.</small>
           {% else %}
-            <p>No hay imágenes cargadas.</p>
-          {% endfor %}
+            <span>Este borrador ya no admite un nuevo envío.</span>
+          {% endif %}
         </div>
       </section>
 
-      <section class="partner-draft-card">
-        <h2>Resumen</h2>
-        <dl class="partner-summary partner-summary--large">
-          <div><dt>Categoría</dt><dd>{{ draft.category.name }}</dd></div>
-          <div><dt>Subcategoría</dt><dd>{{ draft.subcategory.name }}</dd></div>
-          <div><dt>Plantilla</dt><dd><code>{{ draft.template_key }}</code></dd></div>
-          <div><dt>Código del producto</dt><dd>{{ draft.seller_sku or "Pendiente" }}</dd></div>
-          <div>
-            <dt>Código de barras</dt>
-            <dd>
-              {% if draft.seller_sku %}
-                <img class="partner-summary-barcode" src="{{ url_for('partners.product_draft_barcode', draft_id=draft.id) }}" alt="Código de barras Code 128 de {{ draft.seller_sku }}">
-              {% else %}
-                Pendiente
-              {% endif %}
-            </dd>
-          </div>
-          <div><dt>Precio</dt><dd>${{ price.get("price") or "0.00" }}</dd></div>
-          <div><dt>Estado</dt><dd>{{ draft.status.value.replace("_", " ")|title }}</dd></div>
-        </dl>
-      </section>
-    </div>
+      <div class="partner-preview-metrics" aria-label="Métricas del borrador">
+        <article><i data-lucide="layers-3" aria-hidden="true"></i><span>Modo</span><strong>{{ 'Familia' if dashboard.family_enabled else 'Producto simple' }}</strong></article>
+        <article><i data-lucide="boxes" aria-hidden="true"></i><span>Variantes activas</span><strong>{{ dashboard.active_variants if dashboard.family_enabled else 1 }}</strong><small>{{ dashboard.inactive_variants }} inactivas · {{ dashboard.sold_out_variants }} agotadas</small></article>
+        <article><i data-lucide="circle-dollar-sign" aria-hidden="true"></i><span>Precio</span><strong>
+          {% if dashboard.price_min is none %}Pendiente
+          {% elif dashboard.price_min == dashboard.price_max %}{{ dashboard.price_min|money('USD') }}
+          {% else %}{{ dashboard.price_min|money('USD') }} – {{ dashboard.price_max|money('USD') }}{% endif %}
+        </strong></article>
+        <article><i data-lucide="package-check" aria-hidden="true"></i><span>Stock total</span><strong>{{ dashboard.stock_total }}</strong><small>unidades entre presentaciones</small></article>
+        <article><i data-lucide="images" aria-hidden="true"></i><span>Imágenes</span><strong>{{ dashboard.image_count }}</strong><small>{{ dashboard.incomplete_galleries|length }} galerías incompletas</small></article>
+      </div>
 
-    <section class="partner-draft-card">
-      <h2>Descripción</h2>
-      <p>{{ draft.description or "Sin descripción todavía." }}</p>
-    </section>
-
-    <section class="partner-draft-card">
-      <h2>Características</h2>
-      <dl class="partner-summary partner-summary--large">
-        {% for field in view.template.fields %}
-          {% set value = draft.attributes.get(field.key) if draft.attributes else none %}
-          {% if value %}
-            <div><dt>{{ field.label }}</dt><dd>{{ value|join(", ") if value is sequence and value is not string else value }}</dd></div>
+      <div class="partner-preview-dashboard-grid">
+        <section class="partner-preview-card" aria-labelledby="preview-checklist-title">
+          <header>
+            <div><span>Validación</span><h2 id="preview-checklist-title">Pendientes del checklist</h2></div>
+            <strong>{{ dashboard.pending_items|length }}</strong>
+          </header>
+          {% if dashboard.pending_items %}
+            <ul class="partner-preview-checklist">
+              {% for item in dashboard.pending_items %}
+                <li>
+                  <i data-lucide="circle-alert" aria-hidden="true"></i>
+                  <div><strong>{{ item.label }}</strong><span>{{ item.message }}</span></div>
+                  {% if editable %}<a href="{{ url_for('partners.product_draft', draft_id=draft.id) }}">Corregir</a>{% endif %}
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <div class="partner-preview-ready"><i data-lucide="badge-check" aria-hidden="true"></i><div><strong>Todo está completo</strong><span>El borrador está listo para la validación final del servidor.</span></div></div>
           {% endif %}
-        {% else %}
-          <div><dt>Plantilla</dt><dd>Sin campos configurados.</dd></div>
-        {% endfor %}
-      </dl>
+          {% if dashboard.incomplete_galleries %}
+            <div class="partner-preview-gallery-warning">
+              <strong>Galerías que requieren atención</strong>
+              <span>{{ dashboard.incomplete_galleries|join(', ') }}</span>
+            </div>
+          {% endif %}
+        </section>
+
+        <section class="partner-preview-card" aria-labelledby="preview-identity-title">
+          <header><div><span>Identificación</span><h2 id="preview-identity-title">Producto y catálogo</h2></div></header>
+          <dl class="partner-preview-identity">
+            <div><dt>Categoría</dt><dd>{{ draft.category.name }}</dd></div>
+            <div><dt>Subcategoría</dt><dd>{{ draft.subcategory.name }}</dd></div>
+            <div><dt>Plantilla</dt><dd><code>{{ draft.template_key }}</code></dd></div>
+            <div><dt>SKU madre</dt><dd>{{ draft.seller_sku or 'Pendiente' }}</dd></div>
+            <div class="partner-preview-identity__barcode"><dt>Código de barras</dt><dd>
+              {% if draft.seller_sku %}
+                <img src="{{ url_for('partners.product_draft_barcode', draft_id=draft.id) }}" alt="Código de barras Code 128 de {{ draft.seller_sku }}">
+              {% else %}Pendiente{% endif %}
+            </dd></div>
+          </dl>
+        </section>
+      </div>
     </section>
+    {% else %}
+    <section id="preview-storefront-panel" class="partner-preview-panel partner-preview-panel--storefront" role="tabpanel" aria-labelledby="preview-storefront-tab">
+      <div class="partner-storefront-notice" role="status">
+        <i data-lucide="eye" aria-hidden="true"></i>
+        <div><strong>Simulación privada de la página pública</strong><span>Puedes explorar imágenes y variantes. Comprar, añadir al carrito y guardar favoritos permanecerá bloqueado.</span></div>
+      </div>
+
+      <div class="product-detail-page content-container partner-storefront-preview">
+        {{ product_overview(product, true) }}
+
+        <section class="product-detail-section product-recommendations" aria-labelledby="preview-recommendations-title">
+          <div class="detail-section-heading"><span>También puede interesarte</span><h2 id="preview-recommendations-title">Productos recomendados</h2></div>
+          <div class="detail-empty-state"><i data-lucide="package-search" aria-hidden="true"></i><p>Las recomendaciones aparecerán cuando el producto sea publicado.</p></div>
+        </section>
+
+        <section class="product-detail-section" aria-labelledby="preview-description-title">
+          <div class="detail-section-heading"><span>Conoce el producto</span><h2 id="preview-description-title">Descripción</h2></div>
+          {% if product.description %}<p class="product-description">{{ product.description }}</p>
+          {% else %}<div class="detail-empty-state"><i data-lucide="file-text" aria-hidden="true"></i><p>Descripción pendiente.</p></div>{% endif %}
+        </section>
+
+        <section class="product-detail-section" aria-labelledby="preview-specifications-title">
+          <div class="detail-section-heading"><span>Ficha técnica</span><h2 id="preview-specifications-title">Especificaciones</h2></div>
+          {{ product_specs(product.specifications) }}
+        </section>
+
+        <section class="product-detail-section product-reviews" aria-labelledby="preview-reviews-title">
+          <div class="detail-section-heading"><span>Opiniones</span><h2 id="preview-reviews-title">Reseñas del producto</h2></div>
+          <div class="review-empty-state">
+            <div class="review-empty-state__score"><strong>0.0</strong><span>/ 5</span><small>0 opiniones</small></div>
+            <div><i data-lucide="message-square-more" aria-hidden="true"></i><h3>Este producto todavía no tiene reseñas.</h3><p>Las opiniones aparecerán aquí después de la publicación y las primeras compras.</p></div>
+          </div>
+        </section>
+      </div>
+    </section>
+    {% endif %}
   </section>
 </main>
+{% endblock %}
+
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/product-detail.js') }}" defer></script>
 {% endblock %}

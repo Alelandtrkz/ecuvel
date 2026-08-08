@@ -10,7 +10,8 @@
        data-condition-values="{{ field.condition['values'] | join(',') }}"
        {% if not _condition_met %}hidden{% endif %}>
 {% endif %}
-<label class="partner-draft-field partner-draft-field--{{ field.type }}{% if field_unit %} partner-draft-field--with-unit{% endif %}">
+<label class="partner-draft-field partner-draft-field--{{ field.type }}{% if field_unit %} partner-draft-field--with-unit{% endif %}"
+       data-attr-key="{{ field.key }}"{% if field.required %} data-attr-required="1"{% endif %}>
   <span class="partner-draft-field__heading">
     {% if field.icon %}
       <i data-lucide="{{ field.icon }}" aria-hidden="true"></i>

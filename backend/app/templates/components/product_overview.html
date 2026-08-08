@@ -1,0 +1,69 @@
+{% from "components/product_gallery.html" import product_gallery %}
+{% from "components/purchase_card.html" import purchase_card %}
+{% from "components/store_card.html" import store_card %}
+
+{% macro product_overview(product, preview_mode=false) -%}
+<section class="product-overview{{ ' product-overview--preview' if preview_mode }}" aria-labelledby="product-title">
+  {{ product_gallery(product.gallery_images, product.name, product.gallery_placeholder_url) }}
+
+  <header class="product-information">
+    <span class="product-information__category">{{ product.category_name }}</span>
+    <h1 id="product-title">{{ product.name }}</h1>
+    {% if product.variant_name %}<p class="product-information__variant" data-selected-variant-name>{{ product.variant_name }}</p>{% endif %}
+    <div class="product-information__meta">
+      <span class="product-information__rating">
+        <i data-lucide="star" aria-hidden="true"></i>
+        {% if product.rating is not none and product.review_count %}
+          {{ "%.1f"|format(product.rating) }} · {{ product.review_count }} reseña{{ '' if product.review_count == 1 else 's' }}
+        {% else %}
+          0.0 · Sin reseñas
+        {% endif %}
+      </span>
+      <span>SKU: <span data-selected-sku>{{ product.seller_sku }}</span></span>
+    </div>
+    {% if product.variant_payload.axes and product.variant_payload.variants|length > 1 %}
+      {% set selected_ns = namespace(variant=none) %}
+      {% for candidate in product.variant_payload.variants %}
+        {% if candidate.catalog_sku == product.variant_payload.selected_catalog_sku %}{% set selected_ns.variant = candidate %}{% endif %}
+      {% endfor %}
+      <section class="product-variant-selector" data-product-variant-selector aria-label="Opciones del producto">
+        <script type="application/json" data-product-variant-payload>{{ product.variant_payload|tojson }}</script>
+        {% for axis in product.variant_payload.axes %}
+          <fieldset data-public-variant-axis="{{ axis.key }}">
+            <legend>{{ axis.label }}{% if axis.unit %} <small>({{ axis.unit }})</small>{% endif %}</legend>
+            <div class="product-variant-selector__values">
+              {% for value in axis.get('values', []) %}
+                {% set selected_value = selected_ns.variant and selected_ns.variant.attributes.get(axis.key) in [value.key, value.label] %}
+                <button type="button" data-public-variant-value="{{ value.key }}"
+                        aria-pressed="{{ 'true' if selected_value else 'false' }}"
+                        class="{{ 'is-selected' if selected_value }}{% if axis.is_visual %} is-visual{% endif %}"
+                        {% if value.swatch %}style="--variant-swatch: {{ value.swatch }}"{% endif %}>
+                  {% if axis.is_visual %}<span aria-hidden="true"></span>{% endif %}
+                  {{ value.label }}{% if axis.unit %} {{ axis.unit }}{% endif %}
+                </button>
+              {% endfor %}
+            </div>
+          </fieldset>
+        {% endfor %}
+      </section>
+    {% endif %}
+  </header>
+
+  {{ purchase_card(product, preview_mode) }}
+
+  <section class="product-summary" aria-labelledby="summary-title">
+    <h2 id="summary-title">Características principales</h2>
+    {% if product.highlights %}
+      <dl>
+        {% for highlight in product.highlights %}
+          <div><dt>{{ highlight.label }}</dt><dd>{{ highlight.value }}</dd></div>
+        {% endfor %}
+      </dl>
+    {% else %}
+      <p>La información resumida está pendiente.</p>
+    {% endif %}
+  </section>
+
+  {{ store_card(product, preview_mode) }}
+</section>
+{%- endmacro %}

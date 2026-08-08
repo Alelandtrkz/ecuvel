@@ -1,4 +1,4 @@
-{% macro store_card(product) -%}
+{% macro store_card(product, preview_mode=false) -%}
 <section class="store-card" aria-labelledby="store-card-title">
   <div class="store-card__icon"><i data-lucide="store" aria-hidden="true"></i></div>
   <div class="store-card__content">
@@ -13,7 +13,9 @@
       <p>Calificación basada en reseñas de productos publicados.</p>
     {% endif %}
   </div>
-  {% if product.store_url %}
+  {% if preview_mode %}
+    <button class="button button--secondary" type="button" disabled>Vista previa de tienda</button>
+  {% elif product.store_url %}
     <a class="button button--secondary" href="{{ product.store_url }}">Ver tienda</a>
   {% else %}
     <button class="button button--secondary" type="button" disabled>Página de tienda próximamente</button>

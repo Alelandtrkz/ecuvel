@@ -1,20 +1,41 @@
-{% macro purchase_card(product) -%}
-<aside class="purchase-card" aria-label="Opciones de compra">
-  <div class="purchase-card__availability purchase-card__availability--{{ 'available' if product.is_available else 'unavailable' }}">
+{% macro purchase_card(product, preview_mode=false) -%}
+<aside class="purchase-card" aria-label="Opciones de compra"{% if preview_mode %} data-preview-commercial{% endif %}>
+  <div class="purchase-card__availability purchase-card__availability--{{ 'available' if product.is_available else 'unavailable' }}" data-variant-availability>
     <i data-lucide="{{ 'circle-check' if product.is_available else 'circle-x' }}" aria-hidden="true"></i>
-    <span>{{ product.availability_label }}</span>
+    <span data-variant-availability-label>{{ product.availability_label }}</span>
   </div>
   <div class="purchase-card__prices">
-    <strong>{{ product.current_price|money(product.currency) }}</strong>
-    {% if product.compare_at_price %}
-      <del>{{ product.compare_at_price|money(product.currency) }}</del>
-    {% endif %}
+    <strong data-variant-price>{{ "Precio pendiente" if product.price_pending|default(false) else product.current_price|money(product.currency) }}</strong>
+    <del data-variant-compare-price {% if not product.compare_at_price %}hidden{% endif %}>{{ product.compare_at_price|money(product.currency) if product.compare_at_price else '' }}</del>
   </div>
   <p class="purchase-card__delivery"><i data-lucide="truck" aria-hidden="true"></i> Información de entrega próximamente</p>
 
+  {% if preview_mode %}
+  <div class="purchase-card__cart-form" data-cart-add-form data-max-quantity="{{ product.max_quantity }}">
+    <div class="quantity-selector">
+      <label for="preview-product-quantity">Cantidad</label>
+      <div class="quantity-selector__controls">
+        <button type="button" aria-label="Disminuir cantidad" disabled><i data-lucide="minus" aria-hidden="true"></i></button>
+        <input id="preview-product-quantity" type="number" value="1" min="1" disabled>
+        <button type="button" aria-label="Aumentar cantidad" disabled><i data-lucide="plus" aria-hidden="true"></i></button>
+      </div>
+    </div>
+    <p class="purchase-card__stock-message purchase-card__stock-message--{{ 'low' if product.low_stock else 'unavailable' }}" data-stock-message aria-live="polite" {% if not product.low_stock and product.is_available %}hidden{% endif %}>{{ product.availability_message }}</p>
+    <button class="button button--primary purchase-card__add" type="button" disabled title="Disponible cuando el producto sea publicado">
+      <i data-lucide="shopping-cart" aria-hidden="true"></i> Añadir al carrito
+    </button>
+  </div>
+  <p class="purchase-card__preview-note"><i data-lucide="lock-keyhole" aria-hidden="true"></i> Disponible cuando el producto sea publicado.</p>
+  <div class="purchase-card__actions">
+    <button class="button button--secondary" type="button" disabled>Comprar ahora</button>
+    <button class="purchase-card__favorite" type="button" disabled aria-label="Favoritos disponibles al publicar">
+      <i data-lucide="heart" aria-hidden="true"></i><span>Guardar en favoritos</span>
+    </button>
+  </div>
+  {% else %}
   <form class="purchase-card__cart-form" method="post" action="{{ url_for('storefront.add_to_cart') }}" data-cart-add-form data-max-quantity="{{ product.max_quantity }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="offer_id" value="{{ product.offer_id }}">
+    <input type="hidden" name="offer_id" value="{{ product.offer_id }}" data-variant-offer-id>
     <input type="hidden" name="next" value="{{ url_for('storefront.product_detail', product_slug=product.public_identifier) }}">
     <div class="quantity-selector" data-quantity-selector data-max-quantity="{{ product.max_quantity }}">
       <label for="product-quantity">Cantidad</label>
@@ -28,9 +49,7 @@
         </button>
       </div>
     </div>
-    {% if product.low_stock or not product.is_available %}
-      <p class="purchase-card__stock-message purchase-card__stock-message--{{ 'low' if product.low_stock else 'unavailable' }}" data-stock-message aria-live="polite">{{ product.availability_message }}</p>
-    {% endif %}
+    <p class="purchase-card__stock-message purchase-card__stock-message--{{ 'low' if product.low_stock else 'unavailable' }}" data-stock-message aria-live="polite" {% if not product.low_stock and product.is_available %}hidden{% endif %}>{{ product.availability_message }}</p>
     <button
       class="button button--primary purchase-card__add"
       type="submit"
@@ -66,5 +85,6 @@
       </button>
     </form>
   </div>
+  {% endif %}
 </aside>
 {%- endmacro %}

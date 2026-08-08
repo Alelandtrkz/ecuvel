@@ -1,110 +1,158 @@
 {% set draft = view.draft %}
-{% set image_count = view.image_files|length %}
+{% set all_images = view.image_files %}
 {% set max_images = config.PARTNER_PRODUCT_MAX_IMAGES %}
 {% set min_images = config.PARTNER_PRODUCT_MIN_IMAGES %}
-<section
-  class="partner-draft-card partner-gallery"
-  aria-labelledby="gallery-title"
-  data-draft-gallery
-  data-upload-url="{{ url_for('partners.upload_product_draft_file', draft_id=draft.id) }}"
-  data-reorder-url="{{ url_for('partners.reorder_product_draft_files_route', draft_id=draft.id) }}"
-  data-csrf-token="{{ csrf_token() }}"
-  data-count="{{ image_count }}"
-  data-max-images="{{ max_images }}"
-  data-min-images="{{ min_images }}"
->
-  <div class="partner-draft-card__title partner-gallery__title">
-    <div>
-      <h2 id="gallery-title">Galería Multimedia ({{ image_count }}/{{ max_images }})</h2>
-      <p>Cargue al menos {{ min_images }} imágenes de alta calidad. La primera imagen se utilizará como portada.</p>
-    </div>
-    {% if errors.images %}<span class="partner-error">{{ errors.images }}</span>{% endif %}
-  </div>
+{% set variant_config = draft.variant_configuration or {} %}
+{% set family_enabled = variant_config and (variant_config.get('version', 1) < 4 or variant_config.get('enabled') == true) %}
+{% set visual_key = variant_config.get('visual_axis_key') if family_enabled else none %}
+{% set ns = namespace(visual_axis=none) %}
+{% for axis in variant_config.get('axes', []) %}
+  {% if axis.get('key') == visual_key %}{% set ns.visual_axis = axis %}{% endif %}
+{% endfor %}
 
-  <form class="partner-gallery__upload-form" method="post" enctype="multipart/form-data" action="{{ url_for('partners.upload_product_draft_file', draft_id=draft.id) }}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <input type="hidden" name="kind" value="IMAGE">
-    <input
-      class="visually-hidden"
-      data-gallery-input
-      type="file"
-      name="files"
-      accept="image/jpeg,image/png,image/webp"
-      multiple
-      aria-describedby="gallery-help gallery-status"
-    >
-  </form>
-
-  <p id="gallery-status" class="partner-gallery__message" data-gallery-message role="status" aria-live="polite"></p>
-
-  {% if image_count > max_images %}
-    <p class="partner-gallery__limit-warning">
-      Este borrador tiene {{ image_count }} imágenes. El nuevo límite es {{ max_images }}; elimina imágenes antes de enviar a revisión.
-    </p>
+{% macro gallery_group(files, label, axis_key=none, value_key=none, unassigned=false, swatch=none, variant_count=0, stock_count=0, expanded=false) %}
+  {% set count = files|length %}
+  {% if axis_key or unassigned %}
+  <details class="partner-variant-gallery-accordion{% if unassigned %} is-unassigned{% endif %}" {% if expanded %}open{% endif %}>
+    <summary>
+      <span class="partner-variant-gallery-accordion__swatch" style="--variant-swatch: {{ swatch or '#cbd5e1' }}"></span>
+      <span class="partner-variant-gallery-accordion__identity">
+        <strong>{{ label }}</strong>
+        <small>
+          {{ count }} imagen{{ '' if count == 1 else 'es' }}
+          {% if axis_key %} · {{ variant_count }} variante{{ '' if variant_count == 1 else 's' }} · {{ stock_count }} en stock{% endif %}
+        </small>
+      </span>
+      <span class="partner-variant-gallery-accordion__status{% if count %} is-complete{% endif %}">{{ 'Completa' if count else 'Sin imágenes' }}</span>
+      <i data-lucide="chevron-down" aria-hidden="true"></i>
+    </summary>
   {% endif %}
-
-  <div class="partner-gallery__layout" data-gallery-dropzone>
-    {% set cover = view.image_files[0] if image_count else none %}
-    <div class="partner-gallery__cover">
-      {% if cover %}
-        <article class="partner-gallery-item partner-gallery-item--cover is-cover" draggable="true" data-gallery-image data-image-id="{{ cover.id }}">
-          <img src="{{ url_for('partners.product_draft_file', draft_id=draft.id, file_id=cover.id) }}" alt="Imagen de portada del borrador">
-          <span class="partner-gallery-item__badge">Portada</span>
-          <div class="partner-gallery-item__actions">
-            <button type="button" data-move-image="right" aria-label="Mover portada a la derecha">
-              <i data-lucide="arrow-right" aria-hidden="true"></i>
-            </button>
-            <form method="post" action="{{ url_for('partners.delete_product_draft_file_route', draft_id=draft.id, file_id=cover.id) }}" data-gallery-delete-form>
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" aria-label="Eliminar portada">
-                <i data-lucide="trash-2" aria-hidden="true"></i>
-              </button>
-            </form>
-          </div>
-        </article>
-      {% else %}
-        <button class="partner-gallery-empty partner-gallery-empty--cover" type="button" data-open-gallery>
-          <span class="partner-gallery-empty__icon"><i data-lucide="camera" aria-hidden="true"></i></span>
-          <strong>Añadir portada</strong>
-          <span>Arrastra o selecciona un archivo</span>
-        </button>
-      {% endif %}
+  <section class="partner-draft-card partner-gallery{% if axis_key %} partner-gallery--variant{% endif %}"
+           data-draft-gallery
+           data-upload-url="{{ url_for('partners.upload_product_draft_file', draft_id=draft.id) }}"
+           data-reorder-url="{{ url_for('partners.reorder_product_draft_files_route', draft_id=draft.id) }}"
+           data-csrf-token="{{ csrf_token() }}"
+           data-count="{{ count }}"
+           data-max-images="{{ max_images }}"
+           data-min-images="{{ 0 if unassigned else (1 if axis_key else min_images) }}"
+           data-variant-axis-key="{{ axis_key or '' }}"
+           data-variant-value-key="{{ value_key or '' }}">
+    <div class="partner-draft-card__title partner-gallery__title{% if axis_key or unassigned %} visually-hidden{% endif %}">
+      <div>
+        <h3>{{ label }} ({{ count }}/{{ max_images }})</h3>
+        <p>{% if unassigned %}Asigna estas imágenes a un color o elimínalas.{% elif axis_key %}La primera imagen será la portada de este color.{% else %}Carga al menos {{ min_images }} imágenes; la primera será la portada.{% endif %}</p>
+      </div>
     </div>
 
-    <div class="partner-gallery__secondary" aria-label="Imágenes secundarias">
-      {% for file in view.image_files[1:] %}
-        <article class="partner-gallery-item" draggable="true" data-gallery-image data-image-id="{{ file.id }}">
-          <img src="{{ url_for('partners.product_draft_file', draft_id=draft.id, file_id=file.id) }}" alt="Imagen secundaria {{ loop.index }} del borrador">
-          <span class="partner-gallery-item__badge">Imagen {{ loop.index + 1 }}</span>
-          <div class="partner-gallery-item__actions">
-            <form method="post" action="{{ url_for('partners.set_product_draft_cover_route', draft_id=draft.id, file_id=file.id) }}" data-gallery-cover-form>
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" aria-label="Usar como portada">
-                <i data-lucide="star" aria-hidden="true"></i>
-              </button>
-            </form>
-            <button type="button" data-move-image="left" aria-label="Mover imagen a la izquierda">
-              <i data-lucide="arrow-left" aria-hidden="true"></i>
-            </button>
-            <button type="button" data-move-image="right" aria-label="Mover imagen a la derecha">
-              <i data-lucide="arrow-right" aria-hidden="true"></i>
-            </button>
-            <form method="post" action="{{ url_for('partners.delete_product_draft_file_route', draft_id=draft.id, file_id=file.id) }}" data-gallery-delete-form>
-              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-              <button type="submit" aria-label="Eliminar imagen">
-                <i data-lucide="trash-2" aria-hidden="true"></i>
-              </button>
-            </form>
-          </div>
-        </article>
-      {% endfor %}
+    <form class="partner-gallery__upload-form" method="post" enctype="multipart/form-data" action="{{ url_for('partners.upload_product_draft_file', draft_id=draft.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="kind" value="IMAGE">
+      <input type="hidden" name="variant_axis_key" value="{{ axis_key or '' }}">
+      <input type="hidden" name="variant_value_key" value="{{ value_key or '' }}">
+      <input class="visually-hidden" data-gallery-input type="file" name="files"
+             accept="image/jpeg,image/png,image/webp" multiple>
+    </form>
+    <p class="partner-gallery__message" data-gallery-message role="status" aria-live="polite"></p>
 
-      {% set secondary_empty_slots = max_images - image_count if image_count else max_images - 1 %}
-      {% for _slot in range(secondary_empty_slots) %}
-        <button class="partner-gallery-empty" type="button" data-open-gallery aria-label="Agregar imagen al slot {{ image_count + loop.index }}">
-          <i data-lucide="plus" aria-hidden="true"></i>
-        </button>
-      {% endfor %}
+    <div class="partner-gallery__layout" data-gallery-dropzone>
+      {% set cover = files[0] if count else none %}
+      <div class="partner-gallery__cover">
+        {% if cover %}
+          <article class="partner-gallery-item partner-gallery-item--cover is-cover" draggable="true" data-gallery-image data-image-id="{{ cover.id }}">
+            <img src="{{ url_for('partners.product_draft_file', draft_id=draft.id, file_id=cover.id) }}" alt="Portada de {{ label }}">
+            <span class="partner-gallery-item__badge">Portada</span>
+            <div class="partner-gallery-item__actions">
+              <button type="button" data-move-image="right" aria-label="Mover a la derecha"><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+              <form method="post" action="{{ url_for('partners.delete_product_draft_file_route', draft_id=draft.id, file_id=cover.id) }}" data-gallery-delete-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" aria-label="Eliminar portada"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+              </form>
+            </div>
+            {% if unassigned and ns.visual_axis %}
+              <form class="partner-gallery-item__assignment" method="post" action="{{ url_for('partners.assign_product_draft_image_route', draft_id=draft.id, file_id=cover.id) }}" data-gallery-assign-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="variant_axis_key" value="{{ visual_key }}">
+                <label>Asignar a
+                  <select name="variant_value_key" required>
+                    {% for value in ns.visual_axis.get('values', []) %}<option value="{{ value.get('key') }}">{{ value.get('label') }}</option>{% endfor %}
+                  </select>
+                </label>
+                <button class="button button--secondary" type="submit">Mover</button>
+              </form>
+            {% endif %}
+          </article>
+        {% elif not unassigned %}
+          <button class="partner-gallery-empty partner-gallery-empty--cover" type="button" data-open-gallery>
+            <span class="partner-gallery-empty__icon"><i data-lucide="camera" aria-hidden="true"></i></span>
+            <strong>Añadir portada</strong><span>Arrastra o selecciona un archivo</span>
+          </button>
+        {% endif %}
+      </div>
+      <div class="partner-gallery__secondary" aria-label="Imágenes de {{ label }}">
+        {% for file in files[1:] %}
+          <article class="partner-gallery-item" draggable="true" data-gallery-image data-image-id="{{ file.id }}">
+            <img src="{{ url_for('partners.product_draft_file', draft_id=draft.id, file_id=file.id) }}" alt="Imagen {{ loop.index + 1 }} de {{ label }}">
+            <span class="partner-gallery-item__badge">Imagen {{ loop.index + 1 }}</span>
+            <div class="partner-gallery-item__actions">
+              <form method="post" action="{{ url_for('partners.set_product_draft_cover_route', draft_id=draft.id, file_id=file.id) }}" data-gallery-cover-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" aria-label="Usar como portada"><i data-lucide="star" aria-hidden="true"></i></button>
+              </form>
+              <button type="button" data-move-image="left" aria-label="Mover a la izquierda"><i data-lucide="arrow-left" aria-hidden="true"></i></button>
+              <button type="button" data-move-image="right" aria-label="Mover a la derecha"><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+              <form method="post" action="{{ url_for('partners.delete_product_draft_file_route', draft_id=draft.id, file_id=file.id) }}" data-gallery-delete-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" aria-label="Eliminar imagen"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+              </form>
+            </div>
+            {% if unassigned and ns.visual_axis %}
+              <form class="partner-gallery-item__assignment" method="post" action="{{ url_for('partners.assign_product_draft_image_route', draft_id=draft.id, file_id=file.id) }}" data-gallery-assign-form>
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="variant_axis_key" value="{{ visual_key }}">
+                <label>Asignar a
+                  <select name="variant_value_key" required>
+                    {% for value in ns.visual_axis.get('values', []) %}<option value="{{ value.get('key') }}">{{ value.get('label') }}</option>{% endfor %}
+                  </select>
+                </label>
+                <button class="button button--secondary" type="submit">Mover</button>
+              </form>
+            {% endif %}
+          </article>
+        {% endfor %}
+        {% if not unassigned %}
+          {% set remaining_slots = (max_images - count) if count else (max_images - 1) %}
+          {% for _slot in range(remaining_slots) %}
+            <button class="partner-gallery-empty" type="button" data-open-gallery aria-label="Agregar imagen"><i data-lucide="plus" aria-hidden="true"></i></button>
+          {% endfor %}
+        {% endif %}
+      </div>
     </div>
-  </div>
-</section>
+  </section>
+  {% if axis_key or unassigned %}</details>{% endif %}
+{% endmacro %}
+
+<div data-gallery-collection data-total-count="{{ all_images|length }}" data-min-images="{{ min_images }}">
+  <header class="partner-gallery-collection__header">
+    <h2 id="gallery-title">Galería Multimedia ({% if ns.visual_axis %}{{ all_images|length }} imágenes{% else %}{{ all_images|length }}/{{ max_images }}{% endif %})</h2>
+    <p>{% if ns.visual_axis %}Carga entre 1 y {{ max_images }} imágenes para cada color y al menos {{ min_images }} en total.{% else %}Carga entre {{ min_images }} y {{ max_images }} imágenes de alta calidad.{% endif %}</p>
+    {% if errors.images %}<span class="partner-error">{{ errors.images }}</span>{% endif %}
+  </header>
+
+  {% if ns.visual_axis %}
+    {% for value in ns.visual_axis.get('values', []) %}
+      {% set group_files = all_images|selectattr('variant_axis_key', 'equalto', visual_key)|selectattr('variant_value_key', 'equalto', value.get('key'))|list %}
+      {% set stats = namespace(variants=0, stock=0) %}
+      {% for variant in draft.variants or [] %}
+        {% if variant.get('enabled', true) and (variant.get('options', {}).get(visual_key) == value.get('key') or variant.get('attributes', {}).get(visual_key) == value.get('label')) %}
+          {% set stats.variants = stats.variants + 1 %}
+          {% set stats.stock = stats.stock + (variant.get('stock', 0)|int) %}
+        {% endif %}
+      {% endfor %}
+      {{ gallery_group(group_files, value.get('label'), visual_key, value.get('key'), false, value.get('swatch'), stats.variants, stats.stock, loop.first) }}
+    {% endfor %}
+    {% set unassigned = all_images|selectattr('variant_value_key', 'none')|list %}
+    {% if unassigned %}{{ gallery_group(unassigned, 'Imágenes sin asignar', none, none, true, '#f59e0b', 0, 0, true) }}{% endif %}
+  {% else %}
+    {{ gallery_group(all_images, 'Galería general') }}
+  {% endif %}
+</div>

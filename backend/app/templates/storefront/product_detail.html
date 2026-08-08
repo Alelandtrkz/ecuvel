@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 {% from "components/breadcrumbs.html" import breadcrumbs %}
-{% from "components/product_gallery.html" import product_gallery %}
-{% from "components/purchase_card.html" import purchase_card %}
-{% from "components/store_card.html" import store_card %}
+{% from "components/product_overview.html" import product_overview %}
 {% from "components/product_specs.html" import product_specs %}
 {% from "components/product_card.html" import product_card %}
 
@@ -17,43 +15,7 @@
 <div class="product-detail-page content-container">
   {{ breadcrumbs(product) }}
 
-  <section class="product-overview" aria-labelledby="product-title">
-    {{ product_gallery(product.gallery_images, product.name, product.gallery_placeholder_url) }}
-
-    <header class="product-information">
-      <span class="product-information__category">{{ product.category_name }}</span>
-      <h1 id="product-title">{{ product.name }}</h1>
-      {% if product.variant_name %}<p class="product-information__variant">{{ product.variant_name }}</p>{% endif %}
-      <div class="product-information__meta">
-        <span class="product-information__rating">
-          <i data-lucide="star" aria-hidden="true"></i>
-          {% if product.rating is not none and product.review_count %}
-            {{ "%.1f"|format(product.rating) }} · {{ product.review_count }} reseña{{ '' if product.review_count == 1 else 's' }}
-          {% else %}
-            0.0 · Sin reseñas
-          {% endif %}
-        </span>
-        <span>SKU: {{ product.seller_sku }}</span>
-      </div>
-    </header>
-
-    {{ purchase_card(product) }}
-
-    <section class="product-summary" aria-labelledby="summary-title">
-      <h2 id="summary-title">Características principales</h2>
-      {% if product.highlights %}
-        <dl>
-          {% for highlight in product.highlights %}
-            <div><dt>{{ highlight.label }}</dt><dd>{{ highlight.value }}</dd></div>
-          {% endfor %}
-        </dl>
-      {% else %}
-        <p>La información resumida estará disponible próximamente.</p>
-      {% endif %}
-    </section>
-
-    {{ store_card(product) }}
-  </section>
+  {{ product_overview(product) }}
 
   {% include "components/notice_toast.html" %}
 
@@ -167,6 +129,16 @@
                 {% endfor %}
               </div>
             {% endif %}
+
+            {% if review.reply %}
+              <section class="review-card__store-reply" aria-label="Respuesta oficial de la tienda">
+                <div class="review-card__store-reply-heading">
+                  <span><i data-lucide="store" aria-hidden="true"></i> Respuesta de {{ review.reply.store_name }}</span>
+                  <time>{{ review.reply.date_label }}{% if review.reply.is_edited %} · Editada{% endif %}</time>
+                </div>
+                <p>{{ review.reply.body }}</p>
+              </section>
+            {% endif %}
           </article>
         {% endfor %}
       </div>
@@ -191,11 +163,11 @@
       {% if reviews_page.total_pages > 1 %}
         <nav class="pagination" aria-label="Paginación de reseñas">
           {% if reviews_page.has_previous %}
-            <a href="{{ url_for('storefront.product_detail', product_slug=product.public_identifier, reviews_page=reviews_page.page - 1) }}">Anterior</a>
+            <a href="{{ url_for('storefront.product_detail', product_slug=product.public_identifier, variant=product.catalog_sku, reviews_page=reviews_page.page - 1) }}">Anterior</a>
           {% endif %}
           <span>Página {{ reviews_page.page }} de {{ reviews_page.total_pages }}</span>
           {% if reviews_page.has_next %}
-            <a href="{{ url_for('storefront.product_detail', product_slug=product.public_identifier, reviews_page=reviews_page.page + 1) }}">Siguiente</a>
+            <a href="{{ url_for('storefront.product_detail', product_slug=product.public_identifier, variant=product.catalog_sku, reviews_page=reviews_page.page + 1) }}">Siguiente</a>
           {% endif %}
         </nav>
       {% endif %}

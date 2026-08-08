@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from flask import render_template_string
 from sqlalchemy.orm import Session
 
 from app.extensions import db
-from app.models import InventoryBalance, Product, ProductVariant, SellerOffer
-from app.models.enums import OfferStatus
+from app.models import InventoryBalance, Product, ProductMedia, ProductVariant, SellerOffer, Store
+from app.models.enums import OfferStatus, StoreStatus
 from app.storefront import _build_product_gallery_images
 from tests.factories import BaseData, create_catalog_and_stock
 
@@ -203,6 +204,137 @@ def test_product_detail_renders_empty_review_state(client, session: Session):
     assert "0.0" in body
     assert "0 opiniones" in body
     assert "Este producto todavía no tiene reseñas." in body
+
+
+def test_product_detail_variant_selector_stays_in_opened_store(client, session: Session):
+    base = create_catalog_and_stock(session, stock=5)
+    product, first_variant, first_offer = _catalog_entities(session, base)
+    first_variant.title = "Negro / 128 GB"
+    first_variant.combination_key = "color_principal=negro|almacenamiento_gb=128"
+    first_variant.attributes = {"color_principal": "Negro", "almacenamiento_gb": "128"}
+    product.variant_configuration = {
+        "version": 4,
+        "enabled": True,
+        "mode": "family",
+        "visual_axis_key": "color_principal",
+        "default_combination_key": first_variant.combination_key,
+        "axes": [
+            {
+                "key": "color_principal",
+                "label": "Color",
+                "is_visual": True,
+                "unit": "",
+                "values": [
+                    {"key": "negro", "label": "Negro", "swatch": "#111827"},
+                    {"key": "azul", "label": "Azul", "swatch": "#2563EB"},
+                ],
+            },
+            {
+                "key": "almacenamiento_gb",
+                "label": "Almacenamiento",
+                "is_visual": False,
+                "unit": "GB",
+                "values": [{"key": "128", "label": "128", "swatch": None}],
+            },
+        ],
+    }
+    second_variant = ProductVariant(
+        product_id=product.id,
+        catalog_sku=f"{first_variant.catalog_sku}-BLUE",
+        title="Azul / 128 GB",
+        combination_key="color_principal=azul|almacenamiento_gb=128",
+        attributes={"color_principal": "Azul", "almacenamiento_gb": "128"},
+        is_active=True,
+    )
+    session.add(second_variant)
+    session.flush()
+    second_offer = SellerOffer(
+        store_id=base.store_id,
+        variant_id=second_variant.id,
+        seller_sku=f"{first_offer.seller_sku}-BLUE",
+        currency="USD",
+        price=Decimal("12.00"),
+        commission_rate=Decimal("0.00"),
+        status=OfferStatus.ACTIVE,
+    )
+    other_store = Store(
+        public_code=f"STR-{uuid.uuid4().hex[:12]}",
+        name="Otra tienda",
+        slug=f"otra-{uuid.uuid4().hex[:12]}",
+        status=StoreStatus.ACTIVE,
+        is_verified=True,
+    )
+    foreign_variant = ProductVariant(
+        product_id=product.id,
+        catalog_sku=f"{first_variant.catalog_sku}-FOREIGN",
+        title="Azul extranjero",
+        attributes={"color_principal": "Azul", "almacenamiento_gb": "128"},
+        is_active=True,
+    )
+    session.add_all([second_offer, other_store, foreign_variant])
+    session.flush()
+    foreign_offer = SellerOffer(
+        store_id=other_store.id,
+        variant_id=foreign_variant.id,
+        seller_sku=f"{first_offer.seller_sku}-FOREIGN",
+        currency="USD",
+        price=Decimal("99.00"),
+        commission_rate=Decimal("0.00"),
+        status=OfferStatus.ACTIVE,
+    )
+    session.add_all(
+        [
+            foreign_offer,
+            InventoryBalance(
+                offer_id=second_offer.id,
+                location_id=base.storage_location_id,
+                on_hand_quantity=3,
+                reserved_quantity=0,
+                blocked_quantity=0,
+            ),
+        ]
+    )
+    session.commit()
+
+    response = client.get(f"/productos/{product.slug}?variant={second_variant.catalog_sku}")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "data-product-variant-selector" in body
+    assert second_variant.catalog_sku in body
+    assert first_variant.catalog_sku in body
+    assert foreign_variant.catalog_sku not in body
+    assert f'value="{second_offer.id}" data-variant-offer-id' in body
+    assert f"{product.title} — Azul / 128 GB" in body
+
+
+def test_approved_product_media_uses_safe_public_route(client, app, session: Session, tmp_path):
+    base = create_catalog_and_stock(session)
+    product, _variant, _offer = _catalog_entities(session, base)
+    media_root = tmp_path / "catalog-media"
+    app.config["PRODUCT_CATALOG_MEDIA_DIR"] = str(media_root)
+    storage_key = "approved/product-image.png"
+    stored = media_root / storage_key
+    stored.parent.mkdir(parents=True)
+    stored.write_bytes(b"approved-image")
+    media = ProductMedia(
+        product_id=product.id,
+        storage_key=storage_key,
+        media_type="image/png",
+        size_bytes=len(b"approved-image"),
+        position=0,
+        is_cover=True,
+        is_active=True,
+    )
+    session.add(media)
+    session.commit()
+
+    response = client.get(f"/productos/{product.slug}/media/{media.public_id}")
+
+    assert response.status_code == 200
+    assert response.data == b"approved-image"
+    assert response.headers["Cache-Control"].startswith("public")
+    assert client.get(f"/productos/slug-ajeno/media/{media.public_id}").status_code == 404
 
 
 def test_product_gallery_uses_single_placeholder_when_no_images_exist(

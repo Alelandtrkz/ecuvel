@@ -1,0 +1,394 @@
+{% extends "partners/base.html" %}
+{% block partner_title %}Mis productos | ECUVEL Partners{% endblock %}
+
+{% set status_icons = {
+  'draft': 'file-pen-line',
+  'incomplete': 'circle-alert',
+  'ready': 'circle-check-big',
+  'review': 'clock-3',
+  'changes': 'message-square-warning',
+  'rejected': 'circle-x',
+  'approved': 'badge-check',
+  'active': 'circle-check-big',
+  'deactivated': 'circle-off'
+} %}
+
+{% block content %}
+<main class="partner-page partner-page--wide partner-catalog-page">
+  <header class="partner-catalog-heading">
+    <div>
+      <p class="partner-eyebrow">{{ catalog.store_name }}</p>
+      <h1>Mis productos</h1>
+      <p>
+        Administra tu catálogo de
+        <strong>{{ catalog.total_items }} {{ 'presentación' if catalog.total_items == 1 else 'presentaciones' }}</strong>.
+      </p>
+    </div>
+    <a class="partner-button partner-button--primary partner-catalog-heading__add" href="{{ url_for('partners.new_product_category') }}">
+      <i data-lucide="plus" aria-hidden="true"></i>
+      <span>Agregar producto</span>
+    </a>
+  </header>
+
+  {% if batch_result and batch_result.kind == 'submit' and batch_result.failures %}
+    <section class="partner-catalog-batch-result" aria-labelledby="batch-result-title">
+      <i data-lucide="circle-alert" aria-hidden="true"></i>
+      <div>
+        <h2 id="batch-result-title">
+          {{ batch_result.submitted_count }} enviados y {{ batch_result.failures|length }} pendientes de corrección
+        </h2>
+        <ul>
+          {% for failure in batch_result.failures %}
+            <li>
+              <span><strong>{{ failure.title }}</strong>: {{ failure.message }}</span>
+              <a href="{{ url_for('partners.product_draft', draft_id=failure.draft_id) }}">Corregir</a>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    </section>
+  {% endif %}
+
+  {% if catalog.total_items %}
+    <form class="partner-catalog-filters" method="get" action="{{ url_for('partners.my_products') }}" role="search" data-catalog-filters>
+      <label class="partner-catalog-search">
+        <span class="visually-hidden">Buscar por nombre o SKU</span>
+        <i data-lucide="search" aria-hidden="true"></i>
+        <input type="search" name="q" value="{{ catalog.query }}" maxlength="160" placeholder="Buscar por nombre o SKU..." autocomplete="off">
+      </label>
+      <button class="partner-catalog-search-button" type="submit">Buscar</button>
+
+      <div class="partner-catalog-select partner-select" data-catalog-select>
+        <label class="visually-hidden" for="catalog-status-filter">Filtrar por estado</label>
+        <select id="catalog-status-filter"
+                class="partner-select__native"
+                name="status"
+                data-catalog-filter
+                data-catalog-select-native>
+          <option value="">Todos los estados</option>
+          {% for option in catalog.statuses %}
+            <option value="{{ option.value }}" {{ 'selected' if catalog.selected_status == option.value else '' }}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+        <button class="partner-select__button"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                data-catalog-select-button>
+          <span data-catalog-select-label>Todos los estados</span>
+          <i data-lucide="chevron-down" aria-hidden="true"></i>
+        </button>
+        <div class="partner-select__menu" role="listbox" data-catalog-select-menu>
+          <button class="partner-select__option"
+                  type="button"
+                  role="option"
+                  data-value=""
+                  aria-selected="{{ 'true' if not catalog.selected_status else 'false' }}">
+            Todos los estados
+          </button>
+          {% for option in catalog.statuses %}
+            <button class="partner-select__option"
+                    type="button"
+                    role="option"
+                    data-value="{{ option.value }}"
+                    aria-selected="{{ 'true' if catalog.selected_status == option.value else 'false' }}">
+              {{ option.label }}
+            </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="partner-catalog-select partner-select" data-catalog-select>
+        <label class="visually-hidden" for="catalog-category-filter">Filtrar por categoría</label>
+        <select id="catalog-category-filter"
+                class="partner-select__native"
+                name="category"
+                data-catalog-filter
+                data-catalog-select-native>
+          <option value="">Todas las categorías</option>
+          {% for option in catalog.categories %}
+            <option value="{{ option.id }}" {{ 'selected' if catalog.selected_category == option.id|string else '' }}>{{ option.name }}</option>
+          {% endfor %}
+        </select>
+        <button class="partner-select__button"
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                data-catalog-select-button>
+          <span data-catalog-select-label>Todas las categorías</span>
+          <i data-lucide="chevron-down" aria-hidden="true"></i>
+        </button>
+        <div class="partner-select__menu" role="listbox" data-catalog-select-menu>
+          <button class="partner-select__option"
+                  type="button"
+                  role="option"
+                  data-value=""
+                  aria-selected="{{ 'true' if not catalog.selected_category else 'false' }}">
+            Todas las categorías
+          </button>
+          {% for option in catalog.categories %}
+            <button class="partner-select__option"
+                    type="button"
+                    role="option"
+                    data-value="{{ option.id }}"
+                    aria-selected="{{ 'true' if catalog.selected_category == option.id|string else 'false' }}">
+              {{ option.name }}
+            </button>
+          {% endfor %}
+        </div>
+      </div>
+
+      {% if catalog.query or catalog.selected_status or catalog.selected_category %}
+        <a class="partner-catalog-clear" href="{{ url_for('partners.my_products') }}" aria-label="Limpiar todos los filtros">
+          <i data-lucide="filter-x" aria-hidden="true"></i>
+          <span>Limpiar</span>
+        </a>
+      {% endif %}
+    </form>
+  {% endif %}
+
+  {% if not catalog.total_items %}
+    <section class="partner-catalog-empty" aria-labelledby="empty-catalog-title">
+      <span class="partner-catalog-empty__icon"><i data-lucide="package-open" aria-hidden="true"></i></span>
+      <h2 id="empty-catalog-title">Todavía no tienes productos</h2>
+      <p>Crea tu primera publicación y completa sus datos antes de enviarla a revisión.</p>
+      <a class="partner-button partner-button--primary" href="{{ url_for('partners.new_product_category') }}">
+        <i data-lucide="package-plus" aria-hidden="true"></i>
+        <span>Crear primer producto</span>
+      </a>
+    </section>
+  {% elif not catalog.filtered_items %}
+    <section class="partner-catalog-empty" aria-labelledby="empty-results-title">
+      <span class="partner-catalog-empty__icon"><i data-lucide="search-x" aria-hidden="true"></i></span>
+      <h2 id="empty-results-title">No encontramos coincidencias</h2>
+      <p>Prueba otra búsqueda o elimina los filtros aplicados.</p>
+      <a class="partner-button partner-button--secondary" href="{{ url_for('partners.my_products') }}">
+        <i data-lucide="filter-x" aria-hidden="true"></i>
+        <span>Limpiar filtros</span>
+      </a>
+    </section>
+  {% else %}
+    <section class="partner-catalog-card" aria-label="Listado de productos">
+      <div class="partner-catalog-selection" aria-live="polite" data-catalog-selection hidden>
+        <div class="partner-catalog-selection__summary">
+          <i data-lucide="check-square" aria-hidden="true"></i>
+          <strong data-catalog-selected-count>0</strong>
+          <span data-catalog-selected-label>presentaciones seleccionadas</span>
+          <span aria-hidden="true">·</span>
+          <strong data-catalog-selected-drafts>0</strong>
+          <span data-catalog-selected-drafts-label>publicaciones</span>
+        </div>
+        <div class="partner-catalog-selection__actions">
+          <button type="button" class="partner-catalog-bulk-button partner-catalog-bulk-button--submit" data-catalog-bulk-submit>
+            <i data-lucide="send" aria-hidden="true"></i>
+            Enviar a revisión
+          </button>
+          <button type="button"
+                  class="partner-catalog-bulk-button partner-catalog-bulk-button--delete"
+                  data-catalog-bulk-delete
+                  data-delete-url="{{ url_for('partners.bulk_delete_product_drafts_route') }}">
+            <i data-lucide="trash-2" aria-hidden="true"></i>
+            Eliminar
+          </button>
+        </div>
+      </div>
+
+      <div class="partner-catalog-table-scroll">
+        <table class="partner-catalog-table">
+          <thead>
+            <tr>
+              <th class="partner-catalog-table__check" scope="col">
+                <input type="checkbox" data-catalog-select-all aria-label="Seleccionar todos los borradores editables de esta página">
+              </th>
+              <th scope="col">Producto</th>
+              <th scope="col">SKU</th>
+              <th scope="col">Categoría</th>
+              <th scope="col">Precio</th>
+              <th scope="col">Stock</th>
+              <th scope="col">Estado</th>
+              <th scope="col" class="partner-catalog-table__actions">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in catalog.items %}
+              <tr class="{{ 'is-deactivated' if item.is_deactivated else '' }}" data-catalog-row>
+                <td class="partner-catalog-table__check" data-label="Seleccionar">
+                  <input type="checkbox"
+                         value="{{ item.draft_id or '' }}"
+                         data-catalog-row-select
+                         data-draft-id="{{ item.draft_id or '' }}"
+                         data-draft-title="{{ item.base_title }}"
+                         data-variant-count="{{ item.draft_variant_count }}"
+                         data-image-count="{{ item.draft_image_count }}"
+                         data-document-count="{{ item.draft_document_count }}"
+                         aria-label="Seleccionar {{ item.display_title }}"
+                         {% if not item.can_select %}disabled title="Esta presentación no admite acciones masivas en su estado actual"{% endif %}>
+                </td>
+                <td class="partner-catalog-product" data-label="Producto">
+                  <img src="{{ item.thumbnail_url }}" alt="" loading="lazy" width="56" height="56">
+                  <div>
+                    <strong>{{ item.base_title }}</strong>
+                    {% if item.variant_name %}
+                      <span class="{{ 'is-pending' if item.provisional else '' }}">{{ item.variant_name }}</span>
+                    {% else %}
+                      <span>Producto simple</span>
+                    {% endif %}
+                  </div>
+                </td>
+                <td class="partner-catalog-sku" data-label="SKU">
+                  {% if item.sku %}<span title="{{ item.sku }}">{{ item.sku }}</span>{% else %}<em>Pendiente</em>{% endif %}
+                </td>
+                <td data-label="Categoría">{{ item.category_name }}</td>
+                <td class="partner-catalog-price" data-label="Precio">
+                  {% if item.price is not none %}
+                    <strong>${{ '%.2f'|format(item.price) }}</strong>
+                    <span>{{ item.currency }}</span>
+                  {% else %}
+                    <em>Pendiente</em>
+                  {% endif %}
+                </td>
+                <td data-label="Stock">
+                  {% if item.stock is none %}
+                    <em>Pendiente</em>
+                  {% else %}
+                    <span class="partner-catalog-stock {{ 'is-empty' if item.stock <= 0 else '' }}">
+                      <span aria-hidden="true"></span>{{ item.stock }}
+                    </span>
+                  {% endif %}
+                </td>
+                <td data-label="Estado">
+                  <span class="partner-catalog-status partner-catalog-status--{{ item.status }}">
+                    <i data-lucide="{{ status_icons.get(item.status, 'circle') }}" aria-hidden="true"></i>
+                    {{ item.status_label }}
+                  </span>
+                </td>
+                <td class="partner-catalog-action" data-label="Acciones">
+                  {% if item.has_actions %}
+                    <div class="partner-catalog-row-menu" data-catalog-row-menu>
+                      <button type="button"
+                              class="partner-catalog-row-menu__trigger"
+                              aria-label="Acciones para {{ item.display_title }}"
+                              aria-haspopup="menu"
+                              aria-expanded="false"
+                              aria-controls="catalog-row-menu-{{ loop.index }}"
+                              data-catalog-menu-trigger>
+                        <i data-lucide="ellipsis" aria-hidden="true"></i>
+                      </button>
+                      <div class="partner-catalog-row-menu__panel"
+                           id="catalog-row-menu-{{ loop.index }}"
+                           role="menu"
+                           data-catalog-menu-panel
+                           hidden>
+                        {% if item.edit_url %}
+                          <a href="{{ item.edit_url }}" role="menuitem">
+                            <i data-lucide="pencil" aria-hidden="true"></i>Editar
+                          </a>
+                        {% endif %}
+                        {% if item.preview_url %}
+                          <a href="{{ item.preview_url }}" role="menuitem">
+                            <i data-lucide="eye" aria-hidden="true"></i>Vista previa
+                          </a>
+                        {% endif %}
+                        {% if item.public_url %}
+                          <a href="{{ item.public_url }}" role="menuitem">
+                            <i data-lucide="external-link" aria-hidden="true"></i>Ver publicación
+                          </a>
+                        {% endif %}
+                        {% if item.delete_url %}
+                          <span class="partner-catalog-row-menu__divider" role="separator"></span>
+                          <button type="button"
+                                  class="is-danger"
+                                  role="menuitem"
+                                  data-catalog-delete-single
+                                  data-delete-url="{{ item.delete_url }}"
+                                  data-draft-id="{{ item.draft_id }}"
+                                  data-draft-title="{{ item.base_title }}"
+                                  data-variant-count="{{ item.draft_variant_count }}"
+                                  data-image-count="{{ item.draft_image_count }}"
+                                  data-document-count="{{ item.draft_document_count }}">
+                            <i data-lucide="trash-2" aria-hidden="true"></i>Eliminar
+                          </button>
+                        {% endif %}
+                      </div>
+                    </div>
+                  {% else %}
+                    <span aria-label="Sin acciones disponibles">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <footer class="partner-catalog-footer">
+        <p>Mostrando {{ catalog.range_start }} a {{ catalog.range_end }} de {{ catalog.filtered_items }} presentaciones</p>
+        {% if catalog.total_pages > 1 %}
+          <nav class="partner-catalog-pagination" aria-label="Paginación de productos">
+            {% set page_kwargs = {'q': catalog.query or none, 'status': catalog.selected_status or none, 'category': catalog.selected_category or none} %}
+            {% if catalog.has_previous %}
+              <a href="{{ url_for('partners.my_products', page=catalog.page - 1, **page_kwargs) }}" aria-label="Página anterior"><i data-lucide="chevron-left" aria-hidden="true"></i></a>
+            {% else %}
+              <span aria-disabled="true"><i data-lucide="chevron-left" aria-hidden="true"></i></span>
+            {% endif %}
+            {% for page_number in catalog.page_window %}
+              {% if page_number is none %}
+                <span class="partner-catalog-pagination__gap" aria-hidden="true">…</span>
+              {% elif page_number == catalog.page %}
+                <span class="is-current" aria-current="page">{{ page_number }}</span>
+              {% else %}
+                <a href="{{ url_for('partners.my_products', page=page_number, **page_kwargs) }}" aria-label="Página {{ page_number }}">{{ page_number }}</a>
+              {% endif %}
+            {% endfor %}
+            {% if catalog.has_next %}
+              <a href="{{ url_for('partners.my_products', page=catalog.page + 1, **page_kwargs) }}" aria-label="Página siguiente"><i data-lucide="chevron-right" aria-hidden="true"></i></a>
+            {% else %}
+              <span aria-disabled="true"><i data-lucide="chevron-right" aria-hidden="true"></i></span>
+            {% endif %}
+          </nav>
+        {% endif %}
+      </footer>
+    </section>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('partners.bulk_submit_product_drafts_route') }}" data-catalog-bulk-submit-form hidden>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_q" value="{{ catalog.query }}">
+    <input type="hidden" name="return_status" value="{{ catalog.selected_status }}">
+    <input type="hidden" name="return_category" value="{{ catalog.selected_category }}">
+    <input type="hidden" name="return_page" value="{{ catalog.page }}">
+    <span data-catalog-form-ids></span>
+  </form>
+
+  <dialog class="partner-catalog-delete-dialog" aria-labelledby="catalog-delete-title" data-catalog-delete-dialog>
+    <div class="partner-catalog-delete-dialog__icon"><i data-lucide="trash-2" aria-hidden="true"></i></div>
+    <h2 id="catalog-delete-title">Eliminar permanentemente</h2>
+    <p data-catalog-delete-message>Esta acción no se puede deshacer.</p>
+    <dl class="partner-catalog-delete-summary">
+      <div><dt>Publicaciones</dt><dd data-delete-drafts>0</dd></div>
+      <div><dt>Variantes</dt><dd data-delete-variants>0</dd></div>
+      <div><dt>Imágenes</dt><dd data-delete-images>0</dd></div>
+      <div><dt>Documentos</dt><dd data-delete-documents>0</dd></div>
+    </dl>
+    <form method="post" data-catalog-delete-form>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="return_q" value="{{ catalog.query }}">
+      <input type="hidden" name="return_status" value="{{ catalog.selected_status }}">
+      <input type="hidden" name="return_category" value="{{ catalog.selected_category }}">
+      <input type="hidden" name="return_page" value="{{ catalog.page }}">
+      <span data-catalog-delete-ids></span>
+      <div class="partner-catalog-delete-dialog__actions">
+        <button type="button" class="partner-button partner-button--secondary" data-catalog-delete-cancel>Cancelar</button>
+        <button type="submit" class="partner-catalog-confirm-delete">
+          <i data-lucide="trash-2" aria-hidden="true"></i>Eliminar definitivamente
+        </button>
+      </div>
+    </form>
+  </dialog>
+</main>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ url_for('static', filename='js/partners-my-products.js') }}" defer></script>
+{% endblock %}

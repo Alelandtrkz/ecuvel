@@ -95,6 +95,12 @@ class ProductDraft(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         default=list,
         server_default=text("'[]'::jsonb"),
     )
+    variant_configuration: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
     pricing_data: Mapped[dict] = mapped_column(
         JSONB,
         nullable=False,
@@ -219,10 +225,16 @@ class ProductDraftFile(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     document_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     label: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    variant_axis_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    variant_value_key: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
 
     draft: Mapped[ProductDraft] = relationship("ProductDraft", back_populates="files")
 
     __table_args__ = (
         CheckConstraint("size_bytes > 0", name="product_draft_file_size_positive"),
         CheckConstraint("position >= 0", name="product_draft_file_position_nonnegative"),
+        CheckConstraint(
+            "(variant_axis_key IS NULL) = (variant_value_key IS NULL)",
+            name="product_draft_file_variant_binding_complete",
+        ),
     )

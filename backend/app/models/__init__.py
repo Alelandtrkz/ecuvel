@@ -1,6 +1,7 @@
 from app.models.catalog import (
     Category,
     Product,
+    ProductMedia,
     ProductVariant,
     SellerOffer,
 )
@@ -25,7 +26,7 @@ from app.models.partner_onboarding import (
     StoreOnboardingDocument,
     StoreVerificationReview,
 )
-from app.models.product_review import ProductReview, ProductReviewImage
+from app.models.product_review import ProductReview, ProductReviewImage, ProductReviewReply
 from app.models.product_draft import ProductDraft, ProductDraftFile
 from app.models.store import Store, StoreMember, StoreProductCounter
 from app.models.user import PhoneOtpChallenge, User, UserAccountToken
@@ -41,6 +42,7 @@ __all__ = [
     "StoreProductCounter",
     "Category",
     "Product",
+    "ProductMedia",
     "ProductVariant",
     "SellerOffer",
     "Warehouse",
@@ -58,6 +60,7 @@ __all__ = [
     "StoreContractOtpChallenge",
     "ProductReview",
     "ProductReviewImage",
+    "ProductReviewReply",
     "ProductDraft",
     "ProductDraftFile",
     "InventoryBalance",

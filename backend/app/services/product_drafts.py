@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from dataclasses import dataclass
@@ -39,6 +40,11 @@ from app.services.private_storage import (
     stage_private_upload,
 )
 from app.services.public_identifiers import assign_product_code_to_draft
+from app.services.product_variant_builder import (
+    available_variant_axes,
+    build_variant_state,
+    variant_rows_complete,
+)
 
 
 PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY = "partner_current_product_draft_id"
@@ -87,6 +93,7 @@ class ProductDraftView:
     checklist: tuple[ChecklistItem, ...]
     image_files: tuple[ProductDraftFile, ...]
     document_files: tuple[ProductDraftFile, ...]
+    available_variant_axes: tuple[dict[str, Any], ...]
 
 
 def create_or_reuse_draft_from_selection(
@@ -149,13 +156,18 @@ def get_product_draft_for_user(
     store = require_partner_catalog_store(session, user_id)
     query = (
         select(ProductDraft)
-        .options(selectinload(ProductDraft.files), selectinload(ProductDraft.category), selectinload(ProductDraft.subcategory))
+        .options(
+            selectinload(ProductDraft.files),
+            selectinload(ProductDraft.store),
+            selectinload(ProductDraft.category),
+            selectinload(ProductDraft.subcategory),
+        )
         .where(ProductDraft.id == draft_id)
     )
     if lock:
         query = query.with_for_update()
     draft = session.scalar(query)
-    if draft is None or draft.store_id != store.store_id or draft.created_by_user_id != user_id:
+    if draft is None or draft.store_id != store.store_id:
         raise ProductDraftAccessError("No encontramos ese borrador.")
     return draft
 
@@ -164,6 +176,14 @@ def build_product_draft_view(draft: ProductDraft) -> ProductDraftView:
     template = get_product_template(draft.template_key)
     active_files = [item for item in draft.files if item.status == ProductDraftFileStatus.ACTIVE]
     image_files = tuple(_sort_files(item for item in active_files if item.kind == ProductDraftFileKind.IMAGE))
+    configuration = draft.variant_configuration or {}
+    if configuration.get("version", 1) >= 4 and configuration.get("enabled") is False:
+        selected_media_key = configuration.get("single_media_value_key")
+        if selected_media_key:
+            image_files = tuple(
+                item for item in image_files
+                if item.variant_value_key in {None, selected_media_key}
+            )
     document_files = tuple(
         _sort_files(item for item in active_files if item.kind == ProductDraftFileKind.DOCUMENT)
     )
@@ -173,6 +193,7 @@ def build_product_draft_view(draft: ProductDraft) -> ProductDraftView:
         checklist=calculate_checklist(draft, template, image_files=image_files, document_files=document_files),
         image_files=image_files,
         document_files=document_files,
+        available_variant_axes=available_variant_axes(template, draft.attributes),
     )
 
 
@@ -191,8 +212,16 @@ def _active_image_files(draft: ProductDraft) -> list[ProductDraftFile]:
 def _sync_image_positions(
     draft: ProductDraft,
     ordered_ids: Sequence[uuid.UUID] | None = None,
+    *,
+    variant_axis_key: str | None = None,
+    variant_value_key: str | None = None,
 ) -> tuple[ProductDraftFile, ...]:
-    active_images = _active_image_files(draft)
+    active_images = [
+        item
+        for item in _active_image_files(draft)
+        if item.variant_axis_key == variant_axis_key
+        and item.variant_value_key == variant_value_key
+    ]
     if ordered_ids is not None:
         normalized_ids = [_parse_uuid(item) for item in ordered_ids]
         if any(item is None for item in normalized_ids):
@@ -229,7 +258,11 @@ def save_product_draft(
     _ensure_editable(draft)
     assign_product_code_to_draft(session, draft)
     template = get_product_template(draft.template_key)
+    previous_variant_configuration = dict(draft.variant_configuration or {})
     errors = _apply_form_to_draft(draft, template, form, final=final)
+    _reconcile_variant_image_bindings(draft, previous_variant_configuration)
+    if form.get("variant_convert_base") == "1":
+        _assign_general_images_to_default_visual_value(draft)
     errors.update(_validate_sku_uniqueness(session, draft))
     if final:
         errors.update(_validate_final_requirements(draft, template))
@@ -244,12 +277,105 @@ def save_product_draft(
     if draft.status == ProductDraftStatus.DRAFT and draft.completion_percentage > 0:
         draft.status = ProductDraftStatus.INCOMPLETE
     if final:
+        _finalize_variant_mode(draft)
         draft.status = ProductDraftStatus.SUBMITTED
         draft.submitted_at = datetime.now(timezone.utc)
         draft.completion_percentage = 100
     elif draft.completion_percentage == 100:
         draft.status = ProductDraftStatus.READY_FOR_REVIEW
     return draft
+
+
+def submit_saved_product_draft(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    draft_id: uuid.UUID,
+) -> ProductDraft:
+    """Submit the persisted draft without reapplying an editor form payload."""
+    draft = get_product_draft_for_user(
+        session,
+        user_id=user_id,
+        draft_id=draft_id,
+        lock=True,
+    )
+    _ensure_editable(draft)
+    assign_product_code_to_draft(session, draft)
+    template = get_product_template(draft.template_key)
+    family_enabled = _family_variants_enabled(draft.variant_configuration)
+    persisted_variant_errors: dict[str, str] = {}
+    if family_enabled:
+        variant_form = _variant_form_from_saved_draft(draft)
+        configuration, variants, persisted_variant_errors = build_variant_state(
+            form=variant_form,
+            template=template,
+            attributes=draft.attributes,
+            product_code=draft.seller_sku,
+            existing_configuration=draft.variant_configuration,
+            existing_variants=draft.variants,
+            final=True,
+        )
+        draft.variant_configuration = configuration
+        draft.variants = variants
+        family_enabled = _family_variants_enabled(configuration)
+    variant_sources = _variant_source_fields(draft.variant_configuration) if family_enabled else set()
+
+    errors: dict[str, str] = dict(persisted_variant_errors)
+    if draft.title and len(draft.title) < 8:
+        errors["title"] = "El título debe ser más descriptivo."
+    if draft.seller_sku and not _SKU_RE.match(draft.seller_sku):
+        errors["seller_sku"] = "El código del producto debe ser alfanumérico y puede incluir guiones."
+    errors.update(
+        validate_attributes(
+            template,
+            draft.attributes,
+            final=True,
+            excluded_keys=variant_sources,
+        )
+    )
+    errors.update(_validate_sku_uniqueness(session, draft))
+    errors.update(_validate_final_requirements(draft, template))
+    if errors:
+        draft.status = ProductDraftStatus.INCOMPLETE
+        draft.completion_percentage = _completion_percentage(
+            calculate_checklist(draft, template)
+        )
+        raise ProductDraftValidationError("Revisa la información del producto.", errors)
+
+    _finalize_variant_mode(draft)
+    draft.status = ProductDraftStatus.SUBMITTED
+    draft.submitted_at = datetime.now(timezone.utc)
+    draft.completion_percentage = 100
+    return draft
+
+
+def _variant_form_from_saved_draft(draft: ProductDraft) -> MultiDict:
+    configuration = dict(draft.variant_configuration or {})
+    form = MultiDict([
+        ("has_variants", "1"),
+        ("variant_configuration", json.dumps(configuration)),
+        ("variant_default_choice", str(configuration.get("default_variant_id") or "")),
+    ])
+    for row in draft.variants or []:
+        option_values = dict(row.get("options") or {})
+        attributes = dict(row.get("attributes") or {})
+        swatches = dict(row.get("swatches") or {})
+        option_payload = {
+            key: {
+                "key": value_key,
+                "label": attributes.get(key) or value_key,
+                "swatch": swatches.get(key),
+            }
+            for key, value_key in option_values.items()
+        }
+        form.add("variant_id[]", str(row.get("variant_id") or ""))
+        form.add("variant_options[]", json.dumps(option_payload))
+        form.add("variant_combination_key[]", str(row.get("combination_key") or ""))
+        form.add("variant_price[]", str(row.get("price") or ""))
+        form.add("variant_compare_at_price[]", str(row.get("compare_at_price") or ""))
+        form.add("variant_stock[]", str(row.get("stock") if row.get("stock") is not None else ""))
+        form.add("variant_enabled[]", "1" if row.get("enabled", True) else "0")
+    return form
 
 
 def stage_product_draft_upload(
@@ -296,6 +422,8 @@ def attach_product_draft_file(
     document_type: str | None,
     root: str,
     max_images: int,
+    variant_axis_key: str | None = None,
+    variant_value_key: str | None = None,
 ) -> ProductDraftFile:
     return attach_product_draft_files(
         session,
@@ -306,6 +434,8 @@ def attach_product_draft_file(
         document_type=document_type,
         root=root,
         max_images=max_images,
+        variant_axis_key=variant_axis_key,
+        variant_value_key=variant_value_key,
     )[0]
 
 
@@ -319,15 +449,26 @@ def attach_product_draft_files(
     document_type: str | None,
     root: str,
     max_images: int,
+    variant_axis_key: str | None = None,
+    variant_value_key: str | None = None,
 ) -> tuple[ProductDraftFile, ...]:
     if not staged_files:
         raise ProductDraftValidationError("Selecciona al menos un archivo.", {"file": "Selecciona al menos un archivo."})
     draft = get_product_draft_for_user(session, user_id=user_id, draft_id=draft_id, lock=True)
     _ensure_editable(draft)
+    if kind == ProductDraftFileKind.IMAGE:
+        _validate_image_binding(draft, variant_axis_key, variant_value_key)
     active = [
         item
         for item in draft.files
         if item.status == ProductDraftFileStatus.ACTIVE and item.kind == kind
+        and (
+            kind != ProductDraftFileKind.IMAGE
+            or (
+                item.variant_axis_key == variant_axis_key
+                and item.variant_value_key == variant_value_key
+            )
+        )
     ]
     if kind == ProductDraftFileKind.IMAGE:
         remaining = max_images - len(active)
@@ -355,13 +496,19 @@ def attach_product_draft_files(
                 position=position,
                 is_cover=False,
                 document_type=_clean_text(document_type, 80) if document_type else None,
+                variant_axis_key=variant_axis_key if kind == ProductDraftFileKind.IMAGE else None,
+                variant_value_key=variant_value_key if kind == ProductDraftFileKind.IMAGE else None,
             )
             session.add(file_record)
             file_records.append(file_record)
             position += 1
         session.flush()
         if kind == ProductDraftFileKind.IMAGE:
-            _sync_image_positions(draft)
+            _sync_image_positions(
+                draft,
+                variant_axis_key=variant_axis_key,
+                variant_value_key=variant_value_key,
+            )
         for staged in staged_files:
             promoted_paths.append(promote_private_file(staged, root=root))
         return tuple(file_records)
@@ -388,17 +535,106 @@ def delete_product_draft_file(
     file_record.is_cover = False
     delete_private_file(private_file_path(root, file_record.storage_key))
     if file_record.kind == ProductDraftFileKind.IMAGE:
-        _sync_image_positions(draft)
+        _sync_image_positions(
+            draft,
+            variant_axis_key=file_record.variant_axis_key,
+            variant_value_key=file_record.variant_value_key,
+        )
+
+
+def delete_product_draft_color_media(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    variant_axis_key: str,
+    variant_value_key: str,
+    root: str,
+) -> int:
+    draft = get_product_draft_for_user(session, user_id=user_id, draft_id=draft_id, lock=True)
+    _ensure_editable(draft)
+    targets = [
+        item for item in _active_image_files(draft)
+        if item.variant_axis_key == variant_axis_key
+        and item.variant_value_key == variant_value_key
+    ]
+    for item in targets:
+        item.status = ProductDraftFileStatus.DELETED
+        item.is_cover = False
+        delete_private_file(private_file_path(root, item.storage_key))
+    return len(targets)
 
 
 def set_cover_image(session: Session, *, user_id: uuid.UUID, draft_id: uuid.UUID, file_id: uuid.UUID) -> None:
     draft = get_product_draft_for_user(session, user_id=user_id, draft_id=draft_id, lock=True)
     _ensure_editable(draft)
     active_images = _active_image_files(draft)
-    if not any(item.id == file_id for item in active_images):
+    target = next((item for item in active_images if item.id == file_id), None)
+    if target is None:
         raise ProductDraftAccessError("No encontramos esa imagen.")
-    ordered_ids = [file_id, *(item.id for item in active_images if item.id != file_id)]
-    _sync_image_positions(draft, ordered_ids)
+    group = [
+        item for item in active_images
+        if item.variant_axis_key == target.variant_axis_key
+        and item.variant_value_key == target.variant_value_key
+    ]
+    ordered_ids = [file_id, *(item.id for item in group if item.id != file_id)]
+    _sync_image_positions(
+        draft,
+        ordered_ids,
+        variant_axis_key=target.variant_axis_key,
+        variant_value_key=target.variant_value_key,
+    )
+
+
+def assign_product_draft_image(
+    session: Session,
+    *,
+    user_id: uuid.UUID,
+    draft_id: uuid.UUID,
+    file_id: uuid.UUID,
+    variant_axis_key: str,
+    variant_value_key: str,
+    max_images: int,
+) -> None:
+    draft = get_product_draft_for_user(
+        session, user_id=user_id, draft_id=draft_id, lock=True
+    )
+    _ensure_editable(draft)
+    target = next(
+        (item for item in _active_image_files(draft) if item.id == file_id),
+        None,
+    )
+    if target is None:
+        raise ProductDraftAccessError("No encontramos esa imagen.")
+    _validate_image_binding(draft, variant_axis_key, variant_value_key)
+    destination = [
+        item
+        for item in _active_image_files(draft)
+        if item.id != target.id
+        and item.variant_axis_key == variant_axis_key
+        and item.variant_value_key == variant_value_key
+    ]
+    if len(destination) >= max_images:
+        raise ProductDraftValidationError(
+            "La galería de ese color ya está completa.",
+            {"images": f"Cada color admite hasta {max_images} imágenes."},
+        )
+    previous_axis = target.variant_axis_key
+    previous_value = target.variant_value_key
+    target.variant_axis_key = variant_axis_key
+    target.variant_value_key = variant_value_key
+    target.position = len(destination)
+    target.is_cover = not destination
+    _sync_image_positions(
+        draft,
+        variant_axis_key=previous_axis,
+        variant_value_key=previous_value,
+    )
+    _sync_image_positions(
+        draft,
+        variant_axis_key=variant_axis_key,
+        variant_value_key=variant_value_key,
+    )
 
 
 def reorder_product_draft_images(
@@ -410,7 +646,31 @@ def reorder_product_draft_images(
 ) -> None:
     draft = get_product_draft_for_user(session, user_id=user_id, draft_id=draft_id, lock=True)
     _ensure_editable(draft)
-    _sync_image_positions(draft, ordered_image_ids)
+    if not ordered_image_ids:
+        raise ProductDraftValidationError("El orden de las imágenes no es válido.", {"images": "El orden de las imágenes no es válido."})
+    first = next((item for item in _active_image_files(draft) if item.id == ordered_image_ids[0]), None)
+    if first is None:
+        raise ProductDraftAccessError("No encontramos esa imagen.")
+    _sync_image_positions(
+        draft,
+        ordered_image_ids,
+        variant_axis_key=first.variant_axis_key,
+        variant_value_key=first.variant_value_key,
+    )
+
+
+def _validate_image_binding(
+    draft: ProductDraft,
+    variant_axis_key: str | None,
+    variant_value_key: str | None,
+) -> None:
+    visual_key, visual_values = _visual_axis_and_values(draft.variant_configuration)
+    if not visual_key:
+        if variant_axis_key or variant_value_key:
+            raise ProductDraftValidationError("La galería indicada no existe.", {"images": "La galería indicada no existe."})
+        return
+    if variant_axis_key != visual_key or variant_value_key not in visual_values:
+        raise ProductDraftValidationError("Selecciona un color válido para las imágenes.", {"images": "Selecciona un color válido para las imágenes."})
 
 
 def calculate_checklist(
@@ -424,7 +684,12 @@ def calculate_checklist(
         active = [item for item in draft.files if item.status == ProductDraftFileStatus.ACTIVE]
         image_files = tuple(item for item in active if item.kind == ProductDraftFileKind.IMAGE)
         document_files = tuple(item for item in active if item.kind == ProductDraftFileKind.DOCUMENT)
-    required_attrs = [item for item in template.fields if item.required]
+    family_enabled = _family_variants_enabled(draft.variant_configuration)
+    variant_sources = _variant_source_fields(draft.variant_configuration) if family_enabled else set()
+    required_attrs = [
+        item for item in template.fields
+        if item.required and item.key not in variant_sources
+    ]
     attrs_complete = all(not _is_empty(draft.attributes.get(item.key)) for item in required_attrs)
     price = _decimal_or_none(draft.pricing_data.get("price"))
     stock = _int_or_none(draft.inventory_data.get("stock_quantity"))
@@ -432,15 +697,16 @@ def calculate_checklist(
         any(item.document_type == doc for item in document_files)
         for doc in template.required_documents
     )
+    gallery_complete, gallery_message = _gallery_completion(draft, tuple(image_files))
     return (
         ChecklistItem("category", "Categoría", True, "Categoría seleccionada."),
         ChecklistItem("title", "Título", bool(draft.title), "Agrega un título claro."),
-        ChecklistItem("gallery", "Galería", _MIN_IMAGE_COUNT <= len(image_files) <= _MAX_IMAGE_COUNT, f"{len(image_files)}/{_MIN_IMAGE_COUNT} imágenes mínimas."),
+        ChecklistItem("gallery", "Galería", gallery_complete, gallery_message),
         ChecklistItem("description", "Descripción", bool(draft.description and len(draft.description.strip()) >= 20), "Describe el producto con detalle."),
         ChecklistItem("attributes", "Características", attrs_complete, "Completa los campos obligatorios de la plantilla."),
         ChecklistItem("variants", "Variantes", _variants_complete(draft), "Configura variantes o usa la oferta única."),
-        ChecklistItem("price", "Precio", price is not None and price > 0, "Define un precio mayor a cero."),
-        ChecklistItem("stock", "Stock", stock is not None and stock >= 0, "Define stock inicial."),
+        ChecklistItem("price", "Precio", _variants_complete(draft) if family_enabled else price is not None and price > 0, "Define precios vÃ¡lidos."),
+        ChecklistItem("stock", "Stock", _variants_complete(draft) if family_enabled else stock is not None and stock >= 0, "Define stock inicial."),
         ChecklistItem("dimensions", "Dimensiones", bool(draft.dimensions_data.get("product_weight_kg")), "Agrega peso y dimensiones básicas."),
         ChecklistItem("documents", "Documentación", required_docs_complete, "Agrega documentos requeridos.", optional=not template.required_documents),
     )
@@ -448,6 +714,9 @@ def calculate_checklist(
 
 def _apply_form_to_draft(draft: ProductDraft, template: ProductTemplate, form: MultiDict, *, final: bool) -> dict[str, str]:
     errors: dict[str, str] = {}
+    previous_attributes = dict(draft.attributes or {})
+    previous_pricing = dict(draft.pricing_data or {})
+    previous_inventory = dict(draft.inventory_data or {})
     draft.title = _clean_text(form.get("title"), 250)
     draft.brand = _clean_text(form.get("brand"), 120)
     draft.model_number = _clean_text(form.get("model_number"), 120)
@@ -503,18 +772,78 @@ def _apply_form_to_draft(draft: ProductDraft, template: ProductTemplate, form: M
         )
     }
     _apply_product_weight(draft, form)
-    draft.variants = _parse_variants(form, draft.seller_sku)
+    variant_configuration, variants, variant_errors = build_variant_state(
+        form=form,
+        template=template,
+        attributes=draft.attributes,
+        product_code=draft.seller_sku,
+        existing_configuration=draft.variant_configuration,
+        existing_variants=draft.variants,
+        final=final,
+    )
+    draft.variant_configuration = variant_configuration
+    draft.variants = variants
+    family_enabled = _family_variants_enabled(variant_configuration)
+    variant_sources = _variant_source_fields(variant_configuration) if family_enabled else set()
+    if family_enabled:
+        snapshot = dict(variant_configuration.get("source_snapshot") or {})
+        if not snapshot:
+            snapshot = {
+                "attributes": {
+                    key: (
+                        previous_attributes.get(key)
+                        if not _is_empty(previous_attributes.get(key))
+                        else draft.attributes.get(key)
+                    )
+                    for key in variant_sources
+                    if not _is_empty(previous_attributes.get(key))
+                    or not _is_empty(draft.attributes.get(key))
+                },
+                "price": (
+                    previous_pricing.get("price")
+                    if not _is_empty(previous_pricing.get("price"))
+                    else draft.pricing_data.get("price")
+                ),
+                "compare_at_price": (
+                    previous_pricing.get("compare_at_price")
+                    if not _is_empty(previous_pricing.get("compare_at_price"))
+                    else draft.pricing_data.get("compare_at_price")
+                ),
+                "stock": (
+                    previous_inventory.get("stock_quantity")
+                    if not _is_empty(previous_inventory.get("stock_quantity"))
+                    else draft.inventory_data.get("stock_quantity")
+                ),
+            }
+            variant_configuration["source_snapshot"] = snapshot
+        for source_field in variant_sources:
+            draft.attributes[source_field] = None
+        draft.pricing_data["price"] = None
+        draft.pricing_data["compare_at_price"] = None
+        draft.inventory_data["stock_quantity"] = None
+    errors.update(variant_errors)
     if draft.title and len(draft.title) < 8:
         errors["title"] = "El título debe ser más descriptivo."
     if draft.seller_sku and not _SKU_RE.match(draft.seller_sku):
         errors["seller_sku"] = "El código del producto debe ser alfanumérico y puede incluir guiones."
-    errors.update(validate_attributes(template, draft.attributes, final=final))
+    errors.update(
+        validate_attributes(
+            template,
+            draft.attributes,
+            final=final,
+            excluded_keys=variant_sources,
+        )
+    )
     return errors
 
 
 def _validate_final_requirements(draft: ProductDraft, template: ProductTemplate) -> dict[str, str]:
     errors: dict[str, str] = {}
     images = [item for item in draft.files if item.kind == ProductDraftFileKind.IMAGE and item.status == ProductDraftFileStatus.ACTIVE]
+    if (draft.variant_configuration or {}).get("version", 1) >= 4 and (draft.variant_configuration or {}).get("enabled") is False:
+        selected_media_key = (draft.variant_configuration or {}).get("single_media_value_key")
+        if selected_media_key:
+            images = [item for item in images if item.variant_value_key in {None, selected_media_key}]
     documents = [item for item in draft.files if item.kind == ProductDraftFileKind.DOCUMENT and item.status == ProductDraftFileStatus.ACTIVE]
     price = _decimal_or_none(draft.pricing_data.get("price"))
     stock = _int_or_none(draft.inventory_data.get("stock_quantity"))
@@ -524,13 +853,13 @@ def _validate_final_requirements(draft: ProductDraft, template: ProductTemplate)
         errors["seller_sku"] = "El código del producto es obligatorio."
     if not draft.description or len(draft.description.strip()) < 20:
         errors["description"] = "La descripción debe tener al menos 20 caracteres."
-    if len(images) < _MIN_IMAGE_COUNT:
-        errors["images"] = f"Carga al menos {_MIN_IMAGE_COUNT} imágenes."
-    elif len(images) > _MAX_IMAGE_COUNT:
-        errors["images"] = f"La galería admite hasta {_MAX_IMAGE_COUNT} imágenes."
-    if price is None or price <= 0:
+    gallery_complete, gallery_message = _gallery_completion(draft, tuple(images))
+    if not gallery_complete:
+        errors["images"] = gallery_message
+    family_enabled = _family_variants_enabled(draft.variant_configuration)
+    if not family_enabled and (price is None or price <= 0):
         errors["price"] = "El precio debe ser mayor a cero."
-    if stock is None or stock < 0:
+    if not family_enabled and (stock is None or stock < 0):
         errors["stock_quantity"] = "El stock debe ser un entero no negativo."
     if not draft.dimensions_data.get("product_weight_kg"):
         errors["product_weight_kg"] = "El peso del producto es obligatorio."
@@ -599,17 +928,165 @@ def _parse_variants(form: MultiDict, product_code: str | None) -> list[dict[str,
 
 
 def _variants_complete(draft: ProductDraft) -> bool:
-    if not draft.variants:
+    if not _family_variants_enabled(draft.variant_configuration):
         return True
-    seen: set[str] = set()
-    for row in draft.variants:
-        sku = row.get("sku")
-        price = _decimal_or_none(row.get("price"))
-        stock = _int_or_none(row.get("stock"))
-        if not row.get("name") or not sku or sku in seen or price is None or price <= 0 or stock is None or stock < 0:
-            return False
-        seen.add(sku)
-    return True
+    if not draft.variants:
+        return not draft.variant_configuration
+    return variant_rows_complete(draft.variants)
+
+
+def _family_variants_enabled(configuration: Mapping[str, Any] | None) -> bool:
+    configuration = configuration or {}
+    if not configuration:
+        return False
+    if configuration.get("version", 1) < 4:
+        return True
+    return configuration.get("enabled") is True and configuration.get("mode") == "family"
+
+
+def _variant_source_fields(configuration: Mapping[str, Any] | None) -> set[str]:
+    return {
+        str(axis.get("source_field"))
+        for axis in (configuration or {}).get("axes") or []
+        if isinstance(axis, dict) and axis.get("source_field")
+    }
+
+
+def _finalize_variant_mode(draft: ProductDraft) -> None:
+    """Discard draft-only recovery state once the seller submits a final mode."""
+    configuration = dict(draft.variant_configuration or {})
+    if not configuration:
+        return
+
+    if _family_variants_enabled(configuration):
+        configuration.pop("source_snapshot", None)
+        configuration.pop("single_media_value_key", None)
+        configuration["archived_family"] = False
+        draft.variant_configuration = configuration
+        return
+
+    selected_media_key = configuration.get("single_media_value_key")
+    for item in _active_image_files(draft):
+        if item.variant_value_key not in {None, selected_media_key}:
+            item.status = ProductDraftFileStatus.DELETED
+            item.is_cover = False
+            continue
+        item.variant_axis_key = None
+        item.variant_value_key = None
+    _sync_group_positions(_active_image_files(draft))
+
+    draft.variants = []
+    draft.variant_configuration = {
+        "version": 4,
+        "enabled": False,
+        "mode": "single",
+        "axes": [],
+        "visual_axis_key": None,
+        "default_variant_id": None,
+        "default_combination_key": None,
+        "next_sku_sequence": configuration.get("next_sku_sequence", 1),
+        "archived_family": False,
+    }
+
+
+def _visual_axis_and_values(configuration: Mapping[str, Any] | None) -> tuple[str | None, set[str]]:
+    configuration = configuration or {}
+    if not _family_variants_enabled(configuration):
+        return None, set()
+    visual_key = configuration.get("visual_axis_key")
+    if not visual_key:
+        return None, set()
+    for axis in configuration.get("axes") or []:
+        if isinstance(axis, dict) and axis.get("key") == visual_key:
+            return str(visual_key), {
+                str(value.get("key"))
+                for value in axis.get("values") or []
+                if isinstance(value, dict) and value.get("key")
+            }
+    return None, set()
+
+
+def _reconcile_variant_image_bindings(
+    draft: ProductDraft,
+    previous_configuration: Mapping[str, Any] | None,
+) -> None:
+    if draft.variant_configuration and not _family_variants_enabled(draft.variant_configuration):
+        return
+    previous_visual, _previous_values = _visual_axis_and_values(previous_configuration)
+    visual_key, visual_values = _visual_axis_and_values(draft.variant_configuration)
+    active_images = _active_image_files(draft)
+    if not visual_key:
+        for item in active_images:
+            item.variant_axis_key = None
+            item.variant_value_key = None
+        _sync_group_positions(active_images)
+        return
+
+    for item in active_images:
+        if (
+            item.variant_axis_key != visual_key
+            or item.variant_value_key not in visual_values
+        ):
+            item.variant_axis_key = None
+            item.variant_value_key = None
+
+    _sync_group_positions(active_images)
+
+
+def _assign_general_images_to_default_visual_value(draft: ProductDraft) -> None:
+    visual_key, visual_values = _visual_axis_and_values(draft.variant_configuration)
+    default_id = (draft.variant_configuration or {}).get("default_variant_id")
+    default_variant = next(
+        (row for row in (draft.variants or []) if row.get("variant_id") == default_id),
+        None,
+    )
+    if not visual_key or not default_variant:
+        return
+    raw_value = (default_variant.get("options") or {}).get(visual_key)
+    value_key = str(raw_value or "")
+    if value_key not in visual_values:
+        return
+    for item in _active_image_files(draft):
+        if item.variant_value_key is None:
+            item.variant_axis_key = visual_key
+            item.variant_value_key = value_key
+    _sync_group_positions(_active_image_files(draft))
+
+
+def _sync_group_positions(images: Sequence[ProductDraftFile]) -> None:
+    groups: dict[tuple[str | None, str | None], list[ProductDraftFile]] = {}
+    for item in images:
+        groups.setdefault((item.variant_axis_key, item.variant_value_key), []).append(item)
+    for group in groups.values():
+        for position, item in enumerate(sorted(group, key=lambda image: (image.position, image.created_at, image.id))):
+            item.position = position
+            item.is_cover = position == 0
+
+
+def _gallery_completion(
+    draft: ProductDraft,
+    images: tuple[ProductDraftFile, ...],
+) -> tuple[bool, str]:
+    visual_key, visual_values = _visual_axis_and_values(draft.variant_configuration)
+    if not visual_key:
+        complete = _MIN_IMAGE_COUNT <= len(images) <= _MAX_IMAGE_COUNT
+        return complete, f"{len(images)}/{_MIN_IMAGE_COUNT} imágenes mínimas."
+    if len(images) < _MIN_IMAGE_COUNT:
+        return False, f"Carga al menos {_MIN_IMAGE_COUNT} imágenes en total."
+    unassigned = [item for item in images if item.variant_value_key is None]
+    if unassigned:
+        return False, f"Asigna {len(unassigned)} imagen(es) a un color."
+    for value_key in visual_values:
+        count = sum(
+            1
+            for item in images
+            if item.variant_axis_key == visual_key and item.variant_value_key == value_key
+        )
+        if count < 1:
+            return False, "Cada color necesita al menos una imagen."
+        if count > _MAX_IMAGE_COUNT:
+            return False, f"Cada color admite hasta {_MAX_IMAGE_COUNT} imágenes."
+    return True, f"{len(images)} imágenes distribuidas por color."
 
 
 def _ensure_editable(draft: ProductDraft) -> None:
