@@ -108,6 +108,18 @@ class SellerOrderStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class SellerOrderDecisionStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class SellerOrderRejectionReason(StrEnum):
+    OUT_OF_STOCK = "OUT_OF_STOCK"
+    DAMAGED_OR_UNSHIPPABLE = "DAMAGED_OR_UNSHIPPABLE"
+    OTHER = "OTHER"
+
+
 class PaymentMethod(StrEnum):
     BANK_TRANSFER = "BANK_TRANSFER"
     CARD = "CARD"

@@ -17,6 +17,7 @@ from app.models import (
     OrderItem,
     PaymentAttempt,
     Product,
+    ProductMedia,
     ProductVariant,
     SellerOffer,
     SellerOrder,
@@ -141,7 +142,63 @@ class _CheckoutRow:
     store: Store
     quantity: int
     warehouse_id: uuid.UUID | None
+    image_url: str | None
     issue: str | None
+
+
+def _variant_value_key(
+    configuration: dict[str, Any], attributes: dict[str, Any], axis_key: str,
+) -> str | None:
+    raw = attributes.get(axis_key)
+    if raw is None:
+        return None
+    for axis in configuration.get("axes") or []:
+        if not isinstance(axis, dict) or axis.get("key") != axis_key:
+            continue
+        for value in axis.get("values") or []:
+            if isinstance(value, dict) and raw in {value.get("key"), value.get("label")}:
+                return str(value.get("key"))
+    return str(raw)
+
+
+def _checkout_image_url(
+    product: Product,
+    variant: ProductVariant,
+    media: list[ProductMedia],
+) -> str | None:
+    configuration = product.variant_configuration or {}
+    visual_key = configuration.get("visual_axis_key")
+    visual_value = (
+        _variant_value_key(configuration, variant.attributes or {}, str(visual_key))
+        if visual_key else None
+    )
+    candidates = [
+        item for item in media
+        if item.is_active
+        and item.variant_axis_key == visual_key
+        and item.variant_value_key == visual_value
+    ] if visual_key and visual_value else []
+    if not candidates:
+        candidates = [
+            item for item in media
+            if item.is_active and item.variant_axis_key is None
+        ]
+    if not candidates:
+        return None
+    selected = min(
+        candidates,
+        key=lambda item: (not item.is_cover, item.position, item.created_at, item.id),
+    )
+    return f"/productos/{product.slug}/media/{selected.public_id}"
+
+
+def _line_commission(row: _CheckoutRow) -> Decimal:
+    return (
+        row.offer.price
+        * row.quantity
+        * row.offer.commission_rate
+        / Decimal("100")
+    ).quantize(MONEY_QUANTUM)
 
 
 def _selected_items(cart_state: object) -> dict[uuid.UUID, int]:
@@ -192,6 +249,25 @@ def _load_rows(
         ).all()
     }
     availability = _warehouse_availability(session, offer_ids)
+    product_ids = {product.id for _, _, product, _, _ in entities.values()}
+    media_by_product: dict[uuid.UUID, list[ProductMedia]] = {
+        product_id: [] for product_id in product_ids
+    }
+    if product_ids:
+        for media in session.scalars(
+            select(ProductMedia)
+            .where(
+                ProductMedia.product_id.in_(product_ids),
+                ProductMedia.is_active.is_(True),
+            )
+            .order_by(
+                ProductMedia.product_id,
+                ProductMedia.is_cover.desc(),
+                ProductMedia.position,
+                ProductMedia.id,
+            )
+        ):
+            media_by_product.setdefault(media.product_id, []).append(media)
     result: list[_CheckoutRow] = []
 
     for offer_id, quantity in sorted(selected.items(), key=lambda item: item[0]):
@@ -238,6 +314,9 @@ def _load_rows(
                 store=store,
                 quantity=quantity,
                 warehouse_id=warehouse_id,
+                image_url=_checkout_image_url(
+                    product, variant, media_by_product.get(product.id, [])
+                ),
                 issue=issue,
             )
         )
@@ -264,7 +343,7 @@ def _line_from_row(row: _CheckoutRow) -> CheckoutLine:
         compare_at_price=compare_at,
         line_total=line_total,
         savings=display_total - line_total,
-        image_url=None,
+        image_url=row.image_url,
     )
 
 
@@ -476,16 +555,7 @@ def create_checkout_order(
             start=ZERO,
         )
         commission_total = sum(
-            (
-                (
-                    row.offer.price
-                    * row.quantity
-                    * row.offer.commission_rate
-                    / Decimal("100")
-                ).quantize(MONEY_QUANTUM)
-                for row in store_rows
-            ),
-            start=ZERO,
+            (_line_commission(row) for row in store_rows), start=ZERO
         )
         seller_order = SellerOrder(
             seller_order_number=f"{order_number}-S{store_index:02d}",
@@ -514,12 +584,16 @@ def create_checkout_order(
                 product_name_snapshot=row.product.title,
                 seller_name_snapshot=row.store.name,
                 seller_sku_snapshot=row.offer.seller_sku,
-                image_url_snapshot=None,
+                image_url_snapshot=row.image_url,
                 variant_snapshot={
                     "title": row.variant.title,
                     "catalog_sku": row.variant.catalog_sku,
                     "attributes": dict(row.variant.attributes or {}),
                 },
+                commission_rate_snapshot=row.offer.commission_rate,
+                commission_amount_snapshot=_line_commission(row),
+                category_name_snapshot=row.category.name,
+                category_code_snapshot=row.category.code,
             )
             session.add(order_item)
             session.flush()

@@ -79,6 +79,16 @@ from app.services.partner_reviews import (
     get_partner_reviews_page,
     save_partner_review_reply,
 )
+from app.services.partner_orders import (
+    PartnerOrderAccessError,
+    PartnerOrderConflictError,
+    PartnerOrderNotFoundError,
+    PartnerOrderValidationError,
+    approve_partner_order,
+    get_partner_order_detail,
+    get_partner_orders_page,
+    reject_partner_order,
+)
 
 
 partners = Blueprint("partners", __name__, url_prefix="/partners")
@@ -350,6 +360,93 @@ def my_products():
         batch_result=browser_session.pop("partner_catalog_batch_result", None),
         current_partner_tab="my_products",
     )
+
+
+@partners.get("/orders")
+@login_required
+def partner_orders():
+    try:
+        page = get_partner_orders_page(
+            db.session,
+            user_id=current_user.id,
+            tab=request.args.get("tab"),
+            query=request.args.get("q"),
+            status=request.args.get("status"),
+            date_filter=request.args.get("date"),
+            page=request.args.get("page"),
+        )
+    except PartnerOrderAccessError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("partners.dashboard"))
+    return render_template(
+        "partners/orders.html",
+        page=page,
+        current_partner_tab="orders",
+    )
+
+
+@partners.get("/orders/<uuid:seller_order_id>/detail")
+@login_required
+def partner_order_detail(seller_order_id):
+    try:
+        detail = get_partner_order_detail(
+            db.session,
+            user_id=current_user.id,
+            seller_order_id=seller_order_id,
+            pickup_point_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
+            pickup_point_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
+            placeholder_image=url_for(
+                "static", filename="images/placeholders/product-placeholder.svg"
+            ),
+        )
+    except (PartnerOrderAccessError, PartnerOrderNotFoundError) as exc:
+        raise NotFound(str(exc)) from exc
+    return jsonify({"ok": True, "order": _partner_order_detail_json(detail)})
+
+
+@partners.post("/orders/<uuid:seller_order_id>/approve")
+@login_required
+@limiter.limit("30 per minute")
+def partner_order_approve(seller_order_id):
+    try:
+        result = approve_partner_order(
+            db.session,
+            user_id=current_user.id,
+            seller_order_id=seller_order_id,
+        )
+        db.session.commit()
+    except (PartnerOrderAccessError, PartnerOrderNotFoundError) as exc:
+        db.session.rollback()
+        raise NotFound(str(exc)) from exc
+    except PartnerOrderConflictError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify({"ok": True, **_partner_order_decision_json(result)})
+
+
+@partners.post("/orders/<uuid:seller_order_id>/reject")
+@login_required
+@limiter.limit("30 per minute")
+def partner_order_reject(seller_order_id):
+    try:
+        result = reject_partner_order(
+            db.session,
+            user_id=current_user.id,
+            seller_order_id=seller_order_id,
+            reason=request.form.get("reason"),
+            comment=request.form.get("comment"),
+        )
+        db.session.commit()
+    except PartnerOrderValidationError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 422
+    except (PartnerOrderAccessError, PartnerOrderNotFoundError) as exc:
+        db.session.rollback()
+        raise NotFound(str(exc)) from exc
+    except PartnerOrderConflictError as exc:
+        db.session.rollback()
+        return jsonify({"ok": False, "error": str(exc)}), 409
+    return jsonify({"ok": True, **_partner_order_decision_json(result)})
 
 
 @partners.get("/reviews")
@@ -1080,6 +1177,88 @@ def _my_products_redirect():
             page=(request.form.get("return_page") or "").strip()[:8] or None,
         )
     )
+
+
+def _money_json(value) -> str:
+    return f"{value:.2f}"
+
+
+def _partner_order_detail_json(detail) -> dict:
+    return {
+        "seller_order_id": str(detail.seller_order_id),
+        "seller_order_number": detail.seller_order_number,
+        "order_number": detail.order_number,
+        "buyer": {"name": detail.buyer_name, "phone": detail.buyer_phone},
+        "payment_confirmed_label": detail.payment_confirmed_label,
+        "ship_by_label": detail.ship_by_label,
+        "delivery_window_label": detail.delivery_window_label,
+        "is_dispatch_overdue": detail.is_dispatch_overdue,
+        "delivery": {
+            "method": detail.delivery_method_label,
+            "name": detail.pickup_point_name,
+            "address": detail.pickup_point_address,
+        },
+        "lines": [
+            {
+                "product_name": line.product_name,
+                "sku": line.sku,
+                "variant_name": line.variant_name,
+                "quantity": line.quantity,
+                "unit_price": _money_json(line.unit_price),
+                "line_total": _money_json(line.line_total),
+                "image_url": line.image_url,
+            }
+            for line in detail.lines
+        ],
+        "financials": {
+            "currency": detail.currency,
+            "product_subtotal": _money_json(detail.product_subtotal),
+            "commission_total": _money_json(detail.commission_total),
+            "seller_net_total": _money_json(detail.seller_net_total),
+            "breakdown_available": detail.commission_breakdown_available,
+            "commission_lines": [
+                {
+                    "product_name": line.product_name,
+                    "category_name": line.category_name,
+                    "rate": _money_json(line.rate) if line.rate is not None else None,
+                    "amount": _money_json(line.amount) if line.amount is not None else None,
+                }
+                for line in detail.commission_lines
+            ],
+        },
+        "decision": {
+            "status": detail.decision_status,
+            "label": detail.decision_label,
+            "rejection_reason": detail.rejection_reason_label,
+            "rejection_comment": detail.rejection_comment,
+            "requires_refund_resolution": detail.requires_refund_resolution,
+            "can_approve": detail.can_approve,
+            "can_reject": detail.can_reject,
+        },
+        "logistics": {
+            "status": detail.logistical_status,
+            "label": detail.logistical_label,
+        },
+    }
+
+
+def _partner_order_decision_json(result) -> dict:
+    return {
+        "order": {
+            "seller_order_id": str(result.seller_order_id),
+            "decision_status": result.decision_status.value,
+            "decision_label": result.decision_label,
+            "logistical_status": result.logistical_status.value,
+            "logistical_label": result.logistical_label,
+            "replayed": result.replayed,
+        },
+        "metrics": {
+            "pending": result.metrics.pending,
+            "approved": result.metrics.approved,
+            "rejected": result.metrics.rejected,
+            "total": result.metrics.total,
+        },
+    }
 
 
 def _partner_reviews_page_url(page: int) -> str:

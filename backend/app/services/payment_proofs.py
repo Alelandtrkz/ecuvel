@@ -23,6 +23,7 @@ from app.models.enums import (
     PaymentProofStatus,
     PaymentStatus,
     ReservationStatus,
+    SellerOrderDecisionStatus,
     SellerOrderStatus,
     UserStatus,
 )
@@ -38,6 +39,7 @@ from app.services.private_storage import (
     promote_private_file,
     verify_private_file,
 )
+from app.services.seller_order_logistics import build_seller_order_delivery_window
 
 
 class PaymentProofServiceError(Exception):
@@ -330,6 +332,19 @@ def review_payment_proof(
             order.status = OrderStatus.CONFIRMED
             for seller_order in seller_orders:
                 seller_order.status = SellerOrderStatus.CONFIRMED
+                window = build_seller_order_delivery_window(effective_now)
+                seller_order.decision_status = SellerOrderDecisionStatus.PENDING
+                seller_order.decision_available_at = window.decision_available_at
+                seller_order.ship_by_at = window.ship_by_at
+                seller_order.estimated_delivery_from = window.estimated_delivery_from
+                seller_order.estimated_delivery_to = window.estimated_delivery_to
+                seller_order.approved_at = None
+                seller_order.approved_by_user_id = None
+                seller_order.rejected_at = None
+                seller_order.rejected_by_user_id = None
+                seller_order.rejection_reason = None
+                seller_order.rejection_comment = None
+                seller_order.requires_refund_resolution = False
         else:
             if any(r.status == ReservationStatus.CONSUMED for r in reservations):
                 raise InvalidPaymentProofTransitionError(
@@ -348,6 +363,11 @@ def review_payment_proof(
             order.status = OrderStatus.CANCELLED
             for seller_order in seller_orders:
                 seller_order.status = SellerOrderStatus.CANCELLED
+                seller_order.decision_status = None
+                seller_order.decision_available_at = None
+                seller_order.ship_by_at = None
+                seller_order.estimated_delivery_from = None
+                seller_order.estimated_delivery_to = None
     except InventoryServiceError as exc:
         raise PaymentProofIntegrityError(str(exc)) from exc
 

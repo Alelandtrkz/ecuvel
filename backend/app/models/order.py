@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
+    DateTime,
     Enum,
     ForeignKey,
     Numeric,
@@ -16,7 +19,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.extensions import db
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import OrderStatus, SellerOrderStatus
+from app.models.enums import (
+    OrderStatus,
+    SellerOrderDecisionStatus,
+    SellerOrderRejectionReason,
+    SellerOrderStatus,
+)
 
 
 class Order(
@@ -193,6 +201,59 @@ class SellerOrder(
         index=True,
     )
 
+    decision_status: Mapped[SellerOrderDecisionStatus | None] = mapped_column(
+        Enum(
+            SellerOrderDecisionStatus,
+            name="seller_order_decision_status",
+            native_enum=True,
+            validate_strings=True,
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    decision_available_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    rejected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    rejected_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+    )
+    rejection_reason: Mapped[SellerOrderRejectionReason | None] = mapped_column(
+        Enum(
+            SellerOrderRejectionReason,
+            name="seller_order_rejection_reason",
+            native_enum=True,
+            validate_strings=True,
+        ),
+        nullable=True,
+    )
+    rejection_comment: Mapped[str | None] = mapped_column(
+        String(300), nullable=True
+    )
+    ship_by_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    estimated_delivery_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    estimated_delivery_to: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    requires_refund_resolution: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false", index=True
+    )
+
     subtotal: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
         nullable=False,
@@ -228,6 +289,13 @@ class SellerOrder(
 
     store: Mapped["Store"] = relationship(
         "Store",
+    )
+
+    approved_by: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[approved_by_user_id]
+    )
+    rejected_by: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[rejected_by_user_id]
     )
 
     items: Mapped[list["OrderItem"]] = relationship(
@@ -270,6 +338,17 @@ class SellerOrder(
             - commission_total
             """,
             name="seller_order_net_consistent",
+        ),
+        CheckConstraint(
+            "rejection_comment IS NULL OR "
+            "(char_length(btrim(rejection_comment)) >= 1 "
+            "AND char_length(rejection_comment) <= 300)",
+            name="seller_order_rejection_comment_length",
+        ),
+        CheckConstraint(
+            "estimated_delivery_from IS NULL OR estimated_delivery_to IS NULL "
+            "OR estimated_delivery_from <= estimated_delivery_to",
+            name="seller_order_delivery_window_valid",
         ),
     )
 
@@ -355,6 +434,19 @@ class OrderItem(
         default=dict,
     )
 
+    commission_rate_snapshot: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 2), nullable=True
+    )
+    commission_amount_snapshot: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True
+    )
+    category_name_snapshot: Mapped[str | None] = mapped_column(
+        String(120), nullable=True
+    )
+    category_code_snapshot: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
+
     seller_order: Mapped["SellerOrder"] = relationship(
         "SellerOrder",
         back_populates="items",
@@ -405,5 +497,19 @@ class OrderItem(
             + tax_amount
             """,
             name="order_item_total_consistent",
+        ),
+        CheckConstraint(
+            "commission_rate_snapshot IS NULL OR "
+            "(commission_rate_snapshot >= 0 AND commission_rate_snapshot <= 100)",
+            name="order_item_commission_rate_valid",
+        ),
+        CheckConstraint(
+            "commission_amount_snapshot IS NULL OR commission_amount_snapshot >= 0",
+            name="order_item_commission_amount_nonnegative",
+        ),
+        CheckConstraint(
+            "(commission_rate_snapshot IS NULL) = "
+            "(commission_amount_snapshot IS NULL)",
+            name="order_item_commission_snapshot_complete",
         ),
     )

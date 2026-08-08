@@ -14,13 +14,14 @@ from app.models.enums import (
     InventoryMovementType,
     LocationType,
     ReservationStatus,
+    SellerOrderDecisionStatus,
 )
 from app.models.inventory import (
     InventoryBalance,
     InventoryMovement,
     InventoryReservation,
 )
-from app.models.order import OrderItem
+from app.models.order import OrderItem, SellerOrder
 from app.models.warehouse import Warehouse, WarehouseLocation
 
 
@@ -1361,6 +1362,90 @@ def consume_inventory_reservation(
     )
 
 
+def release_consumed_reservation_for_seller_rejection(
+    *,
+    session: Session,
+    reservation_id: uuid.UUID,
+    seller_order_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None = None,
+    now: datetime | None = None,
+) -> ReservationTransitionResult:
+    """Reconcile a paid reservation rejected before picking.
+
+    Payment approval only marks the reservation CONSUMED; physical on-hand
+    stock is reduced later by picking. Rejection therefore releases the
+    reserved quantity without incrementing on-hand stock.
+    """
+    reservation, balance = _lock_reservation(
+        session=session, reservation_id=reservation_id
+    )
+    belongs = session.scalar(
+        select(OrderItem.id).where(
+            OrderItem.id == reservation.order_item_id,
+            OrderItem.seller_order_id == seller_order_id,
+        )
+    )
+    if belongs is None:
+        raise InvalidReservationTransitionError(
+            "La reserva no pertenece al pedido rechazado."
+        )
+
+    movement_key = f"seller-reject-release:{reservation.id.hex}"
+    existing = session.scalar(
+        select(InventoryMovement).where(
+            InventoryMovement.idempotency_key == movement_key
+        )
+    )
+    if reservation.status == ReservationStatus.RELEASED and existing is not None:
+        return _reservation_transition_result(
+            reservation=reservation, balance=balance, replayed=True
+        )
+    if reservation.status != ReservationStatus.CONSUMED:
+        raise InvalidReservationTransitionError(
+            "Solo puede reconciliarse una reserva pagada que no fue recogida."
+        )
+    picked = session.scalar(
+        select(InventoryMovement.id).where(
+            InventoryMovement.movement_type == InventoryMovementType.PICK,
+            InventoryMovement.reference_id == reservation.id,
+        )
+    )
+    if picked is not None:
+        raise InvalidReservationTransitionError(
+            "El inventario ya fue recogido y requiere una devolución operativa."
+        )
+    if existing is not None:
+        raise IdempotencyConflictError(
+            "La reconciliación existente no coincide con la reserva."
+        )
+    if balance.reserved_quantity < reservation.quantity:
+        raise ReservationBalanceIntegrityError(
+            "El saldo reservado no cubre la cantidad rechazada."
+        )
+
+    balance.reserved_quantity -= reservation.quantity
+    reservation.status = ReservationStatus.RELEASED
+    reservation.released_at = now or datetime.now(timezone.utc)
+    session.add(
+        InventoryMovement(
+            balance_id=balance.id,
+            movement_type=InventoryMovementType.RELEASE,
+            delta_on_hand=0,
+            delta_reserved=-reservation.quantity,
+            delta_blocked=0,
+            reference_type="SELLER_ORDER_REJECTION",
+            reference_id=seller_order_id,
+            idempotency_key=movement_key,
+            actor_user_id=actor_user_id,
+            notes="Reserva liberada por rechazo del vendedor después del pago.",
+        )
+    )
+    session.flush()
+    return _reservation_transition_result(
+        reservation=reservation, balance=balance, replayed=False
+    )
+
+
 def expire_inventory_reservations(
     *,
     session: Session,
@@ -1501,6 +1586,20 @@ def pick_inventory_reservation(
         session=session,
         reservation_id=reservation_id,
     )
+
+    seller_order = session.scalar(
+        select(SellerOrder)
+        .join(OrderItem, OrderItem.seller_order_id == SellerOrder.id)
+        .where(OrderItem.id == reservation.order_item_id)
+        .with_for_update(of=SellerOrder)
+    )
+    if (
+        seller_order is None
+        or seller_order.decision_status != SellerOrderDecisionStatus.APPROVED
+    ):
+        raise InvalidReservationTransitionError(
+            "La tienda debe aprobar el pedido antes de iniciar el picking."
+        )
 
     location = session.get(
         WarehouseLocation,

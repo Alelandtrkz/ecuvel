@@ -13,6 +13,7 @@ from app.models.enums import (
     LocationType,
     PackageStatus,
     ReservationStatus,
+    SellerOrderDecisionStatus,
 )
 from app.models.fulfillment import OrderPackage
 from app.models.inventory import (
@@ -161,6 +162,18 @@ def _validate_order_item_fully_picked(
     session: Session,
     order_item: OrderItem,
 ) -> None:
+    seller_order = session.scalar(
+        select(SellerOrder)
+        .where(SellerOrder.id == order_item.seller_order_id)
+        .with_for_update()
+    )
+    if (
+        seller_order is None
+        or seller_order.decision_status != SellerOrderDecisionStatus.APPROVED
+    ):
+        raise OrderNotReadyForPackagingError(
+            "La tienda todavía no ha aprobado este pedido."
+        )
     reservations = list(
         session.scalars(
             select(InventoryReservation)

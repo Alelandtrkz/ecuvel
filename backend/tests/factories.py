@@ -24,6 +24,7 @@ from app.models import (
 from app.models.enums import (
     LocationType,
     OfferStatus,
+    SellerOrderDecisionStatus,
     StoreStatus,
     UserStatus,
 )
@@ -225,6 +226,7 @@ def create_order_items(
         discount_total=Decimal("0.00"),
         commission_total=Decimal("0.00"),
         seller_net_total=subtotal,
+        decision_status=SellerOrderDecisionStatus.APPROVED,
     )
     session.add(seller_order)
     session.flush()

@@ -28,6 +28,7 @@ from app.models.enums import (
     PaymentStatus,
     ReservationStatus,
     SellerOrderStatus,
+    SellerOrderDecisionStatus,
     UserStatus,
 )
 from app.services.payment_proofs import (
@@ -201,6 +202,13 @@ def test_approve_consumes_without_reducing_on_hand(session: Session, tmp_path):
     assert session.get(Order, order_id).status == OrderStatus.CONFIRMED
     assert session.get(InventoryReservation, reservation_ids[0]).status == ReservationStatus.CONSUMED
     assert balance.on_hand_quantity == on_hand
+    seller_order = session.scalar(
+        select(SellerOrder).where(SellerOrder.order_id == order_id)
+    )
+    assert seller_order.decision_status == SellerOrderDecisionStatus.PENDING
+    assert seller_order.decision_available_at == attempt.approved_at
+    assert seller_order.ship_by_at == attempt.approved_at + timedelta(hours=24)
+    assert seller_order.estimated_delivery_to == attempt.approved_at + timedelta(hours=48)
 
 
 def test_reject_releases_and_creates_movement(session: Session, tmp_path):
