@@ -419,6 +419,18 @@ def receive_seller_inbound_package(
             "Los productos escaneados no coinciden con el contenido esperado."
         )
     if package.status == SellerInboundPackageStatus.RECEIVED_BY_ECUVEL:
+        from app.services.logistics_tracking import (
+            register_received_inbound_package,
+        )
+
+        register_received_inbound_package(
+            session,
+            package_id=package.id,
+            location_id=package.received_location_id,
+            actor_user_id=actor.id,
+            now=package.received_at,
+            idempotency_key=f"seller-reception:{package.id}",
+        )
         return _result(
             package,
             order_items=order_items,
@@ -433,6 +445,16 @@ def receive_seller_inbound_package(
     package.received_by_user_id = actor.id
     package.received_location_id = location.id
     session.flush()
+    from app.services.logistics_tracking import register_received_inbound_package
+
+    register_received_inbound_package(
+        session,
+        package_id=package.id,
+        location_id=location.id,
+        actor_user_id=actor.id,
+        now=package.received_at,
+        idempotency_key=f"seller-reception:{package.id}",
+    )
     return _result(
         package,
         order_items=order_items,

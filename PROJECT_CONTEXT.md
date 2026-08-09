@@ -41,7 +41,7 @@ El método funcional es transferencia bancaria. El comprador sube comprobantes p
 
 ### Inventario y fulfillment
 
-Inventario maneja recepción, putaway, reserva, liberación, consumo, expiración y picking. Fulfillment crea paquetes uno-a-uno por artículo, permite empaque, preparación para retiro y entrega atómica por escaneo completo. Las reservas y movimientos se registran con claves idempotentes.
+Inventario maneja recepción, putaway, reserva, liberación, consumo, expiración y picking. El dominio conserva dos paquetes distintos: `SellerInboundPackage` representa la entrega vendedor → ECUVEL y, después de su recepción física, puede continuar por la red inter-puntos; `OrderPackage` representa el paquete ECUVEL → comprador para empaque, retiro y handover. Fulfillment Admin mantiene un estado actual transaccional, traslados y eventos append-only para responder dónde está el paquete de entrada, quién lo custodia, hacia dónde va y si se desvió. `Warehouse` es el punto ECUVEL y `WarehouseLocation` su ubicación interna. Las reservas y movimientos de inventario no se alteran por registrar trazabilidad logística.
 
 ### Pedidos del cliente
 
@@ -65,7 +65,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 
 ### ECUVEL Admin
 
-`/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. Todos los GET son read-only; las únicas mutaciones web actuales son aprobar o rechazar un `PaymentProof` mediante POST, CSRF y el servicio transaccional existente. Los módulos no implementados se identifican como “Próximamente”.
+`/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. `/admin/fulfillment` es el centro de control de paquetes de entrada que ya fueron recibidos por ECUVEL: lista ubicación, custodia, destino, último movimiento, tiempo en estado y desviaciones; el detalle permite asignar/reasignar traslado, confirmar pickup, registrar llegada y crear una corrección de ruta mediante POST, CSRF, locking e idempotencia. Los GET son read-only. Los módulos no implementados se identifican como “Próximamente”.
 
 ## Flujos críticos
 
@@ -81,12 +81,13 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 
 ### Fulfillment y retiro
 
-1. Reservas pagadas se consumen.
-2. Picking descuenta existencia física y reservado.
-3. Se crea un paquete por artículo.
-4. El paquete pasa de creado a empacado.
-5. Luego se prepara en ubicación de retiro.
-6. La entrega exige escanear el conjunto completo de paquetes del pedido.
+1. El vendedor crea un `SellerInboundPackage`, imprime su etiqueta y lo marca listo para drop-off.
+2. ECUVEL lo recibe en una `WarehouseLocation`; esa recepción inicia su estado logístico en el `Warehouse` correspondiente y la custodia queda en el punto.
+3. Un traslado inter-puntos asignado conserva la custodia en origen hasta confirmar pickup.
+4. Pickup transfiere la custodia a un usuario ECUVEL activo y deja el paquete en tránsito.
+5. La llegada correcta transfiere custodia al Warehouse destino; una llegada a otro punto conserva el destino esperado y marca desviación.
+6. Una desviación se corrige creando un nuevo traslado desde el punto real al destino original, sin borrar el recorrido anterior.
+7. Separadamente, reservas pagadas, picking y empaque producen `OrderPackage`; la entrega al comprador continúa exigiendo el handover completo y no se activa por una llegada entre puntos.
 
 ### Reseñas verificadas
 
@@ -131,6 +132,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - Los archivos privados no deben ir bajo `static`.
 - El acceso de administrador ECUVEL no se deriva de ser `OWNER` o `ADMINISTRATOR` de una tienda; exige `User.is_ecuvel_staff`.
 - Los GET de `/admin` son de solo lectura y no deben aprobar pagos, mover inventario ni cambiar estados de dominio.
+- Las transiciones de Fulfillment Admin son exclusivamente POST y actualizan atómicamente estado actual, traslado, custodia y evento; los eventos logísticos no se editan ni eliminan.
 - Los GET públicos o de cliente no deben mutar pagos, pedidos, reservas, inventario ni fulfillment.
 - La revisión web de comprobantes está limitada a ECUVEL staff activo y reutiliza las mismas reglas transaccionales del dominio; otras moderaciones sensibles continúan por CLI cuando no existe una interfaz web explícita.
 - No se deben ejecutar comandos destructivos como reset de Git, limpieza masiva, downgrade de base o borrado de volúmenes sin autorización explícita.
@@ -164,7 +166,8 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 - No hay pasarela de tarjeta real; tarjeta permanece deshabilitada.
 - Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes de pago está disponible para ECUVEL staff; reseñas, onboarding y productos continúan por CLI donde no haya una interfaz administrativa explícita.
 - No hay publicación final de productos desde borradores hacia catálogo público.
-- Pedidos ya tiene listado, detalle y revisión de pago. Fulfillment, escáner, inventario, marketplace, finanzas, incidencias y auditoría completa todavía no tienen pantallas operativas propias.
+- Pedidos ya tiene listado, detalle, revisión de pago y enlaces bidireccionales con el paquete de entrada rastreable. Fulfillment Admin ya tiene lista y detalle operativos. Escáner, inventario, marketplace, finanzas, incidencias y auditoría completa todavía no tienen pantallas operativas propias.
+- Scanner sigue pendiente; los servicios de trazabilidad ya exponen puntos de entrada estables para recepción, salida/pickup y llegada sin duplicar reglas cuando se implemente la interfaz.
 - No hay gestión completa de inventario para vendedores desde Partners.
 - No hay favoritos anónimos persistentes, listas múltiples, notificaciones, chat, social login, 2FA, passkeys ni panel de vendedor completo.
 - No hay SMTP/SMS productivo integrado; los backends de desarrollo/pruebas son controlados por configuración.

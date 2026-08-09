@@ -29,7 +29,9 @@ ADMIN_NAVIGATION = (
             AdminNavigationItem(
                 "orders", "Pedidos", "shopping-cart", "admin.orders", True,
             ),
-            AdminNavigationItem("fulfillment", "Fulfillment", "truck", "admin.module_placeholder"),
+            AdminNavigationItem(
+                "fulfillment", "Fulfillment", "truck", "admin.fulfillment", True,
+            ),
             AdminNavigationItem("scanner", "Escáner", "scan-line", "admin.module_placeholder"),
             AdminNavigationItem("inventory", "Inventario", "archive", "admin.module_placeholder"),
         ),

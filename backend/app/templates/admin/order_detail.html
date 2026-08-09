@@ -49,6 +49,26 @@
       </section>
 
       <section class="admin-card admin-detail-card">
+        <div class="admin-card__heading"><div><p class="admin-eyebrow">Vendedor → ECUVEL</p><h2>Entregas de las tiendas</h2></div></div>
+        {% if detail.inbound_packages %}
+          <div class="admin-package-grid admin-package-grid--inbound">
+            {% for package in detail.inbound_packages %}
+              <article>
+                <header><strong>{{ package.package_code }}</strong>{{ badge(package.status) }}</header>
+                <p>{{ package.store_name }}</p>
+                <dl><div><dt>Ubicación actual</dt><dd>{{ package.current_location }}</dd></div><div><dt>Custodia</dt><dd>{{ package.custodian_name }}</dd></div><div><dt>Código</dt><dd>{{ package.barcode }}</dd></div></dl>
+                <div class="admin-package-actions">
+                  {% if package.tracking_available %}<a href="{{ url_for('admin.fulfillment_detail', package_code=package.package_code) }}">Ver seguimiento</a>{% else %}<span title="Disponible después de la recepción física">Seguimiento pendiente</span>{% endif %}
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="admin-inline-empty">Todavía no existen paquetes de entrega desde las tiendas.</div>
+        {% endif %}
+      </section>
+
+      <section class="admin-card admin-detail-card">
         <div class="admin-card__heading"><div><p class="admin-eyebrow">ECUVEL → comprador</p><h2>Paquetes del pedido</h2></div></div>
         {% if detail.packages %}
           <div class="admin-package-grid">

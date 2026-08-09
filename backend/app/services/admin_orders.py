@@ -14,6 +14,7 @@ from sqlalchemy import and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.models import (
+    LogisticsPackageState,
     Order,
     OrderItem,
     OrderPackage,
@@ -26,12 +27,14 @@ from app.models import (
     User,
 )
 from app.models.enums import (
+    LogisticsPackageStatus,
     OrderStatus,
     PackageStatus,
     PaymentProofStatus,
     PaymentStatus,
     SellerOrderDecisionStatus,
     SellerOrderStatus,
+    SellerInboundPackageStatus,
 )
 from app.services.admin_operations import ecuador_comparison_windows
 from app.services.fulfillment import order_ready_for_pickup_predicate
@@ -172,6 +175,17 @@ class AdminPackageView:
 
 
 @dataclass(frozen=True, slots=True)
+class AdminInboundPackageView:
+    package_code: str
+    barcode: str
+    store_name: str
+    status: AdminStatusView
+    current_location: str
+    custodian_name: str
+    tracking_available: bool
+
+
+@dataclass(frozen=True, slots=True)
 class AdminTimelineStep:
     key: str
     label: str
@@ -206,6 +220,7 @@ class AdminOrderDetail:
     total_units: int
     lines: tuple[AdminOrderLineView, ...]
     stores: tuple[AdminStoreOrderView, ...]
+    inbound_packages: tuple[AdminInboundPackageView, ...]
     packages: tuple[AdminPackageView, ...]
     payment: AdminPaymentView
     timeline: tuple[AdminTimelineStep, ...]
@@ -843,6 +858,31 @@ def _seller_status(status: SellerOrderStatus) -> AdminStatusView:
     return AdminStatusView(status.value.lower(), label, tone)
 
 
+def _inbound_package_status(
+    package: SellerInboundPackage,
+    state: LogisticsPackageState | None,
+) -> AdminStatusView:
+    if state is not None:
+        if state.is_deviated or state.status == LogisticsPackageStatus.DEVIATED:
+            return AdminStatusView("deviated", "Desviado", "danger")
+        values = {
+            LogisticsPackageStatus.AT_POINT: ("at_point", "En punto ECUVEL", "success"),
+            LogisticsPackageStatus.ASSIGNED: ("assigned", "Por recoger", "warning"),
+            LogisticsPackageStatus.IN_TRANSIT: ("in_transit", "En tránsito", "info"),
+            LogisticsPackageStatus.DELIVERED: ("delivered", "Entregado", "success"),
+        }
+        code, label, tone = values[state.status]
+        return AdminStatusView(code, label, tone)
+    values = {
+        SellerInboundPackageStatus.CREATED: ("created", "Creado", "muted"),
+        SellerInboundPackageStatus.READY_FOR_DROPOFF: ("ready", "Listo para entregar", "warning"),
+        SellerInboundPackageStatus.RECEIVED_BY_ECUVEL: ("received", "Recibido por ECUVEL", "success"),
+        SellerInboundPackageStatus.CANCELLED: ("cancelled", "Cancelado", "muted"),
+    }
+    code, label, tone = values[package.status]
+    return AdminStatusView(code, label, tone)
+
+
 def get_admin_order_detail(session: Session, *, order_number: str) -> AdminOrderDetail | None:
     record = session.execute(
         select(Order, User).join(User, User.id == Order.buyer_id).where(Order.order_number == order_number.strip())
@@ -868,6 +908,23 @@ def get_admin_order_detail(session: Session, *, order_number: str) -> AdminOrder
         )
         .where(OrderPackage.order_item_id.in_(item_ids)).order_by(OrderPackage.created_at, OrderPackage.id)
     ).all() if item_ids else ()
+    inbound_records = session.execute(
+        select(SellerInboundPackage, LogisticsPackageState)
+        .outerjoin(
+            LogisticsPackageState,
+            LogisticsPackageState.seller_inbound_package_id
+            == SellerInboundPackage.id,
+        )
+        .options(
+            selectinload(SellerInboundPackage.received_location),
+            selectinload(LogisticsPackageState.current_warehouse),
+            selectinload(LogisticsPackageState.current_location),
+            selectinload(LogisticsPackageState.custodian_warehouse),
+            selectinload(LogisticsPackageState.custodian_user),
+        )
+        .where(SellerInboundPackage.seller_order_id.in_(seller_ids))
+        .order_by(SellerInboundPackage.created_at, SellerInboundPackage.id)
+    ).all() if seller_ids else ()
     records = _payment_records(session, (order.id,))[order.id]
     payment = _payment_view(select_relevant_payment(records))
     by_seller = defaultdict(int)
@@ -882,6 +939,33 @@ def get_admin_order_detail(session: Session, *, order_number: str) -> AdminOrder
     stores = tuple(AdminStoreOrderView(
         store.name, store.public_store_code, by_seller[seller.id], _seller_status(seller.status)
     ) for seller, store in seller_records)
+    store_names = {seller.id: store.name for seller, store in seller_records}
+    inbound_packages = tuple(
+        AdminInboundPackageView(
+            package.package_code,
+            package.barcode,
+            store_names.get(package.seller_order_id, "Tienda"),
+            _inbound_package_status(package, state),
+            (
+                state.current_warehouse.name
+                if state and state.current_warehouse
+                else "En tránsito"
+                if state and state.status == LogisticsPackageStatus.IN_TRANSIT
+                else package.received_location.code
+                if package.received_location
+                else "Pendiente de recepción"
+            ),
+            (
+                state.custodian_user.full_name
+                if state and state.custodian_user
+                else state.custodian_warehouse.name
+                if state and state.custodian_warehouse
+                else "Sin custodia ECUVEL"
+            ),
+            state is not None,
+        )
+        for package, state in inbound_records
+    )
     packages = tuple(AdminPackageView(
         package.package_code, package.barcode, _package_status(package.status),
         item.product_name_snapshot, _variant_title(item.variant_snapshot),
@@ -935,7 +1019,7 @@ def get_admin_order_detail(session: Session, *, order_number: str) -> AdminOrder
         buyer.public_account_code, buyer.email, buyer.phone, order.currency,
         order.subtotal, order.discount_total, order.shipping_total,
         order.tax_total, order.grand_total, sum(item.quantity for item in items),
-        lines, stores, packages, payment,
+        lines, stores, inbound_packages, packages, payment,
         timeline, tuple(history_values),
     )
 

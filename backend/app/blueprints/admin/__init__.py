@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import base64
+import uuid
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 from flask import (
     Blueprint,
+    Response,
     abort,
     current_app,
     flash,
@@ -20,6 +26,10 @@ from app.services.admin_navigation import (
     ADMIN_SECONDARY_NAVIGATION,
     find_admin_navigation_item,
 )
+from app.services.admin_fulfillment import (
+    get_admin_fulfillment_detail,
+    get_admin_fulfillment_page,
+)
 from app.services.admin_operations import (
     get_admin_operations_page,
     search_admin_records,
@@ -33,6 +43,14 @@ from app.services.admin_orders import (
 from app.services.payment_proofs import (
     PaymentProofServiceError,
     review_payment_proof,
+)
+from app.services.barcodes import BarcodeRenderError, render_package_code128_svg
+from app.services.logistics_tracking import (
+    LogisticsTrackingError,
+    assign_package_transfer,
+    confirm_package_pickup,
+    reassign_package_transfer,
+    receive_transfer_at_destination,
 )
 from app.services.private_storage import PrivateStorageError, verify_private_file
 
@@ -104,6 +122,181 @@ def orders():
         "admin/orders.html",
         page=page,
         **_shell_context("orders"),
+    )
+
+
+@admin.get("/fulfillment")
+@ecuvel_staff_required
+def fulfillment():
+    page = get_admin_fulfillment_page(
+        db.session,
+        status=request.args.get("status"),
+        query=request.args.get("q"),
+        point=request.args.get("point"),
+        destination=request.args.get("destination"),
+        custodian=request.args.get("custodian"),
+        deviated=request.args.get("deviated"),
+        age=request.args.get("age"),
+        page=request.args.get("page"),
+        page_size=request.args.get("page_size"),
+    )
+    return render_template(
+        "admin/fulfillment.html",
+        page=page,
+        **_shell_context("fulfillment"),
+    )
+
+
+@admin.get("/fulfillment/<string:package_code>")
+@ecuvel_staff_required
+def fulfillment_detail(package_code: str):
+    detail = get_admin_fulfillment_detail(
+        db.session,
+        package_code=package_code,
+    )
+    if detail is None:
+        abort(404)
+    return render_template(
+        "admin/fulfillment_detail.html",
+        detail=detail,
+        action_token=uuid.uuid4().hex,
+        **_shell_context("fulfillment"),
+    )
+
+
+def _uuid_field(name: str) -> uuid.UUID:
+    try:
+        return uuid.UUID((request.form.get(name) or "").strip())
+    except (TypeError, ValueError) as exc:
+        raise LogisticsTrackingError("La selección enviada no es válida.") from exc
+
+
+def _optional_datetime_field(name: str) -> datetime | None:
+    raw = (request.form.get(name) or "").strip()
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise LogisticsTrackingError("La fecha estimada no es válida.") from exc
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=ZoneInfo("America/Guayaquil"))
+    return value.astimezone(timezone.utc)
+
+
+def _fulfillment_action(package_code: str, operation: str):
+    key = (request.form.get("idempotency_key") or uuid.uuid4().hex).strip()[:120]
+    try:
+        if operation in {"assign", "correct"}:
+            assign_package_transfer(
+                db.session,
+                package_code=package_code,
+                destination_warehouse_id=_uuid_field("destination_warehouse_id"),
+                responsible_user_id=_uuid_field("responsible_user_id"),
+                actor_user_id=current_user.id,
+                vehicle_code=request.form.get("vehicle_code"),
+                eta_at=_optional_datetime_field("eta_at"),
+                notes=request.form.get("notes"),
+                corrective=operation == "correct",
+                idempotency_key=f"admin:{operation}:{key}",
+            )
+        elif operation == "reassign":
+            reassign_package_transfer(
+                db.session,
+                package_code=package_code,
+                responsible_user_id=_uuid_field("responsible_user_id"),
+                actor_user_id=current_user.id,
+                vehicle_code=request.form.get("vehicle_code"),
+                notes=request.form.get("notes"),
+                idempotency_key=f"admin:{operation}:{key}",
+            )
+        elif operation == "pickup":
+            confirm_package_pickup(
+                db.session,
+                package_code=package_code,
+                actor_user_id=current_user.id,
+                notes=request.form.get("notes"),
+                idempotency_key=f"admin:{operation}:{key}",
+            )
+        elif operation == "receive":
+            receive_transfer_at_destination(
+                db.session,
+                package_code=package_code,
+                warehouse_id=_uuid_field("warehouse_id"),
+                actor_user_id=current_user.id,
+                notes=request.form.get("notes"),
+                idempotency_key=f"admin:{operation}:{key}",
+            )
+        else:
+            abort(404)
+        db.session.commit()
+    except LogisticsTrackingError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falló acción fulfillment operation=%s package=%s",
+            operation,
+            package_code,
+        )
+        flash("No pudimos guardar el movimiento logístico.", "error")
+    else:
+        flash("Movimiento logístico guardado correctamente.", "success")
+    return redirect(
+        url_for("admin.fulfillment_detail", package_code=package_code.upper())
+    )
+
+
+@admin.post("/fulfillment/<string:package_code>/assign")
+@limiter.limit("60 per hour")
+@ecuvel_staff_required
+def fulfillment_assign(package_code: str):
+    return _fulfillment_action(package_code, "assign")
+
+
+@admin.post("/fulfillment/<string:package_code>/correct")
+@limiter.limit("60 per hour")
+@ecuvel_staff_required
+def fulfillment_correct(package_code: str):
+    return _fulfillment_action(package_code, "correct")
+
+
+@admin.post("/fulfillment/<string:package_code>/reassign")
+@limiter.limit("60 per hour")
+@ecuvel_staff_required
+def fulfillment_reassign(package_code: str):
+    return _fulfillment_action(package_code, "reassign")
+
+
+@admin.post("/fulfillment/<string:package_code>/pickup")
+@limiter.limit("60 per hour")
+@ecuvel_staff_required
+def fulfillment_pickup(package_code: str):
+    return _fulfillment_action(package_code, "pickup")
+
+
+@admin.post("/fulfillment/<string:package_code>/receive")
+@limiter.limit("60 per hour")
+@ecuvel_staff_required
+def fulfillment_receive(package_code: str):
+    return _fulfillment_action(package_code, "receive")
+
+
+@admin.get("/fulfillment/<string:package_code>/label")
+@ecuvel_staff_required
+def fulfillment_label(package_code: str):
+    detail = get_admin_fulfillment_detail(db.session, package_code=package_code)
+    if detail is None:
+        abort(404)
+    try:
+        barcode_svg = render_package_code128_svg(detail.barcode)
+    except BarcodeRenderError as exc:
+        return Response(str(exc), status=422, mimetype="text/plain")
+    return render_template(
+        "admin/fulfillment_label.html",
+        detail=detail,
+        barcode_data=base64.b64encode(barcode_svg).decode("ascii"),
     )
 
 

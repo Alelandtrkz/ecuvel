@@ -11,6 +11,11 @@ from app.models.inventory import (
     InventoryReservation,
 )
 from app.models.fulfillment import OrderPackage
+from app.models.logistics import (
+    LogisticsPackageState,
+    LogisticsTrackingEvent,
+    LogisticsTransfer,
+)
 from app.models.seller_inbound import (
     SellerInboundPackage,
     SellerInboundPackageItem,
@@ -74,6 +79,9 @@ __all__ = [
     "InventoryReservation",
     "InventoryMovement",
     "OrderPackage",
+    "LogisticsPackageState",
+    "LogisticsTransfer",
+    "LogisticsTrackingEvent",
     "SellerInboundPackage",
     "SellerInboundPackageItem",
     "Favorite",

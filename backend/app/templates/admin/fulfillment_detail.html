@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}{{ detail.package_code }} · Fulfillment ECUVEL{% endblock %}
+{% macro badge(status) -%}<span class="admin-status admin-status--{{ status.tone }}">{{ status.label }}</span>{%- endmacro %}
+
+{% block admin_content %}
+<div class="admin-page admin-fulfillment-detail">
+  <header class="admin-detail-heading">
+    <div><a class="admin-back" href="{{ url_for('admin.fulfillment') }}" aria-label="Volver a Fulfillment"><i data-lucide="arrow-left" aria-hidden="true"></i></a><div><p class="admin-eyebrow">Trazabilidad de paquete</p><h1>{{ detail.package_code }}</h1><p>Pedido <a href="{{ url_for('admin.order_detail', order_number=detail.order_number) }}">{{ detail.order_number }}</a> · {{ detail.seller_order_number }}</p></div>{{ badge(detail.status) }}</div>
+    <div class="admin-detail-actions"><a class="admin-button admin-button--secondary" href="{{ url_for('admin.fulfillment_label', package_code=detail.package_code) }}" target="_blank"><i data-lucide="printer" aria-hidden="true"></i>Imprimir etiqueta</a><a class="admin-button" href="{{ url_for('admin.order_detail', order_number=detail.order_number) }}"><i data-lucide="receipt-text" aria-hidden="true"></i>Ver pedido</a></div>
+  </header>
+
+  <section class="admin-card admin-logistics-current admin-logistics-current--{{ detail.status.tone }}">
+    <div><p class="admin-eyebrow">Estado actual</p><h2>{{ detail.current_location }}</h2><p>Sin cambios desde hace {{ detail.state_since }}{% if detail.current_internal_location %} · {{ detail.current_internal_location }}{% endif %}</p></div><i data-lucide="{{ 'triangle-alert' if detail.status.tone == 'danger' else 'truck' }}" aria-hidden="true"></i>
+  </section>
+
+  <div class="admin-logistics-layout">
+    <main class="admin-logistics-main">
+      <section class="admin-card admin-logistics-route">
+        <div class="admin-card__heading"><div><p class="admin-eyebrow">Segmento vigente</p><h2>Ruta del paquete</h2></div></div>
+        <ol><li class="is-complete"><span><i data-lucide="check" aria-hidden="true"></i></span><strong>{{ detail.origin_name or 'Origen pendiente' }}</strong><small>Origen</small></li><li class="is-active"><span><i data-lucide="truck" aria-hidden="true"></i></span><strong>{{ 'Desviado' if detail.status.code == 'deviated' else detail.status.label }}</strong><small>{{ detail.current_location }}</small></li><li><span><i data-lucide="warehouse" aria-hidden="true"></i></span><strong>{{ detail.destination_name or 'Destino pendiente' }}</strong><small>Destino esperado</small></li></ol>
+      </section>
+
+      <div class="admin-logistics-bento">
+        <section class="admin-card admin-logistics-fact"><div class="admin-card__heading"><h2><i data-lucide="badge" aria-hidden="true"></i>Responsable en custodia</h2></div><div class="admin-logistics-person"><span>{{ detail.custodian_name[:1]|upper }}</span><div><strong>{{ detail.custodian_name }}</strong><small>{{ detail.custodian_code or detail.custodian_type }}</small></div></div><dl><div><dt>Tipo</dt><dd>{{ detail.custodian_type }}</dd></div>{% if detail.custody_package_count is not none %}<div><dt>Paquetes a cargo</dt><dd>{{ detail.custody_package_count }}</dd></div>{% endif %}</dl></section>
+        <section class="admin-card admin-logistics-fact"><div class="admin-card__heading"><h2><i data-lucide="route" aria-hidden="true"></i>Datos del traslado</h2></div>{% if detail.transfer %}<dl><div><dt>Traslado</dt><dd>{{ detail.transfer.transfer_code }}</dd></div><div><dt>Responsable</dt><dd>{{ detail.transfer.responsible_name }}</dd></div><div><dt>Vehículo</dt><dd>{{ detail.transfer.vehicle_code or 'No registrado' }}</dd></div><div><dt>ETA</dt><dd>{{ detail.transfer.eta_at|ecuador_datetime if detail.transfer.eta_at else 'No definida' }}</dd></div></dl>{% else %}<p class="admin-inline-empty">Todavía no existe un traslado asignado.</p>{% endif %}</section>
+      </div>
+
+      <section class="admin-card admin-logistics-next admin-logistics-next--{{ detail.next_tone }}"><div><i data-lucide="navigation" aria-hidden="true"></i><span><p class="admin-eyebrow">Próximo movimiento</p><h2>{{ detail.next_title }}</h2><p>{{ detail.next_description }}</p></span></div></section>
+
+      <section class="admin-card admin-logistics-actions" aria-labelledby="logistics-actions-title">
+        <div class="admin-card__heading"><div><p class="admin-eyebrow">Operación controlada</p><h2 id="logistics-actions-title">Acciones disponibles</h2></div></div>
+        {% if detail.can_assign or detail.can_correct %}
+          <details open><summary><i data-lucide="route" aria-hidden="true"></i>{{ 'Crear traslado correctivo' if detail.can_correct else 'Asignar traslado' }}</summary><form method="post" action="{{ url_for('admin.fulfillment_correct' if detail.can_correct else 'admin.fulfillment_assign', package_code=detail.package_code) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ action_token }}-{{ 'correct' if detail.can_correct else 'assign' }}"><label>Destino ECUVEL<select name="destination_warehouse_id" required><option value="">Seleccionar destino</option>{% for option in detail.warehouses %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}</select></label><label>Responsable<select name="responsible_user_id" required><option value="">Seleccionar personal</option>{% for option in detail.staff %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}</select></label><label>Vehículo (opcional)<input name="vehicle_code" maxlength="40" placeholder="Ej. VAN-0012"></label><label>ETA (opcional)<input type="datetime-local" name="eta_at"></label><label class="is-wide">Notas (opcional)<textarea name="notes" maxlength="500" rows="3"></textarea></label><button class="admin-button is-wide" type="submit">{{ 'Crear traslado correctivo' if detail.can_correct else 'Asignar traslado' }}</button></form></details>
+        {% endif %}
+        {% if detail.can_reassign %}<details><summary><i data-lucide="users" aria-hidden="true"></i>Reasignar responsable</summary><form method="post" action="{{ url_for('admin.fulfillment_reassign', package_code=detail.package_code) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ action_token }}-reassign"><label>Nuevo responsable<select name="responsible_user_id" required><option value="">Seleccionar personal</option>{% for option in detail.staff %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}</select></label><label>Vehículo (opcional)<input name="vehicle_code" maxlength="40"></label><label class="is-wide">Notas (opcional)<textarea name="notes" maxlength="500" rows="3"></textarea></label><button class="admin-button is-wide" type="submit">Guardar reasignación</button></form></details>{% endif %}
+        {% if detail.can_pickup %}<details><summary><i data-lucide="package-check" aria-hidden="true"></i>Confirmar recogida</summary><form method="post" action="{{ url_for('admin.fulfillment_pickup', package_code=detail.package_code) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ action_token }}-pickup"><label class="is-wide">Notas (opcional)<textarea name="notes" maxlength="500" rows="3"></textarea></label><button class="admin-button is-wide" type="submit">Transferir custodia y confirmar salida</button></form></details>{% endif %}
+        {% if detail.can_receive %}<details open><summary><i data-lucide="scan-line" aria-hidden="true"></i>Registrar llegada</summary><form method="post" action="{{ url_for('admin.fulfillment_receive', package_code=detail.package_code) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ action_token }}-receive"><label class="is-wide">Punto de llegada<select name="warehouse_id" required><option value="">Seleccionar punto escaneado</option>{% for option in detail.warehouses %}<option value="{{ option.value }}">{{ option.label }}</option>{% endfor %}</select></label><label class="is-wide">Notas (opcional)<textarea name="notes" maxlength="500" rows="3"></textarea></label><button class="admin-button is-wide" type="submit">Confirmar recepción física</button></form></details>{% endif %}
+        {% if not (detail.can_assign or detail.can_correct or detail.can_reassign or detail.can_pickup or detail.can_receive) %}<div class="admin-inline-empty">No hay acciones logísticas disponibles para el estado actual.</div>{% endif %}
+      </section>
+    </main>
+
+    <aside class="admin-card admin-logistics-history">
+      <div class="admin-card__heading"><div><p class="admin-eyebrow">Auditoría operativa</p><h2>Historial de trazabilidad</h2></div></div>
+      <ol>{% for event in detail.events %}<li class="is-{{ event.tone }}"><span aria-hidden="true"></span><div><header><strong>{{ event.label }}</strong><time datetime="{{ event.occurred_at.isoformat() }}">{{ event.occurred_at|ecuador_datetime }}</time></header>{% if event.notes %}<p>{{ event.notes }}</p>{% endif %}<small>{% if event.actor_name %}{{ event.actor_name }}{% if event.actor_code %} · {{ event.actor_code }}{% endif %}{% else %}Sistema ECUVEL{% endif %}{% if event.point_name %} · {{ event.point_name }}{% endif %}</small>{% if event.custody_change %}<em>Custodia: {{ event.custody_change }}</em>{% endif %}{% if event.transfer_code %}<em>{{ event.transfer_code }}</em>{% endif %}</div></li>{% endfor %}</ol>
+    </aside>
+  </div>
+</div>
+{% endblock %}

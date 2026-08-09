@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.models import (
     InventoryBalance,
     InventoryMovement,
+    LogisticsPackageState,
+    LogisticsTrackingEvent,
     Order,
     OrderPackage,
     PaymentProof,
@@ -29,6 +31,7 @@ from app.models import (
     WarehouseLocation,
 )
 from app.models.enums import (
+    LogisticsTrackingEventType,
     OfferStatus,
     OrderStatus,
     PaymentProofStatus,
@@ -326,6 +329,43 @@ def _recent_activity(
     source_limit = max(1, min(source_limit, 5))
     candidates: list[tuple[datetime, str, str, str | None, str]] = []
 
+    logistics_events = session.execute(
+        select(
+            LogisticsTrackingEvent.occurred_at,
+            LogisticsTrackingEvent.event_type,
+            SellerInboundPackage.package_code,
+        )
+        .join(
+            LogisticsPackageState,
+            LogisticsPackageState.id
+            == LogisticsTrackingEvent.package_state_id,
+        )
+        .join(
+            SellerInboundPackage,
+            SellerInboundPackage.id
+            == LogisticsPackageState.seller_inbound_package_id,
+        )
+        .order_by(
+            LogisticsTrackingEvent.occurred_at.desc(),
+            LogisticsTrackingEvent.id.desc(),
+        )
+        .limit(source_limit)
+    ).all()
+    logistics_labels = {
+        LogisticsTrackingEventType.TRANSFER_ASSIGNED: ("Traslado asignado", "primary"),
+        LogisticsTrackingEventType.TRANSFER_REASSIGNED: ("Traslado reasignado", "primary"),
+        LogisticsTrackingEventType.PICKED_UP: ("Paquete recogido", "primary"),
+        LogisticsTrackingEventType.RECEIVED_AT_DESTINATION: ("Paquete recibido en destino", "success"),
+        LogisticsTrackingEventType.DEVIATION_DETECTED: ("Desviación logística detectada", "danger"),
+        LogisticsTrackingEventType.CORRECTIVE_TRANSFER_CREATED: ("Traslado correctivo creado", "warning"),
+    }
+    for timestamp, event_type, code in logistics_events:
+        label, tone = logistics_labels.get(
+            event_type,
+            ("Movimiento logístico registrado", "neutral"),
+        )
+        candidates.append((timestamp, "logistics", label, code, tone))
+
     received_packages = session.execute(
         select(SellerInboundPackage.received_at, SellerInboundPackage.package_code)
         .where(SellerInboundPackage.received_at.is_not(None))
@@ -459,6 +499,8 @@ def _recent_activity(
             destination_url=(
                 f"/admin/orders/{reference}"
                 if event_type == "payment" and reference
+                else f"/admin/fulfillment/{reference}"
+                if event_type in {"logistics", "package_received"} and reference
                 else None
             ),
         )
@@ -514,6 +556,14 @@ def get_admin_operations_page(
     stores_pending = _count(
         session, StoreOnboarding.status == StoreOnboardingStatus.SUBMITTED
     )
+    deviated_packages = int(
+        session.scalar(
+            select(func.count(LogisticsPackageState.id)).where(
+                LogisticsPackageState.is_deviated.is_(True)
+            )
+        )
+        or 0
+    )
 
     alert_candidates = (
         AdminOperationalAlert(
@@ -536,8 +586,23 @@ def get_admin_operations_page(
             f"{payouts_on_hold} liquidaciones requieren atención.",
             payouts_on_hold, "warning", "wallet-cards",
         ),
+        AdminOperationalAlert(
+            "logistics", "Desviaciones logísticas",
+            f"{deviated_packages} paquetes están fuera de su destino esperado.",
+            deviated_packages, "danger", "route-off", "/admin/fulfillment?status=deviated",
+        ),
     )
-    alerts = tuple(alert for alert in alert_candidates if alert.count > 0)[:4]
+    alert_priority = {
+        "logistics": 0,
+        "seller_sla": 1,
+        "payments": 2,
+        "stock": 3,
+        "payouts": 4,
+    }
+    alerts = tuple(sorted(
+        (alert for alert in alert_candidates if alert.count > 0),
+        key=lambda alert: alert_priority[alert.key],
+    ))[:4]
 
     attention_candidates = (
         AdminAttentionItem("payments", "Pagos", pending_payment_proofs, "banknote", "/admin/orders?payment=review"),
@@ -548,6 +613,10 @@ def get_admin_operations_page(
         AdminAttentionItem("products", "Productos", products_pending_review, "shapes"),
         AdminAttentionItem("stores", "Tiendas", stores_pending, "store"),
         AdminAttentionItem("payouts", "Liquidaciones", payouts_on_hold, "wallet-cards"),
+        AdminAttentionItem(
+            "fulfillment", "Fulfillment", deviated_packages, "truck",
+            "/admin/fulfillment?status=deviated",
+        ),
     )
 
     return AdminOperationsPage(
@@ -686,7 +755,16 @@ def search_admin_records(
 
     package_results: list[AdminSearchResult] = []
     inbound_packages = session.execute(
-        select(SellerInboundPackage.package_code, SellerInboundPackage.status)
+        select(
+            SellerInboundPackage.package_code,
+            SellerInboundPackage.status,
+            LogisticsPackageState.id,
+        )
+        .outerjoin(
+            LogisticsPackageState,
+            LogisticsPackageState.seller_inbound_package_id
+            == SellerInboundPackage.id,
+        )
         .where(SellerInboundPackage.package_code.ilike(prefix, escape="\\"))
         .order_by(
             case(
@@ -704,9 +782,10 @@ def search_admin_records(
     package_results.extend(
         AdminSearchResult(
             "packages", "Paquete tienda → ECUVEL", code,
-            f"Estado: {status.value}", "package-open"
+            f"Estado: {status.value}", "package-open",
+            f"/admin/fulfillment/{code}" if state_id else None,
         )
-        for code, status in inbound_packages
+        for code, status, state_id in inbound_packages
     )
     remaining = max(0, limit_per_group - len(package_results))
     if remaining:
