@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Iterable
 
+from sqlalchemy import and_, exists, select
+
 from app.models.enums import (
     SellerInboundPackageStatus,
     SellerOrderDecisionStatus,
@@ -154,4 +156,54 @@ def resolve_partner_order_workflow(
         len(active_packages),
         received_count,
         created,
+    )
+
+
+def partner_order_all_inbound_packages_received_predicate():
+    """SQL equivalent of the persisted-package portion of the workflow."""
+
+    from app.models.order import SellerOrder
+    from app.models.seller_inbound import SellerInboundPackage
+
+    active_package_exists = exists(
+        select(SellerInboundPackage.id).where(
+            SellerInboundPackage.seller_order_id == SellerOrder.id,
+            SellerInboundPackage.status != SellerInboundPackageStatus.CANCELLED,
+        )
+    )
+    unreceived_package_exists = exists(
+        select(SellerInboundPackage.id).where(
+            SellerInboundPackage.seller_order_id == SellerOrder.id,
+            SellerInboundPackage.status.notin_(
+                (
+                    SellerInboundPackageStatus.CANCELLED,
+                    SellerInboundPackageStatus.RECEIVED_BY_ECUVEL,
+                )
+            ),
+        )
+    )
+    return and_(active_package_exists, ~unreceived_package_exists)
+
+
+def partner_order_preparation_predicate():
+    """Select SellerOrders that resolve to the seller PREPARATION stage."""
+
+    from app.models.order import SellerOrder
+
+    return and_(
+        SellerOrder.decision_status == SellerOrderDecisionStatus.APPROVED,
+        SellerOrder.status != SellerOrderStatus.COMPLETED,
+        ~partner_order_all_inbound_packages_received_predicate(),
+    )
+
+
+def partner_order_overdue_predicate(now: datetime):
+    """Select PREPARATION rows whose real seller delivery SLA expired."""
+
+    from app.models.order import SellerOrder
+
+    return and_(
+        partner_order_preparation_predicate(),
+        SellerOrder.ship_by_at.is_not(None),
+        SellerOrder.ship_by_at < _aware_utc(now),
     )

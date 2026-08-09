@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}{% block admin_title %}ECUVEL Admin{% endblock %}{% endblock %}
+{% block body_class %}admin-body{% endblock %}
+{% block styles %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block header %}
+  <aside class="admin-sidebar" id="admin-sidebar" aria-label="Navegación administrativa">
+    <div class="admin-sidebar__brand">
+      <a href="{{ url_for('admin.operations') }}" aria-label="ECUVEL Admin Panel">
+        <strong>ECUVEL</strong>
+        <span>Admin Panel</span>
+      </a>
+      <button type="button" class="admin-sidebar__close" data-admin-sidebar-close aria-label="Cerrar menú">
+        <i data-lucide="x" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="admin-quick" data-admin-menu>
+      <button class="admin-quick__trigger" type="button" data-admin-menu-trigger aria-expanded="false" aria-controls="admin-quick-menu">
+        <i data-lucide="circle-plus" aria-hidden="true"></i>
+        <span>Acción rápida</span>
+        <i data-lucide="chevron-down" aria-hidden="true"></i>
+      </button>
+      <div class="admin-quick__menu" id="admin-quick-menu" data-admin-menu-panel hidden>
+        <a href="{{ url_for('admin.search', scope='orders') }}"><i data-lucide="search" aria-hidden="true"></i>Buscar pedido</a>
+        <a href="{{ url_for('admin.search', scope='users') }}"><i data-lucide="user-search" aria-hidden="true"></i>Buscar usuario</a>
+        <a href="{{ url_for('admin.module_placeholder', module_key='scanner') }}"><i data-lucide="scan-line" aria-hidden="true"></i>Escanear paquete</a>
+      </div>
+    </div>
+
+    <nav class="admin-sidebar__nav">
+      {% for group in admin_navigation %}
+        <section>
+          <h2>{{ group.label }}</h2>
+          <ul>
+            {% for item in group.items %}
+              <li>
+                <a class="{{ 'is-active' if current_admin_section == item.key else '' }}"
+                   href="{{ url_for(item.endpoint) if item.implemented else url_for(item.endpoint, module_key=item.key) }}"
+                   {% if current_admin_section == item.key %}aria-current="page"{% endif %}
+                   {% if not item.implemented %}title="Módulo próximamente"{% endif %}>
+                  <i data-lucide="{{ item.icon }}" aria-hidden="true"></i>
+                  <span>{{ item.label }}</span>
+                  {% if not item.implemented %}<small>Próx.</small>{% endif %}
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endfor %}
+    </nav>
+
+    <nav class="admin-sidebar__secondary" aria-label="Navegación secundaria">
+      {% for item in admin_secondary_navigation %}
+        <a class="{{ 'is-active' if current_admin_section == item.key else '' }}"
+           href="{{ url_for(item.endpoint, module_key=item.key) }}"
+           {% if current_admin_section == item.key %}aria-current="page"{% endif %}>
+          <i data-lucide="{{ item.icon }}" aria-hidden="true"></i>
+          <span>{{ item.label }}</span>
+          <small>Próx.</small>
+        </a>
+      {% endfor %}
+    </nav>
+  </aside>
+  <button class="admin-sidebar-backdrop" type="button" data-admin-sidebar-close aria-label="Cerrar navegación" hidden></button>
+
+  <header class="admin-topbar">
+    <button type="button" class="admin-topbar__menu" data-admin-sidebar-open aria-label="Abrir menú administrativo">
+      <i data-lucide="menu" aria-hidden="true"></i>
+    </button>
+    <form class="admin-topbar__search" action="{{ url_for('admin.search') }}" method="get" role="search">
+      <i data-lucide="search" aria-hidden="true"></i>
+      <input id="admin-global-search" name="q" type="search" maxlength="120"
+             aria-label="Buscar en administración"
+             value="{{ request.args.get('q', '') if request.endpoint == 'admin.search' else '' }}"
+             placeholder="Buscar pedido, usuario, paquete o tienda..." autocomplete="off">
+    </form>
+    <div class="admin-topbar__actions">
+      <a class="admin-topbar__scan" href="{{ url_for('admin.module_placeholder', module_key='scanner') }}">
+        <i data-lucide="scan-line" aria-hidden="true"></i><span>Escanear</span>
+      </a>
+      <button type="button" aria-label="Notificaciones · Próximamente" title="Notificaciones · Próximamente" disabled>
+        <i data-lucide="bell" aria-hidden="true"></i>
+      </button>
+      <a href="{{ url_for('admin.module_placeholder', module_key='support') }}" aria-label="Ayuda">
+        <i data-lucide="circle-help" aria-hidden="true"></i>
+      </a>
+      <div class="admin-profile" title="{{ current_user.full_name }}">
+        <span>{{ (current_user.full_name or 'EC')[:2] | upper }}</span>
+        <span class="admin-profile__name">{{ (current_user.full_name or 'Operador ECUVEL').split()[0] }}</span>
+      </div>
+    </div>
+  </header>
+{% endblock %}
+
+{% block content %}{% block admin_content %}{% endblock %}{% endblock %}
+{% block footer %}{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/admin.js') }}" defer></script>
+{% endblock %}

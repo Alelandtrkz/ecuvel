@@ -92,6 +92,16 @@ class Config:
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_ENABLED = not TESTING
 
+    ADMIN_CRITICAL_STOCK_THRESHOLD = _environment_int_range(
+        "ADMIN_CRITICAL_STOCK_THRESHOLD", 5, 1, 1000
+    )
+    ADMIN_ACTIVITY_LIMIT = _environment_int_range(
+        "ADMIN_ACTIVITY_LIMIT", 6, 1, 6
+    )
+    ADMIN_SEARCH_GROUP_LIMIT = _environment_int_range(
+        "ADMIN_SEARCH_GROUP_LIMIT", 5, 1, 20
+    )
+
     AUTH_REQUIRE_EMAIL_VERIFICATION = _environment_bool(
         "AUTH_REQUIRE_EMAIL_VERIFICATION",
         True,

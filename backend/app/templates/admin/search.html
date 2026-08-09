@@ -1,0 +1,28 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Búsqueda administrativa · ECUVEL{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-search-page">
+  <section class="admin-page-heading">
+    <div><p class="admin-eyebrow">Consulta segura</p><h1>Búsqueda administrativa</h1><p>Busca por identificadores públicos o por prefijos de nombre.</p></div>
+  </section>
+  {% if not page.query %}
+    <section class="admin-card admin-empty"><i data-lucide="search" aria-hidden="true"></i><h2>Escribe un término de búsqueda</h2><p>Puedes buscar pedidos, usuarios, paquetes o tiendas.</p></section>
+  {% elif not page.groups %}
+    <section class="admin-card admin-empty"><i data-lucide="search-x" aria-hidden="true"></i><h2>Sin resultados</h2><p>No encontramos coincidencias para “{{ page.query }}”.</p></section>
+  {% else %}
+    <p class="admin-search-page__count">{{ page.total_results }} resultados para <strong>“{{ page.query }}”</strong></p>
+    <div class="admin-search-groups">
+      {% for group in page.groups %}
+        <section class="admin-card admin-search-group">
+          <div class="admin-card__heading"><h2>{{ group.label }}</h2><span>{{ group.results|length }}</span></div>
+          <ul>
+            {% for result in group.results %}
+              <li><i data-lucide="{{ result.icon }}" aria-hidden="true"></i><div><span>{{ result.label }}</span><strong>{{ result.reference }}</strong><small>{{ result.description }}</small></div></li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

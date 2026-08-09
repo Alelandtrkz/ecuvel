@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from app.models.enums import (
@@ -149,6 +149,56 @@ class HandoverOrderResult:
     scanned_package_count: int
     packages: tuple[HandedOverPackageItem, ...]
     replayed: bool
+
+
+def order_ready_for_pickup_predicate():
+    """SQL predicate for a complete customer order awaiting pickup.
+
+    Every order item must have its unique outbound package staged with a
+    readiness timestamp.  At least one package must still be READY_FOR_PICKUP,
+    which excludes orders whose complete handover already finished.  Keeping
+    this rule in fulfillment prevents dashboards from redefining readiness in
+    terms of seller suborders or package row counts.
+    """
+
+    order_item_count = (
+        select(func.count(OrderItem.id))
+        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .where(SellerOrder.order_id == Order.id)
+        .correlate(Order)
+        .scalar_subquery()
+    )
+    staged_package_count = (
+        select(func.count(OrderPackage.id))
+        .join(OrderItem, OrderItem.id == OrderPackage.order_item_id)
+        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .where(
+            SellerOrder.order_id == Order.id,
+            OrderPackage.status.in_(
+                (PackageStatus.READY_FOR_PICKUP, PackageStatus.HANDED_OVER)
+            ),
+            OrderPackage.ready_at.is_not(None),
+        )
+        .correlate(Order)
+        .scalar_subquery()
+    )
+    packages_awaiting_pickup = (
+        select(func.count(OrderPackage.id))
+        .join(OrderItem, OrderItem.id == OrderPackage.order_item_id)
+        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .where(
+            SellerOrder.order_id == Order.id,
+            OrderPackage.status == PackageStatus.READY_FOR_PICKUP,
+            OrderPackage.ready_at.is_not(None),
+        )
+        .correlate(Order)
+        .scalar_subquery()
+    )
+    return and_(
+        order_item_count > 0,
+        staged_package_count == order_item_count,
+        packages_awaiting_pickup > 0,
+    )
 
 
 def _order_not_ready() -> OrderNotReadyForPackagingError:

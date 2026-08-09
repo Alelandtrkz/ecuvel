@@ -34,6 +34,7 @@ from app.models.enums import (
     StoreStatus,
 )
 from app.services.partner_order_workflow import resolve_partner_order_workflow
+from app.services.payment_reporting import approved_payment_dates_subquery
 
 
 ECUADOR_TZ = ZoneInfo("America/Guayaquil")
@@ -287,21 +288,6 @@ def resolve_sales_period(
     )
 
 
-def _payment_dates_subquery():
-    return (
-        select(
-            PaymentAttempt.order_id.label("order_id"),
-            func.min(PaymentAttempt.approved_at).label("approved_at"),
-        )
-        .where(
-            PaymentAttempt.status == PaymentStatus.APPROVED,
-            PaymentAttempt.approved_at.is_not(None),
-        )
-        .group_by(PaymentAttempt.order_id)
-        .subquery("approved_payments")
-    )
-
-
 def _valid_sale_conditions(store_id: uuid.UUID):
     return (
         SellerOrder.store_id == store_id,
@@ -318,7 +304,7 @@ def _sales_totals(
     starts_at: datetime,
     ends_at: datetime,
 ) -> tuple[Decimal, Decimal, Decimal, int]:
-    payments = _payment_dates_subquery()
+    payments = approved_payment_dates_subquery()
     row = session.execute(
         select(
             func.coalesce(func.sum(SellerOrder.subtotal), ZERO),
@@ -344,7 +330,7 @@ def _units_sold(
     starts_at: datetime,
     ends_at: datetime,
 ) -> int:
-    payments = _payment_dates_subquery()
+    payments = approved_payment_dates_subquery()
     value = session.scalar(
         select(func.coalesce(func.sum(OrderItem.quantity), 0))
         .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
@@ -476,7 +462,7 @@ def _chart_points(
     period: SalesPeriod,
     granularity: str,
 ) -> tuple[SalesChartPoint, ...]:
-    payments = _payment_dates_subquery()
+    payments = approved_payment_dates_subquery()
     local_payment = func.timezone("America/Guayaquil", payments.c.approved_at)
     bucket = func.date_trunc(granularity, local_payment).label("bucket")
     rows = session.execute(
@@ -529,7 +515,7 @@ def _top_products(
     placeholder_image: str,
     order_by: str,
 ) -> tuple[TopProductView, ...]:
-    payments = _payment_dates_subquery()
+    payments = approved_payment_dates_subquery()
     commission = func.coalesce(OrderItem.commission_amount_snapshot, ZERO)
     net_line = (
         OrderItem.unit_price * OrderItem.quantity
@@ -621,7 +607,7 @@ def _date_label(value: datetime) -> str:
 def _recent_sales(
     session: Session, *, store_id: uuid.UUID
 ) -> tuple[RecentSaleView, ...]:
-    payments = _payment_dates_subquery()
+    payments = approved_payment_dates_subquery()
     rows = session.execute(
         select(SellerOrder, payments.c.approved_at)
         .join(Order, Order.id == SellerOrder.order_id)
@@ -675,7 +661,7 @@ def _payout_rows(
         for payout, order_count in payout_rows
     ]
 
-    payments = _payment_dates_subquery()
+    payments = approved_payment_dates_subquery()
     assigned = exists(
         select(SellerPayoutItem.seller_order_id).where(
             SellerPayoutItem.seller_order_id == SellerOrder.id
@@ -866,7 +852,7 @@ def get_partner_sales_export(
 ) -> tuple[SalesPeriod, tuple[SalesExportRow, ...]]:
     store = require_partner_sales_store(session, user_id)
     period = resolve_sales_period(period_key, now=now)
-    payments = _payment_dates_subquery()
+    payments = approved_payment_dates_subquery()
     rows = session.execute(
         select(
             SellerOrder,

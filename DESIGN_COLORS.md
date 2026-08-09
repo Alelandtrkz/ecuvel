@@ -298,3 +298,17 @@ Los diseños de Stitch, Ozon u otras plataformas pueden orientar estructura, jer
 - [ ] El teclado y el foco visible permiten completar toda la interacción.
 - [ ] Se respeta `prefers-reduced-motion`.
 - [ ] El resultado se compara con los componentes existentes de ECUVEL antes de aprobarse.
+
+## ECUVEL Admin
+
+El Admin Panel utiliza una identidad visual separada y más operativa, basada en el diseño aprobado del Centro de Operaciones:
+
+- Tipografía: `Plus Jakarta Sans` (400, 500, 600, 700, 800 y 900).
+- Primario: `#005146`; acento/surface tint: `#006b5d`.
+- Fondo: `#f6f8f7`; tarjetas: `#ffffff`; superficie secundaria: `#f1f4f2`.
+- Bordes: `#dde3e2`; texto: `#121616`; texto secundario: `#6a817d`.
+- Azul operativo: `#246ff0` para estados listos; naranja y rojo se reservan para advertencias y alertas reales.
+- Tarjetas: radio de 16 px, bordes de 1 px y sombras ambientales suaves.
+- Botones: radio aproximado de 12 px; estados y filtros pueden usar pills completamente redondeadas.
+
+Estos tokens viven encapsulados en `admin.css`; no deben copiarse a `partners.css` ni reemplazar la identidad azul de Partners.

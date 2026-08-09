@@ -31,6 +31,16 @@ SELLABLE_LOCATION_TYPES = (
 )
 
 
+def inventory_available_quantity_expression():
+    """Canonical SQL expression for the available units of one balance."""
+
+    return (
+        InventoryBalance.on_hand_quantity
+        - InventoryBalance.reserved_quantity
+        - InventoryBalance.blocked_quantity
+    )
+
+
 def get_sellable_quantities_by_warehouse_for_offers(
     *,
     session: Session,
@@ -42,11 +52,7 @@ def get_sellable_quantities_by_warehouse_for_offers(
     if not normalized_offer_ids:
         return {}
 
-    available_quantity = (
-        InventoryBalance.on_hand_quantity
-        - InventoryBalance.reserved_quantity
-        - InventoryBalance.blocked_quantity
-    )
+    available_quantity = inventory_available_quantity_expression()
     rows = session.execute(
         select(
             InventoryBalance.offer_id,

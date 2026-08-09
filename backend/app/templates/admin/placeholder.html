@@ -1,0 +1,13 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}{{ module.label }} · ECUVEL Admin{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-placeholder-page">
+  <section class="admin-card admin-empty">
+    <span class="admin-empty__icon"><i data-lucide="{{ module.icon }}" aria-hidden="true"></i></span>
+    <p class="admin-eyebrow">Módulo administrativo</p>
+    <h1>{{ module.label }}</h1>
+    <p>Esta sección estará disponible próximamente. No se han creado acciones ni datos simulados.</p>
+    <a class="admin-button" href="{{ url_for('admin.operations') }}"><i data-lucide="arrow-left" aria-hidden="true"></i>Volver al Centro de Operaciones</a>
+  </section>
+</div>
+{% endblock %}

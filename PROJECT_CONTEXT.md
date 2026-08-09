@@ -1,6 +1,6 @@
 # Contexto permanente de ECUVEL
 
-Última actualización: 2026-08-05.
+Última actualización: 2026-08-08.
 
 Este archivo resume el estado funcional y técnico de ECUVEL para que una persona o agente pueda orientarse rápido antes de trabajar. No reemplaza las migraciones, pruebas ni el código fuente. Debe mantenerse como una memoria viva del proyecto.
 
@@ -61,7 +61,11 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 
 ### ECUVEL Partners
 
-`/partners` es el área privada para vendedores autenticados. Incluye onboarding de tienda, revisión por CLI, contrato con código de confirmación, activación de tienda y flujo de productos. Los productos se crean primero como borradores persistentes; no se crean `Product`, `ProductVariant` ni `SellerOffer` hasta una fase posterior de aprobación/publicación.
+`/partners` es el área privada para vendedores autenticados. Incluye onboarding de tienda, revisión por CLI, contrato con código de confirmación, activación de tienda, productos, reseñas, pedidos y ventas. Los productos se crean primero como borradores persistentes; no se crean `Product`, `ProductVariant` ni `SellerOffer` hasta una fase posterior de aprobación/publicación. El flujo de pedidos separa la preparación de la tienda mediante `SellerInboundPackage` del fulfillment hacia el comprador mediante `OrderPackage`. Ventas deriva importes de `SellerOrder` y utiliza `SellerPayout`/`SellerPayoutItem` para liquidaciones ECUVEL → tienda.
+
+### ECUVEL Admin
+
+`/admin` es una superficie administrativa web read-only y separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de las tablas reales. No crea tablas de estadísticas ni expone aprobaciones financieras o moderaciones sensibles: esas decisiones continúan en CLI. Los módulos administrativos aún no implementados se identifican honestamente como “Próximamente”.
 
 ## Flujos críticos
 
@@ -125,6 +129,8 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - Los borradores no publican productos ni ofertas.
 - Existe un contrato puro de conversión de borrador V4 (con migración diferida no destructiva de V2/V3) y modelos públicos `ProductMedia`/configuración de variantes, pero la aprobación administrativa final continúa fuera de alcance.
 - Los archivos privados no deben ir bajo `static`.
+- El acceso de administrador ECUVEL no se deriva de ser `OWNER` o `ADMINISTRATOR` de una tienda; exige `User.is_ecuvel_staff`.
+- Los GET de `/admin` son de solo lectura y no deben aprobar pagos, mover inventario ni cambiar estados de dominio.
 - Los GET públicos o de cliente no deben mutar pagos, pedidos, reservas, inventario ni fulfillment.
 - Revisión administrativa sensible sigue siendo por CLI, no por panel web, hasta existir autenticación/roles administrativos adecuados.
 - No se deben ejecutar comandos destructivos como reset de Git, limpieza masiva, downgrade de base o borrado de volúmenes sin autorización explícita.
@@ -156,8 +162,9 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 ## Límites actuales y pendientes conocidos
 
 - No hay pasarela de tarjeta real; tarjeta permanece deshabilitada.
-- No hay panel administrativo web seguro; revisión de pagos, comprobantes, reseñas y onboarding se hace por CLI.
+- Existe un Centro de Operaciones administrativo read-only; revisión de pagos, comprobantes, reseñas, onboarding y productos continúa por CLI.
 - No hay publicación final de productos desde borradores hacia catálogo público.
+- Los módulos administrativos de pedidos, fulfillment, escáner, inventario, marketplace, finanzas, incidencias y auditoría completa todavía no tienen pantallas operativas.
 - No hay gestión completa de inventario para vendedores desde Partners.
 - No hay favoritos anónimos persistentes, listas múltiples, notificaciones, chat, social login, 2FA, passkeys ni panel de vendedor completo.
 - No hay SMTP/SMS productivo integrado; los backends de desarrollo/pruebas son controlados por configuración.
