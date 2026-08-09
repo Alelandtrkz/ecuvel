@@ -1,0 +1,138 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Pedidos · ECUVEL Admin{% endblock %}
+
+{% macro badge(label, tone) -%}
+  <span class="admin-status admin-status--{{ tone }}">{{ label }}</span>
+{%- endmacro %}
+
+{% macro page_url(target_page) -%}
+  {{ url_for('admin.orders', status=page.active_tab, q=page.query or none,
+      payment=page.payment_filter or none, fulfillment=page.fulfillment_filter or none,
+      attention=page.attention_filter or none, date=page.date_filter or none,
+      page=target_page, page_size=page.page_size) }}
+{%- endmacro %}
+
+{% block admin_content %}
+<div class="admin-page admin-orders-page" data-admin-orders>
+  <section class="admin-page-heading admin-page-heading--orders">
+    <div>
+      <p class="admin-eyebrow">Operaciones</p>
+      <h1>Pedidos</h1>
+      <p>Administra y supervisa todos los pedidos de ECUVEL.</p>
+    </div>
+    <button class="admin-button admin-button--secondary" type="button" disabled title="Exportación próximamente">
+      <i data-lucide="download" aria-hidden="true"></i>Exportar · Próximamente
+    </button>
+  </section>
+
+  <form class="admin-order-filters" method="get" action="{{ url_for('admin.orders') }}" role="search">
+    <input type="hidden" name="status" value="{{ page.active_tab }}">
+    <label class="admin-order-search">
+      <span class="sr-only">Buscar pedidos</span>
+      <i data-lucide="search" aria-hidden="true"></i>
+      <input name="q" value="{{ page.query }}" maxlength="120" placeholder="Buscar pedido, cliente o paquete…">
+    </label>
+    <label>
+      <span>Pago</span>
+      <select name="payment">
+        <option value="">Todos</option>
+        <option value="review" {{ 'selected' if page.payment_filter == 'review' }}>En revisión</option>
+        <option value="approved" {{ 'selected' if page.payment_filter == 'approved' }}>Aprobado</option>
+        <option value="rejected" {{ 'selected' if page.payment_filter == 'rejected' }}>Rechazado</option>
+        <option value="awaiting" {{ 'selected' if page.payment_filter == 'awaiting' }}>Esperando comprobante</option>
+      </select>
+    </label>
+    <label>
+      <span>Fulfillment</span>
+      <select name="fulfillment">
+        <option value="">Todos</option>
+        <option value="picking" {{ 'selected' if page.fulfillment_filter == 'picking' }}>Picking</option>
+        <option value="packed" {{ 'selected' if page.fulfillment_filter == 'packed' }}>Empacado</option>
+      </select>
+    </label>
+    <button class="admin-button" type="submit"><i data-lucide="sliders-horizontal" aria-hidden="true"></i>Aplicar</button>
+    {% if page.query or page.payment_filter or page.fulfillment_filter or page.attention_filter or page.date_filter %}
+      <a class="admin-filter-clear" href="{{ url_for('admin.orders', status=page.active_tab) }}"><i data-lucide="filter-x" aria-hidden="true"></i>Limpiar</a>
+    {% endif %}
+  </form>
+
+  <nav class="admin-order-tabs" aria-label="Estados de pedidos">
+    {% for tab in page.tabs %}
+      <a class="{{ 'is-active' if tab.key == page.active_tab }}"
+         href="{{ url_for('admin.orders', status=tab.key, q=page.query or none, payment=page.payment_filter or none, fulfillment=page.fulfillment_filter or none, attention=page.attention_filter or none, date=page.date_filter or none, page_size=page.page_size) }}"
+         {% if tab.key == page.active_tab %}aria-current="page"{% endif %}>
+        {{ tab.label }} <span>{{ tab.count }}</span>
+      </a>
+    {% endfor %}
+  </nav>
+
+  <section class="admin-card admin-order-table-card" aria-labelledby="orders-results-title">
+    <div class="admin-table-heading">
+      <div><h2 id="orders-results-title">Resultados</h2><p>{{ page.total_items }} pedidos</p></div>
+      <label>Filas
+        <select onchange="this.form.submit()" form="admin-page-size-form" name="page_size">
+          <option value="25" {{ 'selected' if page.page_size == 25 }}>25</option>
+          <option value="50" {{ 'selected' if page.page_size == 50 }}>50</option>
+        </select>
+      </label>
+      <form id="admin-page-size-form" method="get" action="{{ url_for('admin.orders') }}">
+        <input type="hidden" name="status" value="{{ page.active_tab }}">
+        <input type="hidden" name="q" value="{{ page.query }}">
+        <input type="hidden" name="payment" value="{{ page.payment_filter }}">
+        <input type="hidden" name="fulfillment" value="{{ page.fulfillment_filter }}">
+        <input type="hidden" name="attention" value="{{ page.attention_filter }}">
+        <input type="hidden" name="date" value="{{ page.date_filter }}">
+      </form>
+    </div>
+    {% if page.rows %}
+      <div class="admin-table-scroll">
+        <table class="admin-orders-table">
+          <thead><tr>
+            <th>Pedido</th><th>Cliente</th><th>Compra</th><th>Total</th>
+            <th>Pago</th><th>Fulfillment</th><th>Paquetes</th><th>Fecha</th><th>Acción</th>
+          </tr></thead>
+          <tbody>
+          {% for row in page.rows %}
+            <tr>
+              <td><a class="admin-order-number" href="{{ url_for('admin.order_detail', order_number=row.order_number) }}">{{ row.order_number }}</a></td>
+              <td><strong>{{ row.customer_name }}</strong><small>{{ row.customer_code }}</small></td>
+              <td>{{ row.item_count }} {{ 'artículo' if row.item_count == 1 else 'artículos' }}<small>{{ row.store_count }} {{ 'tienda' if row.store_count == 1 else 'tiendas' }}</small></td>
+              <td><strong>{{ row.grand_total|money(row.currency) }}</strong></td>
+              <td>{{ badge(row.payment.status_label, row.payment.status_tone) }}</td>
+              <td>{{ badge(row.fulfillment.label, row.fulfillment.tone) }}</td>
+              <td>
+                <strong>{{ row.package_count }} / {{ row.expected_package_count }}</strong>
+                <small>{{ row.completed_package_count }} listos o entregados</small>
+              </td>
+              <td><time datetime="{{ row.created_at.isoformat() }}">{{ row.created_at_label }}</time></td>
+              <td>
+                <div class="admin-row-actions" data-admin-menu>
+                  <a class="admin-row-primary" href="{{ url_for('admin.order_detail', order_number=row.order_number) }}">Ver pedido</a>
+                  <button type="button" data-admin-menu-trigger aria-expanded="false" aria-controls="admin-order-menu-{{ loop.index }}" aria-label="Más acciones para {{ row.order_number }}"><i data-lucide="ellipsis" aria-hidden="true"></i></button>
+                  <div class="admin-row-menu" id="admin-order-menu-{{ loop.index }}" role="menu" data-admin-menu-panel hidden>
+                    <a role="menuitem" href="{{ url_for('admin.order_detail', order_number=row.order_number) }}"><i data-lucide="eye" aria-hidden="true"></i>Ver detalle</a>
+                    {% if row.payment.proof_id %}<a role="menuitem" href="{{ url_for('admin.payment_review', order_number=row.order_number) }}"><i data-lucide="receipt-text" aria-hidden="true"></i>Ver pago</a>{% endif %}
+                  </div>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <footer class="admin-pagination">
+        <p>Página {{ page.page }} de {{ page.total_pages }}</p>
+        <div>
+          {% if page.has_previous %}<a href="{{ page_url(page.page - 1) }}" aria-label="Página anterior"><i data-lucide="chevron-left" aria-hidden="true"></i></a>{% else %}<span aria-hidden="true"><i data-lucide="chevron-left"></i></span>{% endif %}
+          <strong>{{ page.page }}</strong>
+          {% if page.has_next %}<a href="{{ page_url(page.page + 1) }}" aria-label="Página siguiente"><i data-lucide="chevron-right" aria-hidden="true"></i></a>{% else %}<span aria-hidden="true"><i data-lucide="chevron-right"></i></span>{% endif %}
+        </div>
+      </footer>
+    {% else %}
+      <div class="admin-empty admin-empty--compact"><i data-lucide="shopping-cart" aria-hidden="true"></i><h2>No hay pedidos</h2><p>No encontramos pedidos con los filtros seleccionados.</p></div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}{{ super() }}<script src="{{ url_for('static', filename='js/admin-orders.js') }}" defer></script>{% endblock %}

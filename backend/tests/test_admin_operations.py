@@ -231,7 +231,13 @@ def test_admin_requires_active_ecuvel_staff(session, client):
     _login(client, staff)
     response = client.get("/admin")
     assert response.status_code == 200
-    assert "Centro de Operaciones" in response.get_data(as_text=True)
+    body = response.get_data(as_text=True)
+    assert "Centro de Operaciones" in body
+    assert "/admin/orders?date=today" in body
+    assert "/admin/orders?payment=review" in body
+    assert "/admin/orders?status=preparing" in body
+    assert "/admin/orders?status=ready" in body
+    assert "/admin/orders?fulfillment=picking" in body
     assert client.get("/admin/search?q=ECV-").status_code == 200
     assert client.post("/admin").status_code == 405
 

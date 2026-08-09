@@ -28,31 +28,31 @@
   </section>
 
   <section class="admin-kpis" aria-label="Indicadores de operaciones">
-    <article class="admin-kpi">
+    <a class="admin-kpi" href="{{ url_for('admin.orders', date='today') }}">
       <div><span>Pedidos hoy</span><i data-lucide="shopping-bag" aria-hidden="true"></i></div>
       <strong>{{ page.metrics.orders_today.current }}</strong>
       {{ trend(page.metrics.orders_today) }}
-    </article>
+    </a>
     <article class="admin-kpi">
       <div><span>Ventas hoy</span><i data-lucide="banknote" aria-hidden="true"></i></div>
       <strong>{{ page.metrics.sales_today.current|money('USD') }}</strong>
       {{ trend(page.metrics.sales_today) }}
     </article>
-    <article class="admin-kpi admin-kpi--warning">
+    <a class="admin-kpi admin-kpi--warning" href="{{ url_for('admin.orders', payment='review') }}">
       <div><span>Pagos por revisar</span><i data-lucide="triangle-alert" aria-hidden="true"></i></div>
       <strong>{{ page.metrics.pending_payment_proofs }}</strong>
       <p>{{ page.metrics.overdue_payment_proofs }} llevan +30 min</p>
-    </article>
-    <article class="admin-kpi">
+    </a>
+    <a class="admin-kpi" href="{{ url_for('admin.orders', status='preparing') }}">
       <div><span>En preparación</span><i data-lucide="archive" aria-hidden="true"></i></div>
       <strong>{{ page.metrics.in_preparation }}</strong>
       <p>Pedidos activos del vendedor</p>
-    </article>
-    <article class="admin-kpi admin-kpi--blue">
+    </a>
+    <a class="admin-kpi admin-kpi--blue" href="{{ url_for('admin.orders', status='ready') }}">
       <div><span>Listos para retirar</span><i data-lucide="circle-check" aria-hidden="true"></i></div>
       <strong>{{ page.metrics.ready_for_pickup }}</strong>
       <p>Esperando al cliente</p>
-    </article>
+    </a>
     <article class="admin-kpi admin-kpi--review">
       <div><span>Productos por revisar</span><i data-lucide="clipboard-check" aria-hidden="true"></i></div>
       <strong>{{ page.metrics.products_pending_review }}</strong>
@@ -64,17 +64,17 @@
     <article class="admin-card admin-flow">
       <div class="admin-card__heading">
         <div><p class="admin-eyebrow">Snapshot actual</p><h2>Flujo de pedidos</h2></div>
-        <a href="{{ url_for('admin.module_placeholder', module_key='orders') }}">Ver pedidos <i data-lucide="arrow-right" aria-hidden="true"></i></a>
+        <a href="{{ url_for('admin.orders') }}">Ver pedidos <i data-lucide="arrow-right" aria-hidden="true"></i></a>
       </div>
       <div class="admin-flow__chart" role="img" aria-label="Conteos actuales por etapa del flujo de pedidos">
         {% for item in page.order_flow %}
-          <div class="admin-flow__column">
+          <a class="admin-flow__column" href="{{ item.destination_url }}">
             <div class="admin-flow__bar-wrap">
               <strong>{{ item.count }}</strong>
               <span class="admin-flow__bar admin-flow__bar--{{ item.tone }}" style="--bar-height: {{ item.height_percent }}%"></span>
             </div>
             <span>{{ item.label }}</span>
-          </div>
+          </a>
         {% endfor %}
       </div>
     </article>
@@ -84,10 +84,10 @@
       {% if page.alerts %}
         <div class="admin-alerts__list">
           {% for alert in page.alerts %}
-            <div class="admin-alert admin-alert--{{ alert.tone }}">
+            <{{ 'a' if alert.destination_url else 'div' }} class="admin-alert admin-alert--{{ alert.tone }}"{% if alert.destination_url %} href="{{ alert.destination_url }}"{% endif %}>
               <i data-lucide="{{ alert.icon }}" aria-hidden="true"></i>
               <div><strong>{{ alert.title }}</strong><p>{{ alert.message }}</p></div>
-            </div>
+            </{{ 'a' if alert.destination_url else 'div' }}>
           {% endfor %}
         </div>
       {% else %}
@@ -101,10 +101,10 @@
     {% if page.attention %}
       <div class="admin-attention__items">
         {% for item in page.attention %}
-          <div class="admin-attention__chip" title="Página de gestión próximamente">
+          <{{ 'a' if item.destination_url else 'div' }} class="admin-attention__chip"{% if item.destination_url %} href="{{ item.destination_url }}"{% else %} title="Página de gestión próximamente"{% endif %}>
             <i data-lucide="{{ item.icon }}" aria-hidden="true"></i>
-            <span>{{ item.label }}</span><strong>{{ item.count }}</strong><small>Próximamente</small>
-          </div>
+            <span>{{ item.label }}</span><strong>{{ item.count }}</strong>{% if not item.destination_url %}<small>Próximamente</small>{% endif %}
+          </{{ 'a' if item.destination_url else 'div' }}>
         {% endfor %}
       </div>
     {% else %}
@@ -122,7 +122,7 @@
         {% for item in page.activity %}
           <article class="admin-activity__item admin-activity__item--{{ item.tone }}">
             <span class="admin-activity__dot" aria-hidden="true"></span>
-            <div><time datetime="{{ item.timestamp.isoformat() }}">{{ item.relative_time }}</time><p>{{ item.label }}{% if item.public_reference %}: <strong>{{ item.public_reference }}</strong>{% endif %}.</p></div>
+            <div><time datetime="{{ item.timestamp.isoformat() }}">{{ item.relative_time }}</time><p>{{ item.label }}{% if item.public_reference %}: {% if item.destination_url %}<a href="{{ item.destination_url }}"><strong>{{ item.public_reference }}</strong></a>{% else %}<strong>{{ item.public_reference }}</strong>{% endif %}{% endif %}.</p></div>
           </article>
         {% endfor %}
       </div>

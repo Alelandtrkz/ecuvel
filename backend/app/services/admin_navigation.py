@@ -26,7 +26,9 @@ ADMIN_NAVIGATION = (
                 "operations", "Centro de operaciones", "layout-dashboard",
                 "admin.operations", True,
             ),
-            AdminNavigationItem("orders", "Pedidos", "shopping-cart", "admin.module_placeholder"),
+            AdminNavigationItem(
+                "orders", "Pedidos", "shopping-cart", "admin.orders", True,
+            ),
             AdminNavigationItem("fulfillment", "Fulfillment", "truck", "admin.module_placeholder"),
             AdminNavigationItem("scanner", "Escáner", "scan-line", "admin.module_placeholder"),
             AdminNavigationItem("inventory", "Inventario", "archive", "admin.module_placeholder"),

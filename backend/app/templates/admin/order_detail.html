@@ -1,0 +1,109 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}{{ detail.order_number }} · ECUVEL Admin{% endblock %}
+
+{% macro badge(status) -%}<span class="admin-status admin-status--{{ status.tone }}">{{ status.label }}</span>{%- endmacro %}
+
+{% block admin_content %}
+<div class="admin-page admin-order-detail">
+  <header class="admin-detail-heading">
+    <div>
+      <a class="admin-back" href="{{ url_for('admin.orders') }}" aria-label="Volver a pedidos"><i data-lucide="arrow-left" aria-hidden="true"></i></a>
+      <div><p class="admin-eyebrow">Pedido</p><h1>{{ detail.order_number }}</h1><p>Cliente {{ detail.customer_code }} · Creado {{ detail.created_at|ecuador_datetime }}</p></div>
+      {{ badge(detail.status) }}
+    </div>
+    <div class="admin-detail-actions">
+      {% if detail.customer_email %}<a class="admin-button admin-button--secondary" href="mailto:{{ detail.customer_email }}"><i data-lucide="mail" aria-hidden="true"></i>Contactar cliente</a>{% endif %}
+      <button class="admin-button" type="button" disabled title="Impresión de etiquetas próximamente"><i data-lucide="printer" aria-hidden="true"></i>Imprimir etiquetas · Próx.</button>
+      <button class="admin-icon-button" type="button" disabled title="Más acciones próximamente" aria-label="Más acciones próximamente"><i data-lucide="ellipsis" aria-hidden="true"></i></button>
+    </div>
+  </header>
+
+  <section class="admin-card admin-order-timeline" aria-labelledby="order-timeline-title">
+    <h2 id="order-timeline-title">Estado del pedido</h2>
+    <ol>
+      {% for step in detail.timeline %}
+        <li class="{{ 'is-reached' if step.reached }} {{ 'is-active' if step.active }}">
+          <span><i data-lucide="{{ 'check' if step.reached and not step.active else step.icon }}" aria-hidden="true"></i></span>
+          <strong>{{ step.label }}</strong>
+          <small>{% if step.timestamp %}{{ step.timestamp|ecuador_datetime }}{% elif step.active %}En curso{% else %}Pendiente{% endif %}</small>
+        </li>
+      {% endfor %}
+    </ol>
+  </section>
+
+  <div class="admin-detail-grid">
+    <div class="admin-detail-main">
+      <section class="admin-card admin-detail-card">
+        <div class="admin-card__heading"><div><p class="admin-eyebrow">Snapshots persistidos</p><h2>Artículos ({{ detail.total_units }})</h2></div></div>
+        <div class="admin-order-lines">
+          {% for line in detail.lines %}
+            <article>
+              <div class="admin-line-image">
+                {% if line.image_url %}<img src="{{ line.image_url }}" alt="">{% else %}<i data-lucide="image" aria-hidden="true"></i>{% endif %}
+              </div>
+              <div><strong>{{ line.product_name }}</strong><small>SKU: {{ line.seller_sku }}{% if line.variant_title %} · {{ line.variant_title }}{% endif %}</small><span>{{ line.seller_name }}</span></div>
+              <div><strong>{{ line.line_total|money(detail.currency) }}</strong><small>{{ line.quantity }} × {{ line.unit_price|money(detail.currency) }}</small></div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="admin-card admin-detail-card">
+        <div class="admin-card__heading"><div><p class="admin-eyebrow">ECUVEL → comprador</p><h2>Paquetes del pedido</h2></div></div>
+        {% if detail.packages %}
+          <div class="admin-package-grid">
+            {% for package in detail.packages %}
+              <article>
+                <header><strong>{{ package.package_code }}</strong>{{ badge(package.status) }}</header>
+                <p>{{ package.product_name }}{% if package.variant_title %} · {{ package.variant_title }}{% endif %}</p>
+                <dl><div><dt>Cantidad</dt><dd>{{ package.quantity }}</dd></div><div><dt>Ubicación</dt><dd>{{ package.location_code or 'Pendiente' }}</dd></div><div><dt>Código</dt><dd>{{ package.barcode }}</dd></div></dl>
+                <div class="admin-package-actions"><button type="button" disabled>Ver paquete · Próx.</button><button type="button" disabled>Imprimir · Próx.</button></div>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <div class="admin-inline-empty">Todavía no existen paquetes de salida para este pedido.</div>
+        {% endif %}
+      </section>
+    </div>
+
+    <aside class="admin-detail-aside">
+      <section class="admin-card admin-detail-card">
+        <div class="admin-card__heading"><div><h2>Resumen financiero</h2></div></div>
+        <dl class="admin-money-breakdown">
+          <div><dt>Subtotal</dt><dd>{{ detail.subtotal|money(detail.currency) }}</dd></div>
+          <div><dt>Descuento</dt><dd>-{{ detail.discount_total|money(detail.currency) }}</dd></div>
+          <div><dt>Envío</dt><dd>{{ detail.shipping_total|money(detail.currency) }}</dd></div>
+          <div><dt>Impuestos</dt><dd>{{ detail.tax_total|money(detail.currency) }}</dd></div>
+          <div><dt>Total</dt><dd>{{ detail.grand_total|money(detail.currency) }}</dd></div>
+        </dl>
+        <div class="admin-payment-summary">
+          <div><i data-lucide="landmark" aria-hidden="true"></i><span><strong>{{ 'Transferencia bancaria' if detail.payment.method == 'BANK_TRANSFER' else (detail.payment.method or 'Sin método') }}</strong><small>{{ detail.payment.status_label }}</small></span></div>
+          {% if detail.payment.proof_id %}<a href="{{ url_for('admin.payment_review', order_number=detail.order_number) }}">Ver comprobante</a>{% endif %}
+        </div>
+      </section>
+
+      <section class="admin-card admin-detail-card">
+        <div class="admin-card__heading"><div><h2>Datos del cliente</h2></div></div>
+        <div class="admin-customer"><span>{{ detail.customer_name[:2]|upper }}</span><div><strong>{{ detail.customer_name }}</strong><small>{{ detail.customer_code }}</small></div></div>
+        <dl class="admin-contact-list">
+          {% if detail.customer_email %}<div><dt>Email</dt><dd><a href="mailto:{{ detail.customer_email }}">{{ detail.customer_email }}</a></dd></div>{% endif %}
+          {% if detail.customer_phone %}<div><dt>Teléfono</dt><dd><a href="tel:{{ detail.customer_phone }}">{{ detail.customer_phone }}</a></dd></div>{% endif %}
+        </dl>
+        <p class="admin-data-note">Este modelo no conserva una dirección histórica de envío; no se muestra una dirección actual que pudiera ser incorrecta.</p>
+      </section>
+
+      <section class="admin-card admin-detail-card">
+        <div class="admin-card__heading"><div><h2>Tiendas involucradas</h2></div></div>
+        <div class="admin-store-list">{% for store in detail.stores %}<article><div><strong>{{ store.name }}</strong><small>{{ store.public_code }}</small></div><span>{{ store.item_count }} {{ 'artículo' if store.item_count == 1 else 'artículos' }}</span></article>{% endfor %}</div>
+      </section>
+
+      <section class="admin-card admin-detail-card">
+        <div class="admin-card__heading"><div><h2>Historial</h2></div></div>
+        <ol class="admin-history">{% for item in detail.history %}<li><span aria-hidden="true"></span><time datetime="{{ item.timestamp.isoformat() }}">{{ item.timestamp|ecuador_datetime }}</time><p>{{ item.label }}</p>{% if item.actor %}<small>{{ item.actor }}</small>{% endif %}</li>{% endfor %}</ol>
+        <div class="admin-upcoming-panel"><i data-lucide="notebook-pen" aria-hidden="true"></i><span><strong>Notas internas</strong><small>Próximamente: el dominio aún no tiene persistencia de notas.</small></span></div>
+      </section>
+    </aside>
+  </div>
+</div>
+{% endblock %}

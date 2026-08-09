@@ -17,7 +17,11 @@
           <div class="admin-card__heading"><h2>{{ group.label }}</h2><span>{{ group.results|length }}</span></div>
           <ul>
             {% for result in group.results %}
-              <li><i data-lucide="{{ result.icon }}" aria-hidden="true"></i><div><span>{{ result.label }}</span><strong>{{ result.reference }}</strong><small>{{ result.description }}</small></div></li>
+              <li>
+                {% if result.destination_url %}<a class="admin-search-result" href="{{ result.destination_url }}">{% else %}<div class="admin-search-result">{% endif %}
+                  <i data-lucide="{{ result.icon }}" aria-hidden="true"></i><div><span>{{ result.label }}</span><strong>{{ result.reference }}</strong><small>{{ result.description }}</small></div>
+                {% if result.destination_url %}</a>{% else %}</div>{% endif %}
+              </li>
             {% endfor %}
           </ul>
         </section>

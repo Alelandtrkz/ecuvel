@@ -1,0 +1,109 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Revisión de pago {{ review.order_number }} · ECUVEL Admin{% endblock %}
+
+{% block admin_content %}
+<div class="admin-page admin-payment-review" data-payment-review>
+  <header class="admin-review-heading">
+    <div>
+      <a class="admin-back" href="{{ url_for('admin.order_detail', order_number=review.order_number) }}" aria-label="Volver al pedido"><i data-lucide="arrow-left" aria-hidden="true"></i></a>
+      <div><p class="admin-eyebrow">Pagos · Revisión manual</p><h1>{{ review.order_number }}</h1><p>La prevalidación es evidencia de apoyo; la decisión siempre corresponde al operador.</p></div>
+    </div>
+  </header>
+
+  <div class="admin-review-grid">
+    <div class="admin-review-sidebar">
+      <section class="admin-card admin-review-card">
+        <div class="admin-card__heading"><div><h2>Información del pago</h2></div><span class="admin-status admin-status--{{ review.payment.status_tone }}">{{ review.payment.status_label }}</span></div>
+        <dl class="admin-review-facts">
+          <div><dt>Monto esperado</dt><dd>{{ review.order_total|money(review.currency) }}</dd></div>
+          <div><dt>Cliente</dt><dd>{{ review.customer_name }}<small>{{ review.customer_code }}</small></dd></div>
+          <div><dt>Método</dt><dd>{{ 'Transferencia bancaria' if review.payment.method == 'BANK_TRANSFER' else review.payment.method }}</dd></div>
+          <div><dt>Banco destino</dt><dd>{{ review.bank_name or 'No configurado' }}</dd></div>
+          <div><dt>Fecha reportada</dt><dd>{{ review.payment.reported_at|ecuador_datetime if review.payment.reported_at else 'Pendiente' }}</dd></div>
+        </dl>
+        <a class="admin-inline-link" href="{{ url_for('admin.order_detail', order_number=review.order_number) }}">Ver pedido completo <i data-lucide="arrow-right" aria-hidden="true"></i></a>
+      </section>
+
+      <section class="admin-card admin-review-card">
+        <div class="admin-card__heading"><div><h2>Validación del comprobante</h2></div></div>
+        {% if review.evidence %}
+          <div class="admin-evidence-table" role="table" aria-label="Evidencia detectada">
+            <div role="row"><strong>Dato</strong><strong>Esperado</strong><strong>Detectado</strong><strong>Estado</strong></div>
+            {% for row in review.evidence %}<div role="row"><span>{{ row.label }}</span><span>{{ row.expected }}</span><span>{{ row.detected }}</span><span class="admin-evidence-result admin-evidence-result--{{ row.tone }}">{{ row.result }}</span></div>{% endfor %}
+          </div>
+          <div class="admin-analysis-summary admin-analysis-summary--{{ 'success' if review.analysis_outcome == 'PASSED' else 'warning' }}">
+            <i data-lucide="{{ 'badge-check' if review.analysis_outcome == 'PASSED' else 'scan-search' }}" aria-hidden="true"></i>
+            <div><strong>{{ 'Prevalidación sin discrepancias automáticas' if review.analysis_outcome == 'PASSED' else 'Requiere revisión manual' }}</strong><small>Resultado técnico: {{ review.analysis_outcome or review.analysis_status or 'No disponible' }}</small></div>
+          </div>
+          {% if review.findings %}<ul class="admin-findings">{% for finding in review.findings %}<li>{{ finding }}</li>{% endfor %}</ul>{% endif %}
+        {% else %}
+          <div class="admin-inline-empty">El análisis automático no está disponible. Revisa el archivo manualmente.</div>
+        {% endif %}
+      </section>
+
+      <section class="admin-card admin-review-card">
+        {% if review.payment.can_review %}
+          <h2>Decisión manual</h2>
+          <label class="admin-review-notes">Notas internas (opcional)<textarea maxlength="1000" rows="4" placeholder="Agrega observaciones sobre esta revisión…" data-review-notes></textarea></label>
+          <div class="admin-review-actions">
+            <button class="admin-button admin-button--danger-outline" type="button" data-modal-open="reject-payment-modal"><i data-lucide="x" aria-hidden="true"></i>Rechazar pago</button>
+            <button class="admin-button" type="button" data-modal-open="approve-payment-modal"><i data-lucide="check" aria-hidden="true"></i>Aprobar pago</button>
+          </div>
+        {% else %}
+          <div class="admin-decision-readonly">
+            <i data-lucide="lock-keyhole" aria-hidden="true"></i>
+            <div><strong>Decisión registrada: {{ review.payment.status_label }}</strong><p>{% if review.payment.reviewer_name %}Por {{ review.payment.reviewer_name }}{% endif %}{% if review.payment.reviewed_at %} · {{ review.payment.reviewed_at|ecuador_datetime }}{% endif %}</p>{% if review.payment.rejection_reason %}<p>Motivo: {{ review.payment.rejection_reason }}</p>{% endif %}{% if review.payment.review_notes %}<p>Notas: {{ review.payment.review_notes }}</p>{% endif %}</div>
+          </div>
+        {% endif %}
+      </section>
+    </div>
+
+    <section class="admin-card admin-proof-viewer" data-proof-viewer>
+      <header><div><i data-lucide="receipt-text" aria-hidden="true"></i><h2>Comprobante adjunto</h2></div><div class="admin-proof-tools">
+        {% if review.payment.proof_media_type != 'application/pdf' %}
+          <button type="button" data-proof-zoom-out title="Alejar" aria-label="Alejar"><i data-lucide="zoom-out" aria-hidden="true"></i></button>
+          <button type="button" data-proof-zoom-in title="Acercar" aria-label="Acercar"><i data-lucide="zoom-in" aria-hidden="true"></i></button>
+          <button type="button" data-proof-rotate title="Rotar" aria-label="Rotar"><i data-lucide="rotate-cw" aria-hidden="true"></i></button>
+          <button type="button" data-proof-fit title="Ajustar" aria-label="Ajustar"><i data-lucide="scan" aria-hidden="true"></i></button>
+        {% endif %}
+        <a href="{{ url_for('admin.payment_proof', order_number=review.order_number, download=1) }}" title="Descargar" aria-label="Descargar comprobante"><i data-lucide="download" aria-hidden="true"></i></a>
+      </div></header>
+      <div class="admin-proof-canvas">
+        {% if review.payment.proof_media_type == 'application/pdf' %}
+          <object data="{{ url_for('admin.payment_proof', order_number=review.order_number) }}" type="application/pdf"><p>No se pudo mostrar el PDF. <a href="{{ url_for('admin.payment_proof', order_number=review.order_number, download=1) }}">Descargar comprobante</a>.</p></object>
+        {% else %}
+          <img src="{{ url_for('admin.payment_proof', order_number=review.order_number) }}" alt="Comprobante del pedido {{ review.order_number }}" data-proof-image>
+        {% endif %}
+      </div>
+      <footer><i data-lucide="file" aria-hidden="true"></i>{{ review.payment.proof_filename }} · {{ (review.payment.proof_size_bytes / 1048576)|round(2) }} MiB</footer>
+    </section>
+  </div>
+</div>
+
+{% if review.payment.can_review %}
+<dialog class="admin-dialog" id="approve-payment-modal" aria-labelledby="approve-payment-title">
+  <form method="post" action="{{ url_for('admin.approve_payment', order_number=review.order_number) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="notes" data-modal-notes>
+    <button class="admin-dialog__close" type="button" data-modal-close aria-label="Cerrar"><i data-lucide="x" aria-hidden="true"></i></button>
+    <div class="admin-dialog__icon admin-dialog__icon--success"><i data-lucide="badge-check" aria-hidden="true"></i></div>
+    <h2 id="approve-payment-title">¿Aprobar este pago?</h2>
+    <p>Confirmarás {{ review.order_total|money(review.currency) }} para {{ review.order_number }}. El servicio transaccional consumirá las reservas y confirmará el pedido.</p>
+    <div class="admin-dialog__actions"><button type="button" data-modal-close>Cancelar</button><button class="admin-button" type="submit">Sí, aprobar pago</button></div>
+  </form>
+</dialog>
+
+<dialog class="admin-dialog" id="reject-payment-modal" aria-labelledby="reject-payment-title">
+  <form method="post" action="{{ url_for('admin.reject_payment', order_number=review.order_number) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="notes" data-modal-notes>
+    <button class="admin-dialog__close" type="button" data-modal-close aria-label="Cerrar"><i data-lucide="x" aria-hidden="true"></i></button>
+    <div class="admin-dialog__icon admin-dialog__icon--danger"><i data-lucide="triangle-alert" aria-hidden="true"></i></div>
+    <h2 id="reject-payment-title">Rechazar pago</h2>
+    <p>El rechazo cancela el pedido y libera las reservas activas. Indica un motivo verificable.</p>
+    <label>Motivo del rechazo<textarea name="reason" maxlength="500" rows="4" required placeholder="Describe por qué el comprobante no puede aprobarse…"></textarea></label>
+    <div class="admin-dialog__actions"><button type="button" data-modal-close>Cancelar</button><button class="admin-button admin-button--danger" type="submit">Confirmar rechazo</button></div>
+  </form>
+</dialog>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}{{ super() }}<script src="{{ url_for('static', filename='js/admin-orders.js') }}" defer></script>{% endblock %}

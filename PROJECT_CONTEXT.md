@@ -37,7 +37,7 @@ El carrito vive en sesión firmada, pero siempre rehidrata precios, disponibilid
 
 ### Pagos y comprobantes
 
-El método funcional es transferencia bancaria. El comprador sube comprobantes privados; el sistema valida archivo, lo almacena fuera de `static`, marca el pago como en proceso y deja la decisión financiera a comandos CLI. Existe prevalidación asistida de comprobantes con evidencia estructurada, pero nunca aprueba ni rechaza pagos por sí sola.
+El método funcional es transferencia bancaria. El comprador sube comprobantes privados; el sistema valida el archivo, lo almacena fuera de `static` y marca el pago como en proceso. ECUVEL staff puede revisar la evidencia y aprobar o rechazar el comprobante desde el Admin web; la interfaz reutiliza el mismo servicio transaccional e idempotente de dominio disponible para CLI. La prevalidación asistida nunca decide por sí sola.
 
 ### Inventario y fulfillment
 
@@ -65,7 +65,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 
 ### ECUVEL Admin
 
-`/admin` es una superficie administrativa web read-only y separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de las tablas reales. No crea tablas de estadísticas ni expone aprobaciones financieras o moderaciones sensibles: esas decisiones continúan en CLI. Los módulos administrativos aún no implementados se identifican honestamente como “Próximamente”.
+`/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. Todos los GET son read-only; las únicas mutaciones web actuales son aprobar o rechazar un `PaymentProof` mediante POST, CSRF y el servicio transaccional existente. Los módulos no implementados se identifican como “Próximamente”.
 
 ## Flujos críticos
 
@@ -76,7 +76,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 3. Se crean pedido, subpedidos, artículos, reservas y pago pendiente en una transacción.
 4. Cliente ve instrucciones de transferencia y puede subir comprobante.
 5. Comprobante pasa a revisión manual.
-6. Aprobación CLI consume reservas y confirma pedido/subpedidos.
+6. La aprobación manual desde Admin web o CLI consume reservas y confirma pedido/subpedidos mediante el mismo servicio de dominio.
 7. Rechazo o vencimiento libera reservas y cancela/expira el pedido según corresponda.
 
 ### Fulfillment y retiro
@@ -132,7 +132,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - El acceso de administrador ECUVEL no se deriva de ser `OWNER` o `ADMINISTRATOR` de una tienda; exige `User.is_ecuvel_staff`.
 - Los GET de `/admin` son de solo lectura y no deben aprobar pagos, mover inventario ni cambiar estados de dominio.
 - Los GET públicos o de cliente no deben mutar pagos, pedidos, reservas, inventario ni fulfillment.
-- Revisión administrativa sensible sigue siendo por CLI, no por panel web, hasta existir autenticación/roles administrativos adecuados.
+- La revisión web de comprobantes está limitada a ECUVEL staff activo y reutiliza las mismas reglas transaccionales del dominio; otras moderaciones sensibles continúan por CLI cuando no existe una interfaz web explícita.
 - No se deben ejecutar comandos destructivos como reset de Git, limpieza masiva, downgrade de base o borrado de volúmenes sin autorización explícita.
 
 ## Comandos y validaciones habituales
@@ -162,9 +162,9 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 ## Límites actuales y pendientes conocidos
 
 - No hay pasarela de tarjeta real; tarjeta permanece deshabilitada.
-- Existe un Centro de Operaciones administrativo read-only; revisión de pagos, comprobantes, reseñas, onboarding y productos continúa por CLI.
+- Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes de pago está disponible para ECUVEL staff; reseñas, onboarding y productos continúan por CLI donde no haya una interfaz administrativa explícita.
 - No hay publicación final de productos desde borradores hacia catálogo público.
-- Los módulos administrativos de pedidos, fulfillment, escáner, inventario, marketplace, finanzas, incidencias y auditoría completa todavía no tienen pantallas operativas.
+- Pedidos ya tiene listado, detalle y revisión de pago. Fulfillment, escáner, inventario, marketplace, finanzas, incidencias y auditoría completa todavía no tienen pantallas operativas propias.
 - No hay gestión completa de inventario para vendedores desde Partners.
 - No hay favoritos anónimos persistentes, listas múltiples, notificaciones, chat, social login, 2FA, passkeys ni panel de vendedor completo.
 - No hay SMTP/SMS productivo integrado; los backends de desarrollo/pruebas son controlados por configuración.

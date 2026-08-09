@@ -83,6 +83,7 @@ class AdminOrderFlowItem:
     count: int
     height_percent: int
     tone: str
+    destination_url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +94,7 @@ class AdminOperationalAlert:
     count: int
     tone: str
     icon: str
+    destination_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,13 +269,13 @@ def _order_flow(session: Session) -> tuple[AdminOrderFlowItem, ...]:
     """Build comparable flow bars using SellerOrder for every stage."""
 
     definitions = (
-        ("confirmed", "Confirmados", SellerOrderStatus.CONFIRMED, "neutral"),
-        ("picking", "Picking", SellerOrderStatus.PICKING, "neutral"),
-        ("packed", "Empacados", SellerOrderStatus.PACKED, "neutral"),
-        ("ready", "Listos", SellerOrderStatus.READY_FOR_PICKUP, "highlight"),
-        ("completed", "Entregados", SellerOrderStatus.COMPLETED, "neutral"),
+        ("confirmed", "Confirmados", SellerOrderStatus.CONFIRMED, "neutral", "/admin/orders?status=confirmed"),
+        ("picking", "Picking", SellerOrderStatus.PICKING, "neutral", "/admin/orders?fulfillment=picking"),
+        ("packed", "Empacados", SellerOrderStatus.PACKED, "neutral", "/admin/orders?fulfillment=packed"),
+        ("ready", "Listos", SellerOrderStatus.READY_FOR_PICKUP, "highlight", "/admin/orders?status=ready"),
+        ("completed", "Entregados", SellerOrderStatus.COMPLETED, "neutral", "/admin/orders?status=delivered"),
     )
-    statuses = tuple(status for _, _, status, _ in definitions)
+    statuses = tuple(status for _, _, status, _, _ in definitions)
     counts = {status: 0 for status in statuses}
     rows = session.execute(
         select(SellerOrder.status, func.count(SellerOrder.id))
@@ -293,8 +295,9 @@ def _order_flow(session: Session) -> tuple[AdminOrderFlowItem, ...]:
                 else 0
             ),
             tone=tone,
+            destination_url=destination_url,
         )
-        for key, label, status, tone in definitions
+        for key, label, status, tone, destination_url in definitions
     )
 
 
@@ -453,6 +456,11 @@ def _recent_activity(
             label=label,
             public_reference=reference,
             tone=tone,
+            destination_url=(
+                f"/admin/orders/{reference}"
+                if event_type == "payment" and reference
+                else None
+            ),
         )
         for timestamp, event_type, label, reference, tone in candidates[
             :normalized_limit
@@ -511,12 +519,12 @@ def get_admin_operations_page(
         AdminOperationalAlert(
             "seller_sla", "Entrega a ECUVEL atrasada",
             f"{overdue_preparation} pedidos superaron el SLA de entrega del vendedor.",
-            overdue_preparation, "danger", "timer",
+            overdue_preparation, "danger", "timer", "/admin/orders?attention=inbound-overdue",
         ),
         AdminOperationalAlert(
             "payments", "Pagos pendientes",
             f"{overdue_payment_proofs} comprobantes llevan más de 30 min.",
-            overdue_payment_proofs, "warning", "receipt-text",
+            overdue_payment_proofs, "warning", "receipt-text", "/admin/orders?payment=review",
         ),
         AdminOperationalAlert(
             "stock", "Stock crítico",
@@ -532,11 +540,11 @@ def get_admin_operations_page(
     alerts = tuple(alert for alert in alert_candidates if alert.count > 0)[:4]
 
     attention_candidates = (
-        AdminAttentionItem("payments", "Pagos", pending_payment_proofs, "banknote"),
+        AdminAttentionItem("payments", "Pagos", pending_payment_proofs, "banknote", "/admin/orders?payment=review"),
         AdminAttentionItem(
-            "preparation", "Preparación atrasada", overdue_preparation, "timer"
+            "preparation", "Preparación atrasada", overdue_preparation, "timer", "/admin/orders?attention=inbound-overdue"
         ),
-        AdminAttentionItem("picking", "Picking", picking, "archive-restore"),
+        AdminAttentionItem("picking", "Picking", picking, "archive-restore", "/admin/orders?fulfillment=picking"),
         AdminAttentionItem("products", "Productos", products_pending_review, "shapes"),
         AdminAttentionItem("stores", "Tiendas", stores_pending, "store"),
         AdminAttentionItem("payouts", "Liquidaciones", payouts_on_hold, "wallet-cards"),
@@ -605,7 +613,8 @@ def search_admin_records(
     ).all()
     order_results.extend(
         AdminSearchResult(
-            "orders", "Pedido", number, f"Estado: {status.value}", "shopping-cart"
+            "orders", "Pedido", number, f"Estado: {status.value}", "shopping-cart",
+            f"/admin/orders/{number}",
         )
         for number, status in orders
     )
