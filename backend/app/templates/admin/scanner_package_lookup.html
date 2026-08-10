@@ -1,0 +1,18 @@
+{% extends "admin/base.html" %}
+{% from "admin/_scanner_macros.html" import point_selector, scan_search, status_badge %}
+{% block admin_title %}Consultar paquete · Escáner ECUVEL{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-scanner-page">
+  <header class="admin-page-heading admin-scanner-heading"><div><a class="admin-back-link" href="{{ url_for('admin.scanner') }}"><i data-lucide="arrow-left"></i>Escáner</a><h1>Consultar paquete</h1><p>Consulta ubicación, custodia y ruta sin modificar el estado.</p></div>{{ point_selector(home, 'package', code) }}</header>
+  <div class="admin-scanner-notice admin-scanner-notice--info"><i data-lucide="info"></i><div><strong>Consulta únicamente</strong><p>Ningún estado, custodia ni inventario será modificado desde esta pantalla.</p></div></div>
+  <div class="admin-scanner-workspace">
+    <aside class="admin-card admin-scanner-reader">{{ scan_search(url_for('admin.scanner_package'), 'code', code, 'PKG-… o código de barras', 'Escanea el código del paquete') }}<div class="admin-scanner-ready"><i data-lucide="circle-check"></i><span>Escáner preparado</span></div></aside>
+    <main class="admin-scanner-result">
+      {% if lookup_error %}<div class="admin-scanner-notice admin-scanner-notice--danger"><i data-lucide="package-x"></i><div><strong>Paquete no encontrado</strong><p>{{ lookup_error }}</p></div></div>{% endif %}
+      {% if view and view.kind == 'ambiguous' %}<div class="admin-scanner-notice admin-scanner-notice--danger"><i data-lucide="triangle-alert"></i><div><strong>Código ambiguo</strong><p>El código coincide con un paquete de entrada y otro de salida. No mostramos datos mezclados; requiere revisión operativa.</p></div></div>{% elif view %}
+        <section class="admin-card admin-scanner-lookup {{ 'is-deviated' if view.is_deviated else '' }}"><header><div><p class="admin-eyebrow">{{ view.type_label }}</p><h2>{{ view.package_code }}</h2><p>Pedido <a href="{{ url_for('admin.order_detail', order_number=view.order_number) }}">{{ view.order_number }}</a></p></div>{{ status_badge(view.status_label, view.status_tone) }}</header><div class="admin-scanner-lookup-grid"><section><p class="admin-eyebrow">Detalles</p><dl>{% if view.product_name %}<div><dt>Producto</dt><dd>{{ view.product_name }}</dd></div>{% endif %}{% if view.store_name %}<div><dt>Tienda</dt><dd>{{ view.store_name }}</dd></div>{% endif %}<div><dt>Código de barras</dt><dd>{{ view.barcode }}</dd></div></dl></section><section><p class="admin-eyebrow">Ubicación actual</p><h3>{{ view.current_location }}</h3>{% if view.custodian_name %}<p>Custodia: <strong>{{ view.custodian_name }}</strong></p>{% endif %}{% if view.destination_name %}<p>Destino: <strong>{{ view.destination_name }}</strong></p>{% endif %}</section></div><footer><span><small>Último evento</small><strong>{{ view.last_event or 'Sin eventos' }}</strong></span><span><small>Próximo movimiento</small><strong>{{ view.next_movement or 'Sin acción pendiente' }}</strong></span><div>{% if view.fulfillment_available %}<a class="admin-button admin-button--secondary" href="{{ url_for('admin.fulfillment_detail', package_code=view.package_code) }}">Ver en Fulfillment</a>{% endif %}<a class="admin-button admin-button--secondary" href="{{ url_for('admin.order_detail', order_number=view.order_number) }}">Ver pedido</a></div></footer></section>
+      {% else %}<div class="admin-card admin-scanner-empty"><i data-lucide="scan-barcode"></i><h2>Escanea para consultar</h2><p>Reconocemos paquetes de entrada de tiendas y paquetes de salida para compradores.</p></div>{% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}

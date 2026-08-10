@@ -32,7 +32,7 @@ ADMIN_NAVIGATION = (
             AdminNavigationItem(
                 "fulfillment", "Fulfillment", "truck", "admin.fulfillment", True,
             ),
-            AdminNavigationItem("scanner", "Escáner", "scan-line", "admin.module_placeholder"),
+            AdminNavigationItem("scanner", "Escáner", "scan-line", "admin.scanner", True),
             AdminNavigationItem("inventory", "Inventario", "archive", "admin.module_placeholder"),
         ),
     ),

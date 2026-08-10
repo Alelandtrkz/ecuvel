@@ -22,7 +22,7 @@ from app.models.inventory import (
     InventoryReservation,
 )
 from app.models.order import Order, OrderItem, SellerOrder
-from app.models.warehouse import WarehouseLocation
+from app.models.warehouse import Warehouse, WarehouseLocation
 
 
 class FulfillmentServiceError(Exception):
@@ -763,6 +763,7 @@ def handover_order_packages(
     order_number: str,
     scanned_codes: Sequence[str],
     actor_user_id: uuid.UUID | None = None,
+    expected_warehouse_id: uuid.UUID | None = None,
     notes: str | None = None,
 ) -> HandoverOrderResult:
     normalized_order_number = order_number.strip()
@@ -979,6 +980,7 @@ def handover_order_packages(
                 WarehouseLocation.id.in_(pickup_location_ids)
             )
             .order_by(WarehouseLocation.id)
+            .with_for_update()
         )
     )
     pickup_locations_by_id = {
@@ -995,6 +997,24 @@ def handover_order_packages(
             "Un paquete no tiene una ubicación "
             "de retiro válida."
         )
+
+    if expected_warehouse_id is not None:
+        warehouse = session.scalar(
+            select(Warehouse)
+            .where(Warehouse.id == expected_warehouse_id)
+            .with_for_update()
+        )
+        if warehouse is None or not warehouse.is_active:
+            raise InvalidPickupLocationError(
+                "El punto operativo seleccionado no está disponible."
+            )
+        if any(
+            location.warehouse_id != warehouse.id
+            for location in pickup_locations
+        ):
+            raise InvalidPickupLocationError(
+                "Todos los paquetes deben estar preparados en el punto operativo actual."
+            )
 
     if not replayed:
         handover_time = datetime.now(timezone.utc)

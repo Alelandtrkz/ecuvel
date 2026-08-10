@@ -427,6 +427,7 @@ def confirm_package_pickup(
     *,
     package_code: str,
     actor_user_id: uuid.UUID,
+    expected_origin_warehouse_id: uuid.UUID | None = None,
     notes: str | None = None,
     now: datetime | None = None,
     idempotency_key: str | None = None,
@@ -445,6 +446,16 @@ def confirm_package_pickup(
         return LogisticsMutationResult(state, transfer, None, True)
     if transfer is None or transfer.status != LogisticsTransferStatus.ASSIGNED:
         raise LogisticsConflictError("El paquete no tiene un traslado listo para recoger.")
+    if (
+        expected_origin_warehouse_id is not None
+        and (
+            transfer.origin_warehouse_id != expected_origin_warehouse_id
+            or state.current_warehouse_id != expected_origin_warehouse_id
+        )
+    ):
+        raise LogisticsConflictError(
+            "El paquete no se encuentra en el punto operativo actual."
+        )
     if state.current_warehouse_id != transfer.origin_warehouse_id:
         raise LogisticsConflictError(
             "El paquete ya no se encuentra en el origen del traslado."

@@ -1,0 +1,32 @@
+{% extends "admin/base.html" %}
+{% from "admin/_scanner_macros.html" import point_selector, scan_search, status_badge %}
+{% block admin_title %}Recepción en punto · Escáner ECUVEL{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-scanner-page">
+  <header class="admin-page-heading admin-scanner-heading"><div><a class="admin-back-link" href="{{ url_for('admin.scanner') }}"><i data-lucide="arrow-left"></i>Escáner</a><h1>Recepción en punto</h1><p>Registra el paquete que una tienda entrega físicamente en este punto ECUVEL.</p></div>{{ point_selector(home, 'receive', code) }}</header>
+  <div class="admin-scanner-workspace">
+    <aside class="admin-card admin-scanner-reader">{{ scan_search(url_for('admin.scanner_receive'), 'code', code, 'Ej. PKG-000000451', 'Escanea el código del paquete') }}<div class="admin-scanner-ready"><i data-lucide="circle-check"></i><span>Escáner preparado</span></div></aside>
+    <main class="admin-scanner-result">
+      {% if lookup_error %}<div class="admin-scanner-notice admin-scanner-notice--danger"><i data-lucide="circle-alert"></i><div><strong>Paquete no encontrado</strong><p>{{ lookup_error }}</p></div></div>{% endif %}
+      {% if result == 'received' %}<div class="admin-scanner-notice admin-scanner-notice--success"><i data-lucide="circle-check"></i><div><strong>Recepción registrada</strong><p>La custodia y la trazabilidad del paquete fueron actualizadas.</p></div></div>{% endif %}
+      {% if view %}
+        <section class="admin-card admin-scanner-identified"><header><div><p class="admin-eyebrow">Paquete identificado</p><h2>{{ view.package_code }}</h2></div>{{ status_badge(view.status_label, view.status_tone) }}</header><dl><div><dt>Tienda</dt><dd>{{ view.store_name }}</dd></div><div><dt>Pedido</dt><dd><a href="{{ url_for('admin.order_detail', order_number=view.order_number) }}">{{ view.order_number }}</a></dd></div><div><dt>Orden de tienda</dt><dd>{{ view.seller_order_number }}</dd></div><div><dt>Ubicación actual</dt><dd>{{ view.current_location }}</dd></div></dl></section>
+        <form class="admin-card admin-scanner-verification" method="post" action="{{ url_for('admin.scanner_receive_confirm') }}" data-scan-collector data-field-name="verified_product_codes" data-server-allowed="{{ '1' if view.can_confirm else '0' }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ action_token }}"><input type="hidden" name="package_code" value="{{ view.package_code }}">
+          <header><div><p class="admin-eyebrow">Verificación obligatoria</p><h2>Contenido del paquete</h2><p>Escanea el SKU de cada unidad. Debe coincidir exactamente con el contenido declarado.</p></div><strong data-scan-progress>0/{{ view.total_units }}</strong></header>
+          <div class="admin-scanner-progress"><span data-scan-progress-bar style="width:0%"></span></div>
+          <div class="admin-scanner-content-list">
+            {% for item in view.content %}<article data-expected-code="{{ item.code }}" data-expected-quantity="{{ item.quantity }}"><span class="admin-scanner-check"><i data-lucide="check"></i></span><div><strong>{{ item.product_name }}</strong><small>SKU {{ item.code }}</small></div><span><b data-scan-count>0</b>/{{ item.quantity }}</span></article>{% endfor %}
+          </div>
+          <label class="admin-scanner-inline-input">Escanear SKU de producto<input data-collector-input autocomplete="off" placeholder="Escanea y presiona Enter"><span data-scan-feedback aria-live="polite"></span></label>
+          <div data-collected-fields></div>
+          <details class="admin-scanner-fallback"><summary>Ingreso manual sin JavaScript</summary><label>SKUs verificados, separados por espacio o línea<textarea name="verified_product_codes_text" rows="3"></textarea></label></details>
+          <label>Ubicación interna de recepción<select name="received_location_id" required><option value="">Seleccionar ubicación</option>{% for option in view.receiving_locations %}<option value="{{ option.value }}" {{ 'selected' if option.value == view.selected_location_id else '' }}>{{ option.label }}</option>{% endfor %}</select></label>
+          {% if not home.operating_point %}<p class="admin-form-error">Selecciona el punto operativo.</p>{% elif not view.receiving_locations %}<p class="admin-form-error">Este punto no tiene una ubicación de recepción activa.</p>{% endif %}
+          <button class="admin-button admin-scanner-confirm" type="submit" data-confirm {{ 'disabled' if not view.can_confirm else '' }}><i data-lucide="package-check"></i>Confirmar recepción</button>
+        </form>
+      {% else %}<div class="admin-card admin-scanner-empty"><i data-lucide="scan-line"></i><h2>Escanea un paquete para comenzar</h2><p>Primero identificaremos el paquete. Nada cambia hasta que revises y confirmes.</p></div>{% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}

@@ -4,6 +4,7 @@
 {% macro badge(status) -%}<span class="admin-status admin-status--{{ status.tone }}">{{ status.label }}</span>{%- endmacro %}
 
 {% block admin_content %}
+{% set handover = namespace(ready=false) %}{% for package in detail.packages %}{% if package.status.code == 'ready_for_pickup' %}{% set handover.ready = true %}{% endif %}{% endfor %}
 <div class="admin-page admin-order-detail">
   <header class="admin-detail-heading">
     <div>
@@ -12,6 +13,7 @@
       {{ badge(detail.status) }}
     </div>
     <div class="admin-detail-actions">
+      {% if handover.ready %}<a class="admin-button" href="{{ url_for('admin.scanner_handover', buyer=detail.customer_code, order_number=detail.order_number) }}"><i data-lucide="user-check" aria-hidden="true"></i>Entregar con escáner</a>{% endif %}
       {% if detail.customer_email %}<a class="admin-button admin-button--secondary" href="mailto:{{ detail.customer_email }}"><i data-lucide="mail" aria-hidden="true"></i>Contactar cliente</a>{% endif %}
       <button class="admin-button" type="button" disabled title="Impresión de etiquetas próximamente"><i data-lucide="printer" aria-hidden="true"></i>Imprimir etiquetas · Próx.</button>
       <button class="admin-icon-button" type="button" disabled title="Más acciones próximamente" aria-label="Más acciones próximamente"><i data-lucide="ellipsis" aria-hidden="true"></i></button>
@@ -58,7 +60,7 @@
                 <p>{{ package.store_name }}</p>
                 <dl><div><dt>Ubicación actual</dt><dd>{{ package.current_location }}</dd></div><div><dt>Custodia</dt><dd>{{ package.custodian_name }}</dd></div><div><dt>Código</dt><dd>{{ package.barcode }}</dd></div></dl>
                 <div class="admin-package-actions">
-                  {% if package.tracking_available %}<a href="{{ url_for('admin.fulfillment_detail', package_code=package.package_code) }}">Ver seguimiento</a>{% else %}<span title="Disponible después de la recepción física">Seguimiento pendiente</span>{% endif %}
+                  {% if package.status.code == 'ready' %}<a href="{{ url_for('admin.scanner_receive', code=package.package_code) }}">Recibir con escáner</a>{% elif package.tracking_available %}<a href="{{ url_for('admin.fulfillment_detail', package_code=package.package_code) }}">Ver seguimiento</a><a href="{{ url_for('admin.scanner_package', code=package.package_code) }}">Consultar</a>{% else %}<span title="Disponible después de la recepción física">Seguimiento pendiente</span>{% endif %}
                 </div>
               </article>
             {% endfor %}
@@ -77,7 +79,7 @@
                 <header><strong>{{ package.package_code }}</strong>{{ badge(package.status) }}</header>
                 <p>{{ package.product_name }}{% if package.variant_title %} · {{ package.variant_title }}{% endif %}</p>
                 <dl><div><dt>Cantidad</dt><dd>{{ package.quantity }}</dd></div><div><dt>Ubicación</dt><dd>{{ package.location_code or 'Pendiente' }}</dd></div><div><dt>Código</dt><dd>{{ package.barcode }}</dd></div></dl>
-                <div class="admin-package-actions"><button type="button" disabled>Ver paquete · Próx.</button><button type="button" disabled>Imprimir · Próx.</button></div>
+                <div class="admin-package-actions"><a href="{{ url_for('admin.scanner_package', code=package.package_code) }}">Consultar paquete</a>{% if package.status.code == 'ready_for_pickup' %}<a href="{{ url_for('admin.scanner_handover', buyer=detail.customer_code, order_number=detail.order_number) }}">Entregar</a>{% endif %}</div>
               </article>
             {% endfor %}
           </div>

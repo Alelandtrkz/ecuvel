@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% from "admin/_scanner_macros.html" import point_selector %}
+{% block admin_title %}Entrega al cliente · Escáner ECUVEL{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-scanner-page">
+  <header class="admin-page-heading admin-scanner-heading"><div><a class="admin-back-link" href="{{ url_for('admin.scanner') }}"><i data-lucide="arrow-left"></i>Escáner</a><h1>Entrega al cliente</h1><p>Identifica al comprador y verifica todos sus paquetes antes de confirmar la entrega.</p></div>{{ point_selector(home, 'handover', '', buyer_code, order_number) }}</header>
+  {% if result == 'handed-over' %}<div class="admin-scanner-notice admin-scanner-notice--success"><i data-lucide="badge-check"></i><div><strong>Pedido {{ completed_order }} entregado</strong><p>Todos los paquetes quedaron entregados mediante una única operación auditada.</p></div></div>{% endif %}
+  <div class="admin-scanner-workspace">
+    <aside class="admin-scanner-sidebar-stack">
+      <form class="admin-card admin-scanner-search" action="{{ url_for('admin.scanner_handover') }}" method="get"><label for="buyer-code">Escanear QR o ID público</label><div><i data-lucide="qr-code"></i><input id="buyer-code" name="buyer" value="{{ buyer_code }}" placeholder="U-00000321" maxlength="120" autocomplete="off" data-scanner-primary autofocus required><button class="admin-button" type="submit"><span>Identificar</span><i data-lucide="arrow-right"></i></button></div><small>Este código solo localiza la cuenta. Debes verificar físicamente la identidad.</small></form>
+      {% if view %}<section class="admin-card admin-scanner-buyer"><span><i data-lucide="user"></i></span><div><h2>{{ view.buyer_name }}</h2><p>{{ view.buyer_code }}</p><strong>{{ view.orders|length }} pedido{{ 's' if view.orders|length != 1 else '' }} disponible{{ 's' if view.orders|length != 1 else '' }}</strong></div></section>{% endif %}
+    </aside>
+    <main class="admin-scanner-result">
+      {% if lookup_error %}<div class="admin-scanner-notice admin-scanner-notice--danger"><i data-lucide="user-x"></i><div><strong>Cliente no encontrado</strong><p>{{ lookup_error }}</p></div></div>{% endif %}
+      {% if view and not home.operating_point %}<div class="admin-scanner-notice admin-scanner-notice--warning"><i data-lucide="map-pin"></i><div><strong>Selecciona el punto operativo</strong><p>Solo se mostrarán pedidos listos para retirar en ese punto.</p></div></div>{% endif %}
+      {% if view and home.operating_point and not view.orders %}<div class="admin-card admin-scanner-empty"><i data-lucide="package-x"></i><h2>No hay pedidos listos en este punto</h2><p>La cuenta existe, pero no tiene un pedido completamente disponible para retirar aquí.</p></div>{% endif %}
+      {% if view and view.orders and not view.selected_order %}
+        <section class="admin-card admin-scanner-orders"><header><div><p class="admin-eyebrow">Selección explícita</p><h2>Elige el pedido a entregar</h2></div></header>{% for order in view.orders %}<a href="{{ url_for('admin.scanner_handover', buyer=view.buyer_code, order_number=order.order_number) }}"><span><strong>{{ order.order_number }}</strong><small>{{ order.packages|length }} paquete{{ 's' if order.packages|length != 1 else '' }}</small></span><i data-lucide="arrow-right"></i></a>{% endfor %}</section>
+      {% endif %}
+      {% if view and view.selected_order %}
+        <form class="admin-card admin-scanner-verification" method="post" action="{{ url_for('admin.scanner_handover_confirm') }}" data-scan-collector data-field-name="scanned_codes" data-server-allowed="1" data-identity-required>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ action_token }}"><input type="hidden" name="buyer_code" value="{{ view.buyer_code }}"><input type="hidden" name="order_number" value="{{ view.selected_order.order_number }}">
+          <header><div><p class="admin-eyebrow">Pedido {{ view.selected_order.order_number }}</p><h2>Verificación de paquetes</h2><p>Escanea cada paquete exactamente una vez. La entrega parcial no está permitida.</p></div><strong data-scan-progress>0/{{ view.selected_order.packages|length }}</strong></header><div class="admin-scanner-progress"><span data-scan-progress-bar style="width:0%"></span></div>
+          <div class="admin-scanner-content-list">{% for package in view.selected_order.packages %}<article data-expected-code="{{ package.package_code }}" data-expected-barcode="{{ package.barcode }}" data-expected-quantity="1"><span class="admin-scanner-check"><i data-lucide="check"></i></span><div><strong>{{ package.package_code }}</strong><small>{{ package.product_name }} · Ubicación {{ package.location_code }}</small></div><span><b data-scan-count>0</b>/1</span></article>{% endfor %}</div>
+          <label class="admin-scanner-inline-input">Escanear paquete<input data-collector-input autocomplete="off" placeholder="PKG-… o código de barras"><span data-scan-feedback aria-live="polite"></span></label><div data-collected-fields></div>
+          <details class="admin-scanner-fallback"><summary>Ingreso manual sin JavaScript</summary><label>Códigos verificados, separados por espacio o línea<textarea name="scanned_codes_text" rows="3"></textarea></label></details>
+          <label class="admin-scanner-identity"><input type="checkbox" name="identity_confirmed" value="1" data-identity-confirm><span><strong>Identidad física verificada</strong><small>Confirmo que comparé al portador con una identificación válida. El código U- no autentica por sí solo.</small></span></label>
+          <label>Notas operativas (opcional)<textarea name="notes" maxlength="500" rows="3"></textarea></label>
+          <button class="admin-button admin-scanner-confirm" type="submit" data-confirm><i data-lucide="user-check"></i>Confirmar entrega completa</button>
+        </form>
+      {% elif not view %}<div class="admin-card admin-scanner-empty"><i data-lucide="user-search"></i><h2>Identifica al comprador</h2><p>Escanea o escribe su código público U-. Después podrás elegir un pedido elegible.</p></div>{% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}

@@ -740,12 +740,13 @@ def test_admin_search_uses_public_references_and_group_limits(session):
     assert empty.total_results == 0
 
 
-def test_admin_search_and_placeholders_require_staff(session, client):
+def test_admin_search_scanner_and_placeholders_require_staff(session, client):
     staff = _user(session, is_staff=True)
     session.commit()
     _login(client, staff)
     assert client.get("/admin/search?q=PKG-").status_code == 200
-    placeholder = client.get("/admin/modules/scanner")
-    assert placeholder.status_code == 200
-    assert "Próximamente" in placeholder.get_data(as_text=True)
+    scanner = client.get("/admin/scanner")
+    assert scanner.status_code == 200
+    assert "Recepción en punto" in scanner.get_data(as_text=True)
+    assert client.get("/admin/modules/scanner").status_code == 404
     assert client.get("/admin/modules/unknown").status_code == 404

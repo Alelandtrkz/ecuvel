@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import re
 import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -15,6 +16,7 @@ from flask import (
     render_template,
     request,
     send_file,
+    session as browser_session,
     url_for,
 )
 from flask_login import current_user
@@ -29,6 +31,18 @@ from app.services.admin_navigation import (
 from app.services.admin_fulfillment import (
     get_admin_fulfillment_detail,
     get_admin_fulfillment_page,
+)
+from app.services.admin_scanner import (
+    AdminScannerError,
+    get_admin_customer_handover,
+    get_admin_inbound_reception,
+    get_admin_package_lookup,
+    get_admin_scanner_home,
+    get_admin_transfer_reception,
+    get_admin_transport_pickup,
+    normalize_scanned_code,
+    require_active_operating_point,
+    require_receiving_location,
 )
 from app.services.admin_operations import (
     get_admin_operations_page,
@@ -52,10 +66,24 @@ from app.services.logistics_tracking import (
     reassign_package_transfer,
     receive_transfer_at_destination,
 )
+from app.services.fulfillment import (
+    FulfillmentServiceError,
+    handover_order_packages,
+)
+from app.services.partner_orders import (
+    PartnerOrderConflictError,
+    PartnerOrderNotFoundError,
+    PartnerOrderValidationError,
+)
+from app.services.seller_inbound_packages import (
+    SellerInboundPackageReceptionAccessError,
+    receive_seller_inbound_package,
+)
 from app.services.private_storage import PrivateStorageError, verify_private_file
 
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
+_SCANNER_WAREHOUSE_SESSION_KEY = "admin_operating_warehouse_id"
 
 
 @admin.app_template_filter("ecuador_datetime")
@@ -69,6 +97,44 @@ def _shell_context(section: str) -> dict:
         "admin_secondary_navigation": ADMIN_SECONDARY_NAVIGATION,
         "current_admin_section": section,
     }
+
+
+def _scanner_operating_point():
+    return get_admin_scanner_home(
+        db.session,
+        warehouse_id=browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+    )
+
+
+def _scanner_action_token() -> str:
+    token = (request.form.get("idempotency_key") or "").strip()
+    if not token or len(token) > 120 or not token.replace("-", "").isalnum():
+        raise AdminScannerError(
+            "La operación expiró. Identifica nuevamente el paquete."
+        )
+    return token
+
+
+def _scanner_codes(field: str, fallback_field: str | None = None) -> tuple[str, ...]:
+    values = list(request.form.getlist(field))
+    if fallback_field:
+        fallback = request.form.get(fallback_field) or ""
+        values.extend(re.split(r"[\s,;]+", fallback))
+    return tuple(
+        code
+        for value in values
+        if (code := " ".join((value or "").strip().split())[:120])
+    )
+
+
+def _scanner_redirect(endpoint: str, **values):
+    return redirect(url_for(endpoint, **{key: value for key, value in values.items() if value}))
+
+
+def _scanner_mutation_error(endpoint: str, exc: Exception, **values):
+    db.session.rollback()
+    flash(str(exc), "error")
+    return _scanner_redirect(endpoint, **values)
 
 
 @admin.get("")
@@ -101,6 +167,346 @@ def search():
         "admin/search.html",
         page=page,
         **_shell_context("search"),
+    )
+
+
+@admin.get("/scanner")
+@ecuvel_staff_required
+def scanner():
+    home = _scanner_operating_point()
+    return render_template(
+        "admin/scanner.html",
+        home=home,
+        **_shell_context("scanner"),
+    )
+
+
+@admin.post("/scanner/context")
+@limiter.limit("30 per hour")
+@ecuvel_staff_required
+def scanner_context():
+    try:
+        warehouse = require_active_operating_point(
+            db.session,
+            request.form.get("warehouse_id"),
+        )
+    except AdminScannerError as exc:
+        flash(str(exc), "error")
+    else:
+        browser_session[_SCANNER_WAREHOUSE_SESSION_KEY] = str(warehouse.id)
+        browser_session.modified = True
+        flash(f"Punto operativo actualizado: {warehouse.name}.", "success")
+    endpoint = {
+        "receive": "admin.scanner_receive",
+        "transport": "admin.scanner_transport",
+        "arrival": "admin.scanner_arrival",
+        "handover": "admin.scanner_handover",
+        "package": "admin.scanner_package",
+    }.get(request.form.get("return_mode"), "admin.scanner")
+    return _scanner_redirect(
+        endpoint,
+        code=normalize_scanned_code(request.form.get("code")),
+        buyer=normalize_scanned_code(request.form.get("buyer")),
+        order_number=" ".join((request.form.get("order_number") or "").strip().split())[:120],
+    )
+
+
+@admin.get("/scanner/receive")
+@ecuvel_staff_required
+def scanner_receive():
+    home = _scanner_operating_point()
+    code = normalize_scanned_code(request.args.get("code"))
+    view = get_admin_inbound_reception(
+        db.session,
+        code=code,
+        operating_point=home.operating_point,
+    ) if code else None
+    return render_template(
+        "admin/scanner_receive.html",
+        home=home,
+        code=code,
+        view=view,
+        lookup_error=("No encontramos el paquete de entrada escaneado." if code and view is None else None),
+        result=request.args.get("result"),
+        action_token=uuid.uuid4().hex,
+        **_shell_context("scanner"),
+    )
+
+
+@admin.post("/scanner/receive")
+@limiter.limit("120 per hour")
+@ecuvel_staff_required
+def scanner_receive_confirm():
+    code = normalize_scanned_code(request.form.get("package_code"))
+    try:
+        warehouse = require_active_operating_point(
+            db.session,
+            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            lock=True,
+        )
+        location = require_receiving_location(
+            db.session,
+            warehouse_id=warehouse.id,
+            location_id=request.form.get("received_location_id"),
+            lock=True,
+        )
+        _scanner_action_token()
+        verified_codes = _scanner_codes(
+            "verified_product_codes", "verified_product_codes_text"
+        )
+        receive_seller_inbound_package(
+            db.session,
+            package_code=code,
+            received_location_id=location.id,
+            actor_user_id=current_user.id,
+            verified_product_codes=verified_codes,
+            expected_warehouse_id=warehouse.id,
+        )
+        db.session.commit()
+    except (
+        AdminScannerError,
+        PartnerOrderConflictError,
+        PartnerOrderNotFoundError,
+        PartnerOrderValidationError,
+        SellerInboundPackageReceptionAccessError,
+        LogisticsTrackingError,
+    ) as exc:
+        return _scanner_mutation_error("admin.scanner_receive", exc, code=code)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló recepción Scanner package=%s", code)
+        flash("No pudimos registrar la recepción del paquete.", "error")
+        return _scanner_redirect("admin.scanner_receive", code=code)
+    flash("Paquete recibido correctamente.", "success")
+    return _scanner_redirect("admin.scanner_receive", code=code, result="received")
+
+
+@admin.get("/scanner/transport")
+@ecuvel_staff_required
+def scanner_transport():
+    home = _scanner_operating_point()
+    code = normalize_scanned_code(request.args.get("code"))
+    view = get_admin_transport_pickup(
+        db.session,
+        code=code,
+        operating_point=home.operating_point,
+    ) if code else None
+    return render_template(
+        "admin/scanner_transport.html",
+        home=home,
+        code=code,
+        view=view,
+        lookup_error=("No encontramos un paquete de entrada con ese código." if code and view is None else None),
+        result=request.args.get("result"),
+        action_token=uuid.uuid4().hex,
+        **_shell_context("scanner"),
+    )
+
+
+@admin.post("/scanner/transport")
+@limiter.limit("120 per hour")
+@ecuvel_staff_required
+def scanner_transport_confirm():
+    code = normalize_scanned_code(request.form.get("package_code"))
+    try:
+        warehouse = require_active_operating_point(
+            db.session,
+            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            lock=True,
+        )
+        token = _scanner_action_token()
+        confirm_package_pickup(
+            db.session,
+            package_code=code,
+            actor_user_id=current_user.id,
+            expected_origin_warehouse_id=warehouse.id,
+            notes=request.form.get("notes"),
+            idempotency_key=f"scanner:pickup:{token}",
+        )
+        db.session.commit()
+    except (AdminScannerError, LogisticsTrackingError) as exc:
+        return _scanner_mutation_error("admin.scanner_transport", exc, code=code)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló salida Scanner package=%s", code)
+        flash("No pudimos confirmar la salida del paquete.", "error")
+        return _scanner_redirect("admin.scanner_transport", code=code)
+    flash("Salida confirmada y custodia transferida al responsable.", "success")
+    return _scanner_redirect("admin.scanner_transport", code=code, result="departed")
+
+
+@admin.get("/scanner/arrival")
+@ecuvel_staff_required
+def scanner_arrival():
+    home = _scanner_operating_point()
+    code = normalize_scanned_code(request.args.get("code"))
+    view = get_admin_transfer_reception(
+        db.session,
+        code=code,
+        operating_point=home.operating_point,
+    ) if code else None
+    return render_template(
+        "admin/scanner_arrival.html",
+        home=home,
+        code=code,
+        view=view,
+        lookup_error=("No encontramos un paquete en traslado con ese código." if code and view is None else None),
+        result=request.args.get("result"),
+        action_token=uuid.uuid4().hex,
+        **_shell_context("scanner"),
+    )
+
+
+@admin.post("/scanner/arrival")
+@limiter.limit("120 per hour")
+@ecuvel_staff_required
+def scanner_arrival_confirm():
+    code = normalize_scanned_code(request.form.get("package_code"))
+    try:
+        warehouse = require_active_operating_point(
+            db.session,
+            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            lock=True,
+        )
+        location = require_receiving_location(
+            db.session,
+            warehouse_id=warehouse.id,
+            location_id=request.form.get("received_location_id"),
+            lock=True,
+        )
+        token = _scanner_action_token()
+        result = receive_transfer_at_destination(
+            db.session,
+            package_code=code,
+            warehouse_id=warehouse.id,
+            location_id=location.id,
+            actor_user_id=current_user.id,
+            notes=request.form.get("notes"),
+            idempotency_key=f"scanner:arrival:{token}",
+        )
+        was_deviated = result.package_state.is_deviated
+        db.session.commit()
+    except (AdminScannerError, LogisticsTrackingError) as exc:
+        return _scanner_mutation_error("admin.scanner_arrival", exc, code=code)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló llegada Scanner package=%s", code)
+        flash("No pudimos registrar la llegada del paquete.", "error")
+        return _scanner_redirect("admin.scanner_arrival", code=code)
+    flash(
+        "Paquete recibido y marcado como desviado."
+        if was_deviated
+        else "Paquete recibido en el destino correcto.",
+        "warning" if was_deviated else "success",
+    )
+    return _scanner_redirect(
+        "admin.scanner_arrival",
+        code=code,
+        result="deviated" if was_deviated else "arrived",
+    )
+
+
+@admin.get("/scanner/handover")
+@ecuvel_staff_required
+def scanner_handover():
+    home = _scanner_operating_point()
+    buyer_code = normalize_scanned_code(request.args.get("buyer"))
+    order_number = " ".join((request.args.get("order_number") or "").strip().split())[:120]
+    view = get_admin_customer_handover(
+        db.session,
+        buyer_code=buyer_code,
+        operating_point=home.operating_point,
+        order_number=order_number,
+    ) if buyer_code else None
+    return render_template(
+        "admin/scanner_handover.html",
+        home=home,
+        buyer_code=buyer_code,
+        order_number=order_number,
+        view=view,
+        lookup_error=("No encontramos un cliente con ese código público." if buyer_code and view is None else None),
+        result=request.args.get("result"),
+        completed_order=request.args.get("completed_order"),
+        action_token=uuid.uuid4().hex,
+        **_shell_context("scanner"),
+    )
+
+
+@admin.post("/scanner/handover")
+@limiter.limit("60 per hour")
+@ecuvel_staff_required
+def scanner_handover_confirm():
+    buyer_code = normalize_scanned_code(request.form.get("buyer_code"))
+    order_number = " ".join((request.form.get("order_number") or "").strip().split())[:120]
+    try:
+        warehouse = require_active_operating_point(
+            db.session,
+            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            lock=True,
+        )
+        _scanner_action_token()
+        if request.form.get("identity_confirmed") != "1":
+            raise AdminScannerError(
+                "Confirma que verificaste físicamente la identidad del cliente."
+            )
+        view = get_admin_customer_handover(
+            db.session,
+            buyer_code=buyer_code,
+            operating_point=get_admin_scanner_home(
+                db.session, warehouse_id=warehouse.id
+            ).operating_point,
+            order_number=order_number,
+        )
+        if view is None or view.selected_order is None:
+            raise AdminScannerError(
+                "El pedido no está listo para retirarse en este punto."
+            )
+        scanned_codes = _scanner_codes("scanned_codes", "scanned_codes_text")
+        handover_order_packages(
+            session=db.session,
+            order_number=view.selected_order.order_number,
+            scanned_codes=scanned_codes,
+            actor_user_id=current_user.id,
+            expected_warehouse_id=warehouse.id,
+            notes=request.form.get("notes"),
+        )
+        db.session.commit()
+    except (AdminScannerError, FulfillmentServiceError, ValueError) as exc:
+        return _scanner_mutation_error(
+            "admin.scanner_handover",
+            exc,
+            buyer=buyer_code,
+            order_number=order_number,
+        )
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló handover Scanner order=%s", order_number)
+        flash("No pudimos confirmar la entrega del pedido.", "error")
+        return _scanner_redirect(
+            "admin.scanner_handover", buyer=buyer_code, order_number=order_number
+        )
+    flash("Pedido entregado correctamente.", "success")
+    return _scanner_redirect(
+        "admin.scanner_handover",
+        buyer=buyer_code,
+        result="handed-over",
+        completed_order=view.selected_order.order_number,
+    )
+
+
+@admin.get("/scanner/package")
+@ecuvel_staff_required
+def scanner_package():
+    home = _scanner_operating_point()
+    code = normalize_scanned_code(request.args.get("code"))
+    view = get_admin_package_lookup(db.session, code=code) if code else None
+    return render_template(
+        "admin/scanner_package_lookup.html",
+        home=home,
+        code=code,
+        view=view,
+        lookup_error=("No encontramos un paquete con ese código." if code and view is None else None),
+        **_shell_context("scanner"),
     )
 
 

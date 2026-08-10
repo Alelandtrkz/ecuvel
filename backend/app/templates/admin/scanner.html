@@ -1,0 +1,27 @@
+{% extends "admin/base.html" %}
+{% from "admin/_scanner_macros.html" import point_selector %}
+{% block admin_title %}Escáner · ECUVEL Admin{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-scanner-page">
+  <header class="admin-page-heading admin-scanner-heading">
+    <div><p class="admin-eyebrow">Operación física</p><h1>Escáner</h1><p>Selecciona la operación que vas a registrar en la red ECUVEL.</p></div>
+    {{ point_selector(home, 'home') }}
+  </header>
+
+  {% if not home.operating_point %}
+    <div class="admin-scanner-notice admin-scanner-notice--warning"><i data-lucide="map-pin" aria-hidden="true"></i><div><strong>Selecciona el punto operativo</strong><p>El punto es obligatorio para recibir, trasladar o entregar paquetes. La consulta rápida sigue disponible.</p></div></div>
+  {% endif %}
+
+  <section class="admin-scanner-actions" aria-label="Operaciones de escáner">
+    <a class="admin-card admin-scanner-operation" href="{{ url_for('admin.scanner_receive') }}"><span><i data-lucide="package-check" aria-hidden="true"></i></span><h2>Recepción en punto</h2><p class="admin-scanner-flow">Tienda <i data-lucide="arrow-right"></i> Punto ECUVEL</p><p>Recibe un paquete de una tienda y verifica exactamente su contenido.</p><em>Comenzar <i data-lucide="arrow-right"></i></em></a>
+    <a class="admin-card admin-scanner-operation" href="{{ url_for('admin.scanner_transport') }}"><span><i data-lucide="truck" aria-hidden="true"></i></span><h2>Entrega a transportista</h2><p class="admin-scanner-flow">Punto ECUVEL <i data-lucide="arrow-right"></i> Transporte</p><p>Verifica el paquete y transfiere la custodia al responsable asignado.</p><em>Comenzar <i data-lucide="arrow-right"></i></em></a>
+    <a class="admin-card admin-scanner-operation" href="{{ url_for('admin.scanner_arrival') }}"><span><i data-lucide="package-open" aria-hidden="true"></i></span><h2>Recepción de traslado</h2><p class="admin-scanner-flow">Transporte <i data-lucide="arrow-right"></i> Punto ECUVEL</p><p>Registra la llegada desde otro punto y detecta cualquier desvío.</p><em>Comenzar <i data-lucide="arrow-right"></i></em></a>
+    <a class="admin-card admin-scanner-operation" href="{{ url_for('admin.scanner_handover') }}"><span><i data-lucide="user-check" aria-hidden="true"></i></span><h2>Entrega al cliente</h2><p class="admin-scanner-flow">Punto ECUVEL <i data-lucide="arrow-right"></i> Comprador</p><p>Identifica al comprador y comprueba todos sus paquetes antes de entregar.</p><em>Comenzar <i data-lucide="arrow-right"></i></em></a>
+  </section>
+
+  <section class="admin-card admin-scanner-quick">
+    <div><p class="admin-eyebrow">Solo consulta</p><h2>Consulta rápida</h2><p>Conoce el estado, la ubicación y la custodia sin modificar el paquete.</p></div>
+    <form action="{{ url_for('admin.scanner_package') }}" method="get" role="search"><i data-lucide="search" aria-hidden="true"></i><input name="code" maxlength="120" placeholder="Escanea o ingresa PKG-…" autocomplete="off" required><button class="admin-button" type="submit">Consultar paquete</button></form>
+  </section>
+</div>
+{% endblock %}

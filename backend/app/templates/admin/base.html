@@ -30,7 +30,7 @@
       <div class="admin-quick__menu" id="admin-quick-menu" data-admin-menu-panel hidden>
         <a href="{{ url_for('admin.search', scope='orders') }}"><i data-lucide="search" aria-hidden="true"></i>Buscar pedido</a>
         <a href="{{ url_for('admin.search', scope='users') }}"><i data-lucide="user-search" aria-hidden="true"></i>Buscar usuario</a>
-        <a href="{{ url_for('admin.module_placeholder', module_key='scanner') }}"><i data-lucide="scan-line" aria-hidden="true"></i>Escanear paquete</a>
+        <a href="{{ url_for('admin.scanner') }}"><i data-lucide="scan-line" aria-hidden="true"></i>Escanear paquete</a>
       </div>
     </div>
 
@@ -82,7 +82,7 @@
              placeholder="Buscar pedido, usuario, paquete o tienda..." autocomplete="off">
     </form>
     <div class="admin-topbar__actions">
-      <a class="admin-topbar__scan" href="{{ url_for('admin.module_placeholder', module_key='scanner') }}">
+      <a class="admin-topbar__scan" href="{{ url_for('admin.scanner') }}">
         <i data-lucide="scan-line" aria-hidden="true"></i><span>Escanear</span>
       </a>
       <button type="button" aria-label="Notificaciones · Próximamente" title="Notificaciones · Próximamente" disabled>
@@ -103,4 +103,5 @@
 {% block footer %}{% endblock %}
 {% block scripts %}
   <script src="{{ url_for('static', filename='js/admin.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/admin-scanner.js') }}" defer></script>
 {% endblock %}

@@ -365,6 +365,7 @@ def receive_seller_inbound_package(
     received_location_id: uuid.UUID,
     actor_user_id: uuid.UUID,
     verified_product_codes: Sequence[str],
+    expected_warehouse_id: uuid.UUID | None = None,
     now: datetime | None = None,
 ) -> PartnerInboundPackageResult:
     """Internal ECUVEL operation. It is deliberately not exposed to Partners."""
@@ -393,6 +394,13 @@ def receive_seller_inbound_package(
     ):
         raise PartnerOrderValidationError(
             "La ubicación de recepción de Ecuvel no es válida."
+        )
+    if (
+        expected_warehouse_id is not None
+        and location.warehouse_id != expected_warehouse_id
+    ):
+        raise PartnerOrderValidationError(
+            "La ubicación de recepción no pertenece al punto operativo actual."
         )
     normalized_code = (package_code or "").strip().upper()
     package = session.scalar(

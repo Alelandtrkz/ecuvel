@@ -1,0 +1,32 @@
+{% macro point_selector(home, return_mode, code='', buyer='', order_number='') -%}
+  <form class="admin-scanner-point" method="post" action="{{ url_for('admin.scanner_context') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="return_mode" value="{{ return_mode }}">
+    {% if code %}<input type="hidden" name="code" value="{{ code }}">{% endif %}
+    {% if buyer %}<input type="hidden" name="buyer" value="{{ buyer }}">{% endif %}
+    {% if order_number %}<input type="hidden" name="order_number" value="{{ order_number }}">{% endif %}
+    <label for="scanner-point-{{ return_mode }}">
+      <i data-lucide="map-pin" aria-hidden="true"></i>
+      <span><small>Punto operativo actual</small><strong>{{ home.operating_point.label if home.operating_point else 'Seleccionar punto ECUVEL' }}</strong></span>
+    </label>
+    <select id="scanner-point-{{ return_mode }}" name="warehouse_id" required data-point-selector>
+      <option value="">Seleccionar punto</option>
+      {% for option in home.warehouse_options %}<option value="{{ option.value }}" {{ 'selected' if home.operating_point and option.value == home.operating_point.id|string else '' }}>{{ option.label }}</option>{% endfor %}
+    </select>
+    <button class="admin-button admin-button--secondary" type="submit">Aplicar</button>
+  </form>
+{%- endmacro %}
+
+{% macro scan_search(action, name, value='', placeholder='Escanea o ingresa el código', label='Escanear código') -%}
+  <form class="admin-scanner-search" action="{{ action }}" method="get" role="search">
+    <label for="scanner-input-{{ name }}">{{ label }}</label>
+    <div>
+      <i data-lucide="scan-line" aria-hidden="true"></i>
+      <input id="scanner-input-{{ name }}" name="{{ name }}" value="{{ value }}" maxlength="120" autocomplete="off" placeholder="{{ placeholder }}" data-scanner-primary autofocus required>
+      <button class="admin-button" type="submit"><span>Identificar</span><i data-lucide="arrow-right" aria-hidden="true"></i></button>
+    </div>
+    <small>Compatible con lector USB tipo teclado. El escaneo se procesa al recibir Enter.</small>
+  </form>
+{%- endmacro %}
+
+{% macro status_badge(label, tone) -%}<span class="admin-status admin-status--{{ tone }}">{{ label }}</span>{%- endmacro %}

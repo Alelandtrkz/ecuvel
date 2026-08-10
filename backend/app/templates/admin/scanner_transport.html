@@ -1,0 +1,20 @@
+{% extends "admin/base.html" %}
+{% from "admin/_scanner_macros.html" import point_selector, scan_search, status_badge %}
+{% block admin_title %}Entrega a transportista · Escáner ECUVEL{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-scanner-page">
+  <header class="admin-page-heading admin-scanner-heading"><div><a class="admin-back-link" href="{{ url_for('admin.scanner') }}"><i data-lucide="arrow-left"></i>Escáner</a><h1>Entrega a transportista</h1><p>Verifica el paquete y transfiere su custodia al responsable asignado.</p></div>{{ point_selector(home, 'transport', code) }}</header>
+  <div class="admin-scanner-workspace">
+    <aside class="admin-card admin-scanner-reader">{{ scan_search(url_for('admin.scanner_transport'), 'code', code, 'Ej. PKG-000000451', 'Escanea el paquete que va a salir') }}<div class="admin-scanner-ready"><i data-lucide="circle-check"></i><span>Escáner preparado</span></div></aside>
+    <main class="admin-scanner-result">
+      {% if lookup_error %}<div class="admin-scanner-notice admin-scanner-notice--danger"><i data-lucide="circle-alert"></i><div><strong>Paquete no encontrado</strong><p>{{ lookup_error }}</p></div></div>{% endif %}
+      {% if result == 'departed' %}<div class="admin-scanner-notice admin-scanner-notice--success"><i data-lucide="truck"></i><div><strong>Salida confirmada</strong><p>La custodia fue transferida al responsable del traslado.</p></div></div>{% endif %}
+      {% if view %}
+        <section class="admin-card admin-scanner-identified"><header><div><p class="admin-eyebrow">Paquete identificado</p><h2>{{ view.package_code }}</h2><p>Pedido <a href="{{ url_for('admin.order_detail', order_number=view.order_number) }}">{{ view.order_number }}</a></p></div>{{ status_badge(view.status_label, view.status_tone) }}</header><dl><div><dt>Ubicación actual</dt><dd>{{ view.current_point }}</dd></div><div><dt>Destino</dt><dd>{{ view.destination_name }}</dd></div></dl></section>
+        <section class="admin-card admin-scanner-transfer"><div class="admin-scanner-transfer__icon"><i data-lucide="truck"></i></div><div><p class="admin-eyebrow">Traslado asignado</p><h2>{{ view.transfer_code or 'Sin traslado' }}</h2><dl><div><dt>Responsable</dt><dd>{{ view.responsible_name }}{% if view.responsible_code %} · {{ view.responsible_code }}{% endif %}</dd></div><div><dt>Vehículo</dt><dd>{{ view.vehicle_code or 'No registrado' }}</dd></div><div><dt>Ruta</dt><dd>{{ view.origin_name }} <i data-lucide="arrow-right"></i> {{ view.destination_name }}</dd></div>{% if view.eta_at %}<div><dt>ETA</dt><dd>{{ view.eta_at|ecuador_datetime }}</dd></div>{% endif %}</dl></div></section>
+        <form class="admin-card admin-scanner-confirm-card" method="post" action="{{ url_for('admin.scanner_transport_confirm') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="idempotency_key" value="{{ action_token }}"><input type="hidden" name="package_code" value="{{ view.package_code }}"><h2>Verificación final</h2><div class="admin-scanner-checks"><span><i data-lucide="circle-check"></i>Paquete correcto</span><span><i data-lucide="circle-check"></i>Destino correcto</span><span><i data-lucide="circle-check"></i>Responsable asignado</span></div><label>Notas operativas (opcional)<textarea name="notes" maxlength="500" rows="3"></textarea></label>{% if view.validation_message %}<p class="admin-form-error">{{ view.validation_message }}</p>{% endif %}<button class="admin-button admin-scanner-confirm" type="submit" {{ 'disabled' if not view.can_confirm else '' }}><i data-lucide="arrow-right"></i>Confirmar salida</button></form>
+      {% else %}<div class="admin-card admin-scanner-empty"><i data-lucide="truck"></i><h2>Escanea el paquete asignado</h2><p>Mostraremos el responsable, el vehículo y la ruta antes de transferir la custodia.</p></div>{% endif %}
+    </main>
+  </div>
+</div>
+{% endblock %}
