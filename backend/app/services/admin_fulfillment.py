@@ -47,7 +47,7 @@ EVENT_LABELS = {
     LogisticsTrackingEventType.RECEIVED_AT_DESTINATION: "Recibido en destino",
     LogisticsTrackingEventType.DEVIATION_DETECTED: "Desviación detectada",
     LogisticsTrackingEventType.CORRECTIVE_TRANSFER_CREATED: "Traslado correctivo creado",
-    LogisticsTrackingEventType.INCIDENT_REPORTED: "Incidencia reportada",
+    LogisticsTrackingEventType.INCIDENT_REPORTED: "Intento o incidencia reportada",
 }
 
 

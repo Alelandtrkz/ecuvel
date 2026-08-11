@@ -1,0 +1,22 @@
+{% extends "admin/base.html" %}
+{% from "admin/_inventory_macros.html" import point_selector, tabs, pagination %}
+{% block admin_title %}Inventario · ECUVEL Admin{% endblock %}
+{% block admin_content %}
+<div class="admin-page admin-inventory-page">
+  <header class="admin-page-heading admin-inventory-heading"><div><p class="admin-eyebrow">Operación física por punto</p><h1>Inventario</h1><p>Controla paquetes físicos y existencias comerciales sin mezclar sus responsabilidades.</p></div>{{ point_selector(page) }}</header>
+  {{ tabs(page.active_tab) }}
+  {% if not page.operating_point %}<div class="admin-scanner-notice admin-scanner-notice--warning"><i data-lucide="map-pin"></i><div><strong>Selecciona un punto operativo</strong><p>Los datos de inventario siempre se limitan al punto activo de tu sesión.</p></div></div>{% else %}
+  <section class="admin-inventory-metrics" aria-label="Resumen operativo">
+    <a class="admin-card" href="{{ url_for('admin.inventory', status='at-point') }}"><span>En el punto</span><strong>{{ page.metrics.at_point }}</strong><small>paquetes físicos</small><i data-lucide="archive"></i></a>
+    <a class="admin-card" href="{{ url_for('admin.inventory_expected') }}"><span>Esperados</span><strong>{{ page.metrics.expected }}</strong><small>hacia este punto</small><i data-lucide="truck"></i></a>
+    <a class="admin-card" href="{{ url_for('admin.inventory', status='ready') }}"><span>Listos para retirar</span><strong>{{ page.metrics.ready_for_pickup }}</strong><small>para compradores</small><i data-lucide="circle-check"></i></a>
+    <a class="admin-card is-danger" href="{{ url_for('admin.inventory', status='attention') }}"><span>Requieren atención</span><strong>{{ page.metrics.attention }}</strong><small>condiciones reales</small><i data-lucide="triangle-alert"></i></a>
+  </section>
+  <section class="admin-card admin-inventory-panel">
+    <form class="admin-inventory-toolbar" method="get"><label><i data-lucide="search"></i><input name="q" value="{{ page.query }}" maxlength="120" placeholder="Buscar paquete, pedido, cliente o producto…"></label><select name="status" aria-label="Estado"><option value="all">Todos</option>{% for value, label in [('at-point','En el punto'),('ready','Listos para retirar'),('expected','Esperados'),('deviated','Desviados'),('attention','Requieren atención')] %}<option value="{{ value }}" {{ 'selected' if page.active_filter == value }}>{{ label }}</option>{% endfor %}</select><button class="admin-button" type="submit">Buscar</button></form>
+    <div class="admin-table-wrap"><table class="admin-inventory-table"><thead><tr><th>Paquete</th><th>Contenido</th><th>Pedido</th><th>Estado</th><th>Ubicación</th><th>Tiempo</th><th>Acción</th></tr></thead><tbody>{% for row in page.rows %}<tr class="{{ 'is-attention' if row.attention_reason }}"><td><strong>{{ row.package_code }}</strong><small>{{ 'Retiro cliente' if row.kind == 'CUSTOMER' else ('Esperado' if row.kind == 'EXPECTED' else 'Ingreso tienda') }}</small></td><td>{{ row.content }}</td><td>{{ row.order_number }}</td><td><span class="admin-status admin-status--{{ row.status_tone }}">{{ row.status_label }}</span>{% if row.attention_reason %}<small>{{ row.attention_reason }}</small>{% endif %}</td><td>{{ row.location_label }}</td><td>{{ row.time_label }}</td><td>{% if row.kind == 'CUSTOMER' %}<a class="admin-table-action" href="{{ url_for('admin.order_detail', order_number=row.action_value) }}">Ver pedido</a>{% else %}<a class="admin-table-action" href="{{ url_for('admin.fulfillment_detail', package_code=row.action_value) }}">Ver paquete</a>{% endif %}</td></tr>{% else %}<tr><td colspan="7" class="admin-empty-cell">No hay paquetes que coincidan con estos filtros.</td></tr>{% endfor %}</tbody></table></div>
+    <footer class="admin-inventory-panel__footer"><span>Mostrando {{ page.rows|length }} de {{ page.total_items }} paquetes</span>{{ pagination(page, 'admin.inventory', {'q': page.query, 'status': page.active_filter}) }}</footer>
+  </section>
+  {% endif %}
+</div>
+{% endblock %}

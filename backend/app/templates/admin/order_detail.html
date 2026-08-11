@@ -13,6 +13,7 @@
       {{ badge(detail.status) }}
     </div>
     <div class="admin-detail-actions">
+      <a class="admin-button admin-button--secondary" href="{{ url_for('admin.inventory', q=detail.order_number) }}"><i data-lucide="warehouse" aria-hidden="true"></i>Ver paquetes en inventario</a>
       {% if handover.ready %}<a class="admin-button" href="{{ url_for('admin.scanner_handover', buyer=detail.customer_code, order_number=detail.order_number) }}"><i data-lucide="user-check" aria-hidden="true"></i>Entregar con escáner</a>{% endif %}
       {% if detail.customer_email %}<a class="admin-button admin-button--secondary" href="mailto:{{ detail.customer_email }}"><i data-lucide="mail" aria-hidden="true"></i>Contactar cliente</a>{% endif %}
       <button class="admin-button" type="button" disabled title="Impresión de etiquetas próximamente"><i data-lucide="printer" aria-hidden="true"></i>Imprimir etiquetas · Próx.</button>

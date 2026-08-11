@@ -178,12 +178,23 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 - No hay pasarela de tarjeta real; tarjeta permanece deshabilitada.
 - Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes de pago está disponible para ECUVEL staff; reseñas, onboarding y productos continúan por CLI donde no haya una interfaz administrativa explícita.
 - No hay publicación final de productos desde borradores hacia catálogo público.
-- Pedidos ya tiene listado, detalle, revisión de pago y enlaces bidireccionales con Fulfillment y Scanner. Fulfillment Admin ya tiene lista y detalle operativos. Escáner ya cubre las cinco operaciones físicas y la consulta rápida; inventario, marketplace, finanzas, incidencias y auditoría completa todavía no tienen pantallas operativas propias.
+- Pedidos ya tiene listado, detalle, revisión de pago y enlaces bidireccionales con Fulfillment, Scanner e Inventario. Fulfillment Admin ya tiene lista y detalle operativos. Escáner cubre las cinco operaciones físicas y la consulta rápida; Inventario cubre paquetes, esperados, existencias, movimientos y conteo físico por punto. Marketplace, finanzas, gestión completa de incidencias y auditoría completa todavía no tienen pantallas operativas propias.
 - No existe todavía un QR firmado, token de retiro de un solo uso ni OTP para entrega. El código público `U-...` solo identifica la cuenta y la entrega depende de verificación física explícita del operador.
 - No hay gestión completa de inventario para vendedores desde Partners.
 - No hay favoritos anónimos persistentes, listas múltiples, notificaciones, chat, social login, 2FA, passkeys ni panel de vendedor completo.
 - No hay SMTP/SMS productivo integrado; los backends de desarrollo/pruebas son controlados por configuración.
 - Las imágenes reales de catálogo y logos persistentes aún son limitados; se usan placeholders cuando corresponde.
+
+## Inventario operativo por punto ECUVEL
+
+- Scanner e Inventario comparten el punto operativo mediante la clave de sesión firmada `admin_operating_warehouse_id`. Toda lectura y mutación vuelve a validar que el almacén y la ubicación existan y estén activos.
+- El inventario físico de paquetes usa dos fuentes canónicas: `SellerInboundPackage + LogisticsPackageState` para paquetes de tiendas y `OrderPackage` para paquetes de salida al comprador.
+- El stock comercial continúa separado en `InventoryBalance`. La disponibilidad se calcula como existencia menos reservado y bloqueado; nunca debe inferirse de la cantidad de paquetes físicos.
+- `/admin/inventory` ofrece Paquetes, Existencias y Movimientos; `/admin/inventory/expected` separa paquetes esperados que todavía no forman parte del inventario físico del punto.
+- Los conteos físicos usan `PhysicalInventoryCount`, `PhysicalInventoryCountExpectedPackage` y `PhysicalInventoryCountScan`. El baseline queda congelado al iniciar, solo puede existir un conteo abierto por almacén, los escaneos duplicados son idempotentes y el conteo finalizado es inmutable desde los servicios web.
+- Rechazar una recepción fuera de ruta solo registra `INCIDENT_REPORTED`; no cambia ubicación, custodia, estado ni traslado. Aceptarla usa la recepción normal y marca la desviación de forma explícita.
+- Los movimientos de inventario son una proyección de eventos existentes de logística, movimientos comerciales, entregas y hallazgos de conteo. No existe una bitácora genérica paralela ni un ajuste libre desde la interfaz.
+- El acceso operativo futuro debe asignarse a cuentas personales con roles y puntos autorizados. No se creará una contraseña compartida por punto operativo.
 
 ## Cómo mantener este archivo
 

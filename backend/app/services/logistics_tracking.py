@@ -602,6 +602,66 @@ def receive_transfer_at_destination(
     return LogisticsMutationResult(state, transfer, event_record or arrival, False)
 
 
+def report_logistics_incident(
+    session: Session,
+    *,
+    package_code: str,
+    warehouse_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    reason: str,
+    now: datetime | None = None,
+    idempotency_key: str | None = None,
+) -> LogisticsMutationResult:
+    """Record a rejected/incorrect delivery attempt without transferring custody."""
+
+    previous = _event_for_key(session, idempotency_key)
+    if previous is not None:
+        return LogisticsMutationResult(
+            previous.package_state, previous.transfer, previous, True
+        )
+    actor = _require_staff(session, actor_user_id)
+    warehouse = _require_warehouse(session, warehouse_id, lock=True)
+    state = _locked_state(session, package_code)
+    transfer = _active_transfer(session, state.id, lock=True)
+    if (
+        transfer is None
+        or transfer.status != LogisticsTransferStatus.IN_TRANSIT
+        or state.status != LogisticsPackageStatus.IN_TRANSIT
+        or state.custodian_user_id != transfer.assigned_user_id
+    ):
+        raise LogisticsConflictError(
+            "El paquete no tiene un traslado en tránsito que pueda reportarse."
+        )
+    if transfer.destination_warehouse_id == warehouse.id:
+        raise LogisticsValidationError(
+            "Este punto es el destino esperado; confirma la recepción normal."
+        )
+    normalized_reason = _normalized_notes(reason)
+    if not normalized_reason:
+        raise LogisticsValidationError(
+            "Describe por qué se rechazó la entrega en este punto."
+        )
+    occurred_at = _now(now)
+    event_record = _append_event(
+        session,
+        state=state,
+        transfer=transfer,
+        event_type=LogisticsTrackingEventType.INCIDENT_REPORTED,
+        occurred_at=occurred_at,
+        actor_user_id=actor.id,
+        warehouse_id=warehouse.id,
+        previous_custodian_user_id=state.custodian_user_id,
+        new_custodian_user_id=state.custodian_user_id,
+        idempotency_key=idempotency_key,
+        notes=(
+            f"Entrega rechazada en {warehouse.name}; el paquete continúa "
+            f"bajo custodia del transportista. Motivo: {normalized_reason}"
+        ),
+    )
+    session.flush()
+    return LogisticsMutationResult(state, transfer, event_record, False)
+
+
 # Stable domain entry points for the future Scanner module.
 receive_package_at_point = register_received_inbound_package
 confirm_package_departure = confirm_package_pickup

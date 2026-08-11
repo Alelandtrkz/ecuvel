@@ -9,6 +9,8 @@ from werkzeug.datastructures import MultiDict
 
 from app.models import (
     LogisticsPackageState,
+    LogisticsTrackingEvent,
+    LogisticsTransfer,
     OrderItem,
     OrderPackage,
     SellerInboundPackage,
@@ -21,6 +23,8 @@ from app.models import (
 from app.models.enums import (
     LocationType,
     LogisticsPackageStatus,
+    LogisticsTrackingEventType,
+    LogisticsTransferStatus,
     PackageStatus,
     SellerInboundPackageStatus,
 )
@@ -343,6 +347,89 @@ def test_wrong_transfer_destination_creates_real_deviation(session, client):
     assert state.is_deviated
     assert state.current_warehouse_id == wrong_point.id
     assert state.expected_destination_warehouse_id == destination.id
+
+
+def test_wrong_transfer_can_be_rejected_without_location_or_custody_change(session, client):
+    base, staff, package, item, _order_number = _ready_inbound(session, quantity=1)
+    from app.services.seller_inbound_packages import receive_seller_inbound_package
+
+    receive_seller_inbound_package(
+        session,
+        package_code=package.package_code,
+        received_location_id=base.receiving_location_id,
+        actor_user_id=staff.id,
+        verified_product_codes=(item.seller_sku_snapshot,),
+        expected_warehouse_id=base.warehouse_id,
+    )
+    destination, _destination_location = _point(session, "Destino esperado")
+    wrong_point, _wrong_location = _point(session, "Punto que rechaza")
+    assign_package_transfer(
+        session,
+        package_code=package.package_code,
+        destination_warehouse_id=destination.id,
+        responsible_user_id=staff.id,
+        actor_user_id=staff.id,
+        idempotency_key="assign-rejected-arrival",
+    )
+    confirm_package_pickup(
+        session,
+        package_code=package.package_code,
+        actor_user_id=staff.id,
+        expected_origin_warehouse_id=base.warehouse_id,
+        idempotency_key="pickup-rejected-arrival",
+    )
+    session.commit()
+    state = session.scalar(
+        select(LogisticsPackageState).where(
+            LogisticsPackageState.seller_inbound_package_id == package.id
+        )
+    )
+    transfer = session.scalar(
+        select(LogisticsTransfer).where(
+            LogisticsTransfer.package_state_id == state.id,
+            LogisticsTransfer.status == LogisticsTransferStatus.IN_TRANSIT,
+        )
+    )
+    before = (
+        state.current_warehouse_id,
+        state.current_location_id,
+        state.custodian_warehouse_id,
+        state.custodian_user_id,
+        state.status,
+        transfer.status,
+    )
+    _login(client, staff)
+    _set_point(client, wrong_point.id)
+    response = client.post(
+        "/admin/scanner/arrival",
+        data={
+            "idempotency_key": "reject-wrong-arrival",
+            "operation": "reject",
+            "package_code": package.package_code,
+            "notes": "El punto no corresponde al destino indicado.",
+        },
+    )
+    assert response.status_code == 302
+    session.expire_all()
+    stored_state = session.get(LogisticsPackageState, state.id)
+    stored_transfer = session.get(LogisticsTransfer, transfer.id)
+    assert (
+        stored_state.current_warehouse_id,
+        stored_state.current_location_id,
+        stored_state.custodian_warehouse_id,
+        stored_state.custodian_user_id,
+        stored_state.status,
+        stored_transfer.status,
+    ) == before
+    incident = session.scalar(
+        select(LogisticsTrackingEvent).where(
+            LogisticsTrackingEvent.package_state_id == state.id,
+            LogisticsTrackingEvent.event_type
+            == LogisticsTrackingEventType.INCIDENT_REPORTED,
+        )
+    )
+    assert incident is not None
+    assert incident.warehouse_id == wrong_point.id
 
 
 def test_customer_handover_requires_identity_and_all_packages(session, client):

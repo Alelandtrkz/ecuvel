@@ -44,6 +44,26 @@ from app.services.admin_scanner import (
     require_active_operating_point,
     require_receiving_location,
 )
+from app.services.admin_operating_context import (
+    ADMIN_OPERATING_WAREHOUSE_SESSION_KEY,
+    AdminOperatingContextError,
+    require_active_operating_point as require_shared_operating_point,
+)
+from app.services.admin_inventory import (
+    get_admin_count_detail_page,
+    get_admin_count_list_page,
+    get_admin_expected_page,
+    get_admin_inventory_page,
+    get_admin_movements_page,
+    get_admin_stock_page,
+)
+from app.services.inventory_counts import (
+    PhysicalInventoryCountError,
+    finalize_physical_inventory_count,
+    normalize_count_code,
+    scan_physical_inventory_package,
+    start_physical_inventory_count,
+)
 from app.services.admin_operations import (
     get_admin_operations_page,
     search_admin_records,
@@ -65,6 +85,7 @@ from app.services.logistics_tracking import (
     confirm_package_pickup,
     reassign_package_transfer,
     receive_transfer_at_destination,
+    report_logistics_incident,
 )
 from app.services.fulfillment import (
     FulfillmentServiceError,
@@ -83,7 +104,7 @@ from app.services.private_storage import PrivateStorageError, verify_private_fil
 
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
-_SCANNER_WAREHOUSE_SESSION_KEY = "admin_operating_warehouse_id"
+_SCANNER_WAREHOUSE_SESSION_KEY = ADMIN_OPERATING_WAREHOUSE_SESSION_KEY
 
 
 @admin.app_template_filter("ecuador_datetime")
@@ -202,6 +223,11 @@ def scanner_context():
         "arrival": "admin.scanner_arrival",
         "handover": "admin.scanner_handover",
         "package": "admin.scanner_package",
+        "inventory": "admin.inventory",
+        "inventory-expected": "admin.inventory_expected",
+        "inventory-stock": "admin.inventory_stock",
+        "inventory-movements": "admin.inventory_movements",
+        "inventory-counts": "admin.inventory_counts",
     }.get(request.form.get("return_mode"), "admin.scanner")
     return _scanner_redirect(
         endpoint,
@@ -368,23 +394,37 @@ def scanner_arrival_confirm():
             browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
             lock=True,
         )
-        location = require_receiving_location(
-            db.session,
-            warehouse_id=warehouse.id,
-            location_id=request.form.get("received_location_id"),
-            lock=True,
-        )
         token = _scanner_action_token()
-        result = receive_transfer_at_destination(
-            db.session,
-            package_code=code,
-            warehouse_id=warehouse.id,
-            location_id=location.id,
-            actor_user_id=current_user.id,
-            notes=request.form.get("notes"),
-            idempotency_key=f"scanner:arrival:{token}",
-        )
-        was_deviated = result.package_state.is_deviated
+        operation = request.form.get("operation", "accept")
+        if operation == "reject":
+            report_logistics_incident(
+                db.session,
+                package_code=code,
+                warehouse_id=warehouse.id,
+                actor_user_id=current_user.id,
+                reason=request.form.get("notes") or "Destino operativo incorrecto",
+                idempotency_key=f"scanner:arrival-rejected:{token}",
+            )
+            was_deviated = False
+            was_rejected = True
+        else:
+            location = require_receiving_location(
+                db.session,
+                warehouse_id=warehouse.id,
+                location_id=request.form.get("received_location_id"),
+                lock=True,
+            )
+            result = receive_transfer_at_destination(
+                db.session,
+                package_code=code,
+                warehouse_id=warehouse.id,
+                location_id=location.id,
+                actor_user_id=current_user.id,
+                notes=request.form.get("notes"),
+                idempotency_key=f"scanner:arrival:{token}",
+            )
+            was_deviated = result.package_state.is_deviated
+            was_rejected = False
         db.session.commit()
     except (AdminScannerError, LogisticsTrackingError) as exc:
         return _scanner_mutation_error("admin.scanner_arrival", exc, code=code)
@@ -393,16 +433,22 @@ def scanner_arrival_confirm():
         current_app.logger.exception("Falló llegada Scanner package=%s", code)
         flash("No pudimos registrar la llegada del paquete.", "error")
         return _scanner_redirect("admin.scanner_arrival", code=code)
-    flash(
-        "Paquete recibido y marcado como desviado."
-        if was_deviated
-        else "Paquete recibido en el destino correcto.",
-        "warning" if was_deviated else "success",
-    )
+    if was_rejected:
+        flash(
+            "Intento registrado. La custodia continúa con el transportista.",
+            "warning",
+        )
+    else:
+        flash(
+            "Paquete recibido y marcado como desviado."
+            if was_deviated
+            else "Paquete recibido en el destino correcto.",
+            "warning" if was_deviated else "success",
+        )
     return _scanner_redirect(
         "admin.scanner_arrival",
         code=code,
-        result="deviated" if was_deviated else "arrived",
+        result=("rejected" if was_rejected else ("deviated" if was_deviated else "arrived")),
     )
 
 
@@ -508,6 +554,214 @@ def scanner_package():
         lookup_error=("No encontramos un paquete con ese código." if code and view is None else None),
         **_shell_context("scanner"),
     )
+
+
+def _inventory_warehouse_id():
+    return browser_session.get(ADMIN_OPERATING_WAREHOUSE_SESSION_KEY)
+
+
+@admin.post("/inventory/context")
+@limiter.limit("30 per hour")
+@ecuvel_staff_required
+def inventory_context():
+    try:
+        warehouse = require_shared_operating_point(
+            db.session, request.form.get("warehouse_id")
+        )
+    except AdminOperatingContextError as exc:
+        flash(str(exc), "error")
+    else:
+        browser_session[ADMIN_OPERATING_WAREHOUSE_SESSION_KEY] = str(warehouse.id)
+        browser_session.modified = True
+        flash(f"Punto operativo actualizado: {warehouse.name}.", "success")
+    destination = {
+        "expected": "admin.inventory_expected",
+        "stock": "admin.inventory_stock",
+        "movements": "admin.inventory_movements",
+        "counts": "admin.inventory_counts",
+    }.get(request.form.get("return_view"), "admin.inventory")
+    return redirect(url_for(destination))
+
+
+@admin.get("/inventory")
+@ecuvel_staff_required
+def inventory():
+    page = get_admin_inventory_page(
+        db.session,
+        warehouse_id=_inventory_warehouse_id(),
+        query=request.args.get("q"),
+        active_filter=request.args.get("status"),
+        page=request.args.get("page"),
+    )
+    return render_template(
+        "admin/inventory.html", page=page, **_shell_context("inventory")
+    )
+
+
+@admin.get("/inventory/expected")
+@ecuvel_staff_required
+def inventory_expected():
+    page = get_admin_expected_page(
+        db.session,
+        warehouse_id=_inventory_warehouse_id(),
+        page=request.args.get("page"),
+    )
+    return render_template(
+        "admin/inventory_expected.html",
+        page=page,
+        **_shell_context("inventory"),
+    )
+
+
+@admin.get("/inventory/stock")
+@ecuvel_staff_required
+def inventory_stock():
+    page = get_admin_stock_page(
+        db.session,
+        warehouse_id=_inventory_warehouse_id(),
+        query=request.args.get("q"),
+        page=request.args.get("page"),
+    )
+    return render_template(
+        "admin/inventory_stock.html", page=page, **_shell_context("inventory")
+    )
+
+
+@admin.get("/inventory/movements")
+@ecuvel_staff_required
+def inventory_movements():
+    page = get_admin_movements_page(
+        db.session,
+        warehouse_id=_inventory_warehouse_id(),
+        active_filter=request.args.get("type"),
+        page=request.args.get("page"),
+    )
+    return render_template(
+        "admin/inventory_movements.html",
+        page=page,
+        **_shell_context("inventory"),
+    )
+
+
+@admin.get("/inventory/counts")
+@ecuvel_staff_required
+def inventory_counts():
+    page = get_admin_count_list_page(
+        db.session, warehouse_id=_inventory_warehouse_id()
+    )
+    return render_template(
+        "admin/inventory_counts.html", page=page, **_shell_context("inventory")
+    )
+
+
+@admin.post("/inventory/counts/start")
+@limiter.limit("20 per hour")
+@ecuvel_staff_required
+def inventory_count_start():
+    try:
+        warehouse = require_shared_operating_point(
+            db.session, _inventory_warehouse_id(), lock=True
+        )
+        count = start_physical_inventory_count(
+            db.session,
+            warehouse_id=warehouse.id,
+            location_id=request.form.get("location_id"),
+            actor_user_id=current_user.id,
+            notes=request.form.get("notes"),
+        )
+        db.session.commit()
+    except (AdminOperatingContextError, PhysicalInventoryCountError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("admin.inventory_counts"))
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló el inicio del conteo físico")
+        flash("No pudimos iniciar el conteo físico.", "error")
+        return redirect(url_for("admin.inventory_counts"))
+    flash("Conteo físico iniciado con su línea base congelada.", "success")
+    return redirect(url_for("admin.inventory_count_detail", count_id=count.id))
+
+
+@admin.get("/inventory/counts/<uuid:count_id>")
+@ecuvel_staff_required
+def inventory_count_detail(count_id: uuid.UUID):
+    page = get_admin_count_detail_page(
+        db.session,
+        count_id=count_id,
+        warehouse_id=_inventory_warehouse_id(),
+    )
+    if page is None:
+        abort(404)
+    return render_template(
+        "admin/inventory_count_detail.html",
+        page=page,
+        **_shell_context("inventory"),
+    )
+
+
+@admin.post("/inventory/counts/<uuid:count_id>/scan")
+@limiter.limit("600 per hour")
+@ecuvel_staff_required
+def inventory_count_scan(count_id: uuid.UUID):
+    try:
+        warehouse = require_shared_operating_point(
+            db.session, _inventory_warehouse_id(), lock=True
+        )
+        result = scan_physical_inventory_package(
+            db.session,
+            count_id=count_id,
+            warehouse_id=warehouse.id,
+            code=normalize_count_code(request.form.get("package_code")),
+            actor_user_id=current_user.id,
+        )
+        db.session.commit()
+    except (AdminOperatingContextError, PhysicalInventoryCountError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló escaneo de conteo count=%s", count_id)
+        flash("No pudimos registrar el escaneo.", "error")
+    else:
+        if result.duplicate:
+            flash("Ese paquete ya estaba verificado; el total no cambió.", "warning")
+        elif result.scan.classification == "UNEXPECTED":
+            flash("Paquete no esperado registrado como hallazgo, sin moverlo.", "warning")
+        else:
+            flash("Paquete verificado.", "success")
+    return redirect(url_for("admin.inventory_count_detail", count_id=count_id))
+
+
+@admin.post("/inventory/counts/<uuid:count_id>/finalize")
+@limiter.limit("20 per hour")
+@ecuvel_staff_required
+def inventory_count_finalize(count_id: uuid.UUID):
+    try:
+        if request.form.get("confirmed") != "1":
+            raise PhysicalInventoryCountError(
+                "Confirma que deseas cerrar el conteo de forma irreversible."
+            )
+        warehouse = require_shared_operating_point(
+            db.session, _inventory_warehouse_id(), lock=True
+        )
+        finalize_physical_inventory_count(
+            db.session,
+            count_id=count_id,
+            warehouse_id=warehouse.id,
+            actor_user_id=current_user.id,
+        )
+        db.session.commit()
+    except (AdminOperatingContextError, PhysicalInventoryCountError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló cierre de conteo count=%s", count_id)
+        flash("No pudimos finalizar el conteo.", "error")
+    else:
+        flash("Conteo finalizado. Las diferencias quedaron registradas.", "success")
+    return redirect(url_for("admin.inventory_count_detail", count_id=count_id))
 
 
 @admin.get("/orders")

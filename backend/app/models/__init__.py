@@ -21,6 +21,11 @@ from app.models.seller_inbound import (
     SellerInboundPackageItem,
 )
 from app.models.favorite import Favorite
+from app.models.physical_inventory import (
+    PhysicalInventoryCount,
+    PhysicalInventoryCountExpectedPackage,
+    PhysicalInventoryCountScan,
+)
 from app.models.order import (
     Order,
     OrderItem,
@@ -85,4 +90,7 @@ __all__ = [
     "SellerInboundPackage",
     "SellerInboundPackageItem",
     "Favorite",
+    "PhysicalInventoryCount",
+    "PhysicalInventoryCountExpectedPackage",
+    "PhysicalInventoryCountScan",
 ]

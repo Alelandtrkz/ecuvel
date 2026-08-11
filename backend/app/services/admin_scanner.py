@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import or_, select
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
     LogisticsPackageState,
@@ -31,6 +31,14 @@ from app.models.enums import (
     SellerInboundPackageStatus,
 )
 from app.services.fulfillment import order_ready_for_pickup_predicate
+from app.services.admin_operating_context import (
+    AdminOperatingContextError,
+    AdminOperatingOption as AdminScannerOption,
+    AdminOperatingPoint,
+    get_operating_point,
+    require_active_operating_point as shared_require_active_operating_point,
+    warehouse_options,
+)
 
 
 _PUBLIC_USER_RE = re.compile(r"^U-(\d{1,8})$", re.IGNORECASE)
@@ -46,25 +54,6 @@ class AdminScannerError(Exception):
 
 class AdminScannerValidationError(AdminScannerError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class AdminScannerOption:
-    value: str
-    label: str
-
-
-@dataclass(frozen=True, slots=True)
-class AdminOperatingPoint:
-    id: uuid.UUID
-    code: str
-    name: str
-    city: str
-    receiving_locations: tuple[AdminScannerOption, ...]
-
-    @property
-    def label(self) -> str:
-        return f"{self.name} · {self.city}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,72 +170,15 @@ def normalize_scanned_code(value: str | None) -> str:
     return " ".join((value or "").strip().upper().split())[:120]
 
 
-def _warehouse_options(session: Session) -> tuple[AdminScannerOption, ...]:
-    return tuple(
-        AdminScannerOption(str(warehouse.id), f"{warehouse.name} · {warehouse.city}")
-        for warehouse in session.scalars(
-            select(Warehouse)
-            .where(Warehouse.is_active.is_(True))
-            .order_by(Warehouse.name, Warehouse.code)
-        )
-    )
-
-
-def get_operating_point(
-    session: Session, warehouse_id: str | uuid.UUID | None
-) -> AdminOperatingPoint | None:
-    if not warehouse_id:
-        return None
-    try:
-        parsed_id = uuid.UUID(str(warehouse_id))
-    except (TypeError, ValueError):
-        return None
-    warehouse = session.scalar(
-        select(Warehouse)
-        .options(selectinload(Warehouse.locations))
-        .where(Warehouse.id == parsed_id, Warehouse.is_active.is_(True))
-    )
-    if warehouse is None:
-        return None
-    receiving = tuple(
-        AdminScannerOption(str(location.id), f"{location.name} · {location.code}")
-        for location in sorted(
-            (
-                location
-                for location in warehouse.locations
-                if location.is_active
-                and location.location_type == LocationType.RECEIVING
-            ),
-            key=lambda value: (value.name, value.code),
-        )
-    )
-    return AdminOperatingPoint(
-        warehouse.id,
-        warehouse.code,
-        warehouse.name,
-        warehouse.city,
-        receiving,
-    )
-
-
 def require_active_operating_point(
     session: Session, warehouse_id: str | uuid.UUID | None, *, lock: bool = False
 ) -> Warehouse:
     try:
-        parsed_id = uuid.UUID(str(warehouse_id))
-    except (TypeError, ValueError) as exc:
-        raise AdminScannerValidationError(
-            "Selecciona un punto operativo válido."
-        ) from exc
-    statement = select(Warehouse).where(Warehouse.id == parsed_id)
-    if lock:
-        statement = statement.with_for_update()
-    warehouse = session.scalar(statement)
-    if warehouse is None or not warehouse.is_active:
-        raise AdminScannerValidationError(
-            "El punto operativo seleccionado no está disponible."
+        return shared_require_active_operating_point(
+            session, warehouse_id, lock=lock
         )
-    return warehouse
+    except AdminOperatingContextError as exc:
+        raise AdminScannerValidationError(str(exc)) from exc
 
 
 def require_receiving_location(
@@ -283,7 +215,7 @@ def get_admin_scanner_home(
 ) -> AdminScannerHome:
     return AdminScannerHome(
         get_operating_point(session, warehouse_id),
-        _warehouse_options(session),
+        warehouse_options(session),
     )
 
 
