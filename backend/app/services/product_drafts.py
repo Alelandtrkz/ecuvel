@@ -161,6 +161,8 @@ def get_product_draft_for_user(
             selectinload(ProductDraft.store),
             selectinload(ProductDraft.category),
             selectinload(ProductDraft.subcategory),
+            selectinload(ProductDraft.moderation_events),
+            selectinload(ProductDraft.publication),
         )
         .where(ProductDraft.id == draft_id)
     )

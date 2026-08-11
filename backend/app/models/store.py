@@ -105,6 +105,17 @@ class Store(
         back_populates="store",
     )
 
+    inventory_warehouses: Mapped[list["Warehouse"]] = relationship(
+        "Warehouse",
+        back_populates="seller_store",
+    )
+
+    inventory_locations: Mapped[list["StoreInventoryLocation"]] = relationship(
+        "StoreInventoryLocation",
+        back_populates="store",
+        cascade="all, delete-orphan",
+    )
+
     payouts: Mapped[list["SellerPayout"]] = relationship(
         "SellerPayout",
         back_populates="store",

@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% from "admin/_product_moderation.html" import moderation_panel %}
+{% block admin_title %}Moderación de productos | ECUVEL Admin{% endblock %}
+{% block styles %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/admin-products.css') }}">{% endblock %}
+{% block admin_content %}
+<main class="admin-page admin-products-page">
+  <header class="admin-page-heading"><div><p class="admin-eyebrow">Marketplace</p><h1>Moderación de productos</h1><p>Revisa publicaciones enviadas por las tiendas y publica únicamente contenido conforme.</p></div><span class="admin-products-pending"><i data-lucide="clipboard-clock"></i>{{ page.counts.review }} pendientes</span></header>
+  <nav class="admin-product-tabs" aria-label="Estados de moderación">
+    {% for key, label in [('review','En revisión'),('approved','Aprobados'),('changes','Correcciones solicitadas'),('rejected','Rechazados')] %}
+      <a class="{{ 'is-active' if page.status_key == key }}" href="{{ url_for('admin.products', status=key, q=page.query) }}" {% if page.status_key == key %}aria-current="page"{% endif %}>{{ label }} <span>{{ page.counts[key] }}</span></a>
+    {% endfor %}
+  </nav>
+  <form class="admin-products-search" method="get"><input type="hidden" name="status" value="{{ page.status_key }}"><i data-lucide="search"></i><input name="q" value="{{ page.query }}" maxlength="160" placeholder="Buscar por producto, SKU o tienda..."><button class="admin-button" type="submit">Buscar</button>{% if page.query %}<a href="{{ url_for('admin.products', status=page.status_key) }}">Limpiar</a>{% endif %}</form>
+
+  {% if page.rows %}
+  <div class="admin-products-layout">
+    <section class="admin-card admin-products-list" aria-label="Publicaciones">
+      <div class="admin-products-table-wrap"><table><thead><tr><th>Producto</th><th>Tienda</th><th>Precio</th><th>Enviado</th></tr></thead><tbody>
+      {% for row in page.rows %}<tr class="{{ 'is-selected' if page.selected and page.selected.draft.id == row.draft.id }}"><td><a href="{{ url_for('admin.products', status=page.status_key, q=page.query, page=page.page, draft=row.draft.id) }}"><span class="admin-product-thumb">{% if row.cover %}<img src="{{ url_for('admin.product_file', draft_id=row.draft.id, file_id=row.cover.id) }}" alt="">{% else %}<i data-lucide="image"></i>{% endif %}</span><span><strong>{{ row.draft.title or 'Producto sin título' }}</strong><small>{{ row.draft.seller_sku or 'SKU pendiente' }} · {{ 'Familia' if row.active_variants > 1 else 'Simple' }}</small></span></a></td><td>{{ row.draft.store.name }}</td><td><strong>{{ row.price_label }}</strong></td><td>{{ row.draft.submitted_at|ecuador_datetime if row.draft.submitted_at else 'Sin fecha' }}</td></tr>{% endfor %}
+      </tbody></table></div>
+      <footer><span>Mostrando {{ page.rows|length }} de {{ page.total }}</span><nav aria-label="Paginación">{% if page.page > 1 %}<a href="{{ url_for('admin.products', status=page.status_key, q=page.query, page=page.page-1) }}">Anterior</a>{% endif %}<span>Página {{ page.page }} de {{ page.pages }}</span>{% if page.page < page.pages %}<a href="{{ url_for('admin.products', status=page.status_key, q=page.query, page=page.page+1) }}">Siguiente</a>{% endif %}</nav></footer>
+    </section>
+    {% if page.selected %}<aside class="admin-card admin-product-side">
+      <a class="admin-product-side__open" href="{{ url_for('admin.product_preview', draft_id=page.selected.draft.id) }}" aria-label="Abrir vista previa completa"><i data-lucide="external-link"></i></a>
+      <div class="admin-product-side__hero">{% if page.selected.cover %}<img src="{{ url_for('admin.product_file', draft_id=page.selected.draft.id, file_id=page.selected.cover.id) }}" alt="{{ page.selected.draft.title }}">{% else %}<i data-lucide="image-off"></i>{% endif %}</div>
+      <h2>{{ page.selected.draft.title }}</h2><strong class="admin-product-side__price">{{ page.selected.price_label }}</strong><p><i data-lucide="store"></i>{{ page.selected.draft.store.name }} · {{ page.selected.draft.seller_sku }}</p>
+      <dl><div><dt>Categoría</dt><dd>{{ page.selected.draft.category.name }} / {{ page.selected.draft.subcategory.name }}</dd></div><div><dt>Marca / modelo</dt><dd>{{ page.selected.draft.brand or 'Pendiente' }} / {{ page.selected.draft.model_number or 'Pendiente' }}</dd></div><div><dt>Modo</dt><dd>{{ 'Familia con ' ~ page.selected.active_variants ~ ' variantes activas' if page.selected_preview.dashboard.family_enabled else 'Producto simple' }}</dd></div><div><dt>Variantes inactivas</dt><dd>{{ page.selected_preview.dashboard.inactive_variants }}</dd></div><div><dt>Stock total</dt><dd>{{ page.selected_preview.dashboard.stock_total }}</dd></div><div><dt>Imágenes</dt><dd>{{ page.selected_preview.dashboard.image_count }}</dd></div><div><dt>Galerías incompletas</dt><dd>{{ page.selected_preview.dashboard.incomplete_galleries|length }}</dd></div><div><dt>Enviado</dt><dd>{{ page.selected.draft.submitted_at|ecuador_datetime if page.selected.draft.submitted_at else 'Sin fecha' }}</dd></div><div><dt>Estado</dt><dd>{{ page.selected.status_label }}</dd></div></dl>
+      {% if page.selected.draft.moderation_events %}<section class="admin-product-history" aria-labelledby="moderation-history-title"><h2 id="moderation-history-title">Historial de moderación</h2><ol>{% for event in page.selected.draft.moderation_events %}<li><strong>{{ {'APPROVED':'Aprobado','CHANGES_REQUESTED':'Correcciones solicitadas','REJECTED':'Rechazado'}.get(event.decision, event.decision) }}</strong><span>{{ event.actor.full_name }} · {{ event.created_at|ecuador_datetime }}</span>{% if event.reason_code %}<small>{{ page.reasons.get(event.reason_code, event.reason_code) }}{% if event.note %} — {{ event.note }}{% endif %}</small>{% endif %}</li>{% endfor %}</ol></section>{% endif %}
+      {{ moderation_panel(page.selected.draft, page.selected_view, page.selected_preview, 'list') }}
+    </aside>{% endif %}
+  </div>
+  {% else %}<section class="admin-card admin-products-empty"><i data-lucide="package-search"></i><h2>No hay publicaciones en este estado</h2><p>{% if page.query %}Prueba otra búsqueda o limpia el filtro.{% else %}Las nuevas publicaciones aparecerán aquí cuando las tiendas las envíen.{% endif %}</p></section>{% endif %}
+</main>
+{% endblock %}
+{% block scripts %}{{ super() }}<script src="{{ url_for('static', filename='js/admin-products.js') }}" defer></script>{% endblock %}

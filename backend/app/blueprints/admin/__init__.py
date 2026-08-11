@@ -20,6 +20,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db, limiter
 from app.services.admin_access import ecuvel_staff_required
@@ -74,6 +75,10 @@ from app.services.admin_orders import (
     get_admin_orders_page,
     get_admin_payment_review,
 )
+from app.services.admin_products import (
+    get_admin_product_draft,
+    get_admin_products_page,
+)
 from app.services.payment_proofs import (
     PaymentProofServiceError,
     review_payment_proof,
@@ -101,6 +106,15 @@ from app.services.seller_inbound_packages import (
     receive_seller_inbound_package,
 )
 from app.services.private_storage import PrivateStorageError, verify_private_file
+from app.services.product_draft_preview import build_product_draft_preview
+from app.services.product_drafts import build_product_draft_view
+from app.services.product_publication import (
+    ProductModerationError,
+    normalize_moderation_checklist,
+    publish_product_draft,
+    record_moderation_decision,
+    remove_copied_publication_files,
+)
 
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
@@ -1082,6 +1096,181 @@ def approve_payment(order_number: str):
 @ecuvel_staff_required
 def reject_payment(order_number: str):
     return _review_payment(order_number, "reject")
+
+
+def _draft_uuid(value: str | None) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(value)) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+@admin.get("/products")
+@ecuvel_staff_required
+def products():
+    page = get_admin_products_page(
+        db.session,
+        status_key=request.args.get("status", "review"),
+        query=request.args.get("q", ""),
+        page=request.args.get("page", 1, type=int) or 1,
+        selected_id=_draft_uuid(request.args.get("draft")),
+    )
+    return render_template(
+        "admin/products.html",
+        page=page,
+        **_shell_context("products"),
+    )
+
+
+@admin.get("/products/<uuid:draft_id>/preview")
+@ecuvel_staff_required
+def product_preview(draft_id: uuid.UUID):
+    draft = get_admin_product_draft(db.session, draft_id)
+    if draft is None:
+        abort(404)
+    draft_view = build_product_draft_view(draft)
+    preview = build_product_draft_preview(
+        draft_view,
+        requested_sku=request.args.get("variant"),
+        selected_view="storefront",
+        media_endpoint="admin.product_file",
+    )
+    return render_template(
+        "admin/product_preview.html",
+        draft=draft,
+        draft_view=draft_view,
+        preview=preview,
+        **_shell_context("products"),
+    )
+
+
+@admin.get("/products/<uuid:draft_id>/files/<uuid:file_id>")
+@ecuvel_staff_required
+def product_file(draft_id: uuid.UUID, file_id: uuid.UUID):
+    draft = get_admin_product_draft(db.session, draft_id)
+    if draft is None:
+        abort(404)
+    file_record = next((item for item in draft.files if item.id == file_id), None)
+    if file_record is None or file_record.status.value != "ACTIVE":
+        abort(404)
+    try:
+        path = verify_private_file(
+            root=current_app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"],
+            storage_key=file_record.storage_key,
+            size_bytes=file_record.size_bytes,
+            sha256=file_record.sha256,
+        )
+    except PrivateStorageError:
+        abort(404)
+    response = send_file(
+        path,
+        mimetype=file_record.media_type,
+        as_attachment=request.args.get("download") == "1",
+        download_name=file_record.original_filename,
+        conditional=False,
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+def _moderation_redirect(draft_id: uuid.UUID):
+    if request.form.get("source") == "preview":
+        return redirect(url_for("admin.product_preview", draft_id=draft_id))
+    return redirect(url_for("admin.products", status="review", draft=draft_id))
+
+
+def _record_product_decision(draft_id: uuid.UUID, decision: str):
+    checklist = normalize_moderation_checklist(request.form.getlist("checklist"))
+    try:
+        record_moderation_decision(
+            db.session,
+            draft_id=draft_id,
+            actor_user_id=current_user.id,
+            decision=decision,
+            checklist=checklist,
+            reason_code=request.form.get("reason_code"),
+            note=request.form.get("note"),
+        )
+        db.session.commit()
+    except ProductModerationError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló la moderación del producto %s", draft_id)
+        flash("No pudimos guardar la decisión. Inténtalo nuevamente.", "error")
+    else:
+        flash(
+            "La publicación volvió a la tienda para correcciones."
+            if decision == "CHANGES_REQUESTED"
+            else "La publicación fue rechazada.",
+            "success",
+        )
+    return _moderation_redirect(draft_id)
+
+
+@admin.post("/products/<uuid:draft_id>/request-changes")
+@limiter.limit("30 per hour")
+@ecuvel_staff_required
+def request_product_changes(draft_id: uuid.UUID):
+    return _record_product_decision(draft_id, "CHANGES_REQUESTED")
+
+
+@admin.post("/products/<uuid:draft_id>/reject")
+@limiter.limit("30 per hour")
+@ecuvel_staff_required
+def reject_product(draft_id: uuid.UUID):
+    return _record_product_decision(draft_id, "REJECTED")
+
+
+@admin.post("/products/<uuid:draft_id>/approve")
+@limiter.limit("30 per hour")
+@ecuvel_staff_required
+def approve_product(draft_id: uuid.UUID):
+    checklist = normalize_moderation_checklist(request.form.getlist("checklist"))
+    copied_files = ()
+    try:
+        result = publish_product_draft(
+            db.session,
+            draft_id=draft_id,
+            actor_user_id=current_user.id,
+            checklist=checklist,
+            source_media_root=current_app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"],
+            catalog_media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+        )
+        copied_files = result.copied_files
+        db.session.commit()
+    except ProductModerationError as exc:
+        db.session.rollback()
+        remove_copied_publication_files(copied_files)
+        flash(str(exc), "error")
+    except IntegrityError:
+        db.session.rollback()
+        remove_copied_publication_files(copied_files)
+        current_app.logger.info(
+            "Conflicto de identificador al publicar el producto %s", draft_id
+        )
+        flash(
+            "No se pudo publicar porque un SKU, código de barras u otro "
+            "identificador ya existe en el catálogo.",
+            "error",
+        )
+    except Exception:
+        db.session.rollback()
+        remove_copied_publication_files(copied_files)
+        current_app.logger.exception("Falló la publicación del producto %s", draft_id)
+        flash("No pudimos publicar el producto. No se guardó ningún cambio parcial.", "error")
+    else:
+        flash(
+            "El producto ya estaba publicado."
+            if result.already_published else "Producto aprobado y publicado correctamente.",
+            "success",
+        )
+        return redirect(url_for("admin.products", status="approved", draft=draft_id))
+    return _moderation_redirect(draft_id)
 
 
 @admin.get("/modules/<string:module_key>")

@@ -41,7 +41,10 @@ def warehouse_options(session: Session) -> tuple[AdminOperatingOption, ...]:
         AdminOperatingOption(str(warehouse.id), f"{warehouse.name} · {warehouse.city}")
         for warehouse in session.scalars(
             select(Warehouse)
-            .where(Warehouse.is_active.is_(True))
+            .where(
+                Warehouse.is_active.is_(True),
+                Warehouse.seller_store_id.is_(None),
+            )
             .order_by(Warehouse.name, Warehouse.code)
         )
     )
@@ -59,7 +62,11 @@ def get_operating_point(
     warehouse = session.scalar(
         select(Warehouse)
         .options(selectinload(Warehouse.locations))
-        .where(Warehouse.id == parsed_id, Warehouse.is_active.is_(True))
+        .where(
+            Warehouse.id == parsed_id,
+            Warehouse.is_active.is_(True),
+            Warehouse.seller_store_id.is_(None),
+        )
     )
     if warehouse is None:
         return None
@@ -92,7 +99,10 @@ def require_active_operating_point(
         raise AdminOperatingContextError(
             "Selecciona un punto operativo válido."
         ) from exc
-    statement = select(Warehouse).where(Warehouse.id == parsed_id)
+    statement = select(Warehouse).where(
+        Warehouse.id == parsed_id,
+        Warehouse.seller_store_id.is_(None),
+    )
     if lock:
         statement = statement.with_for_update()
     warehouse = session.scalar(statement)

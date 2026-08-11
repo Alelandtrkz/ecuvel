@@ -43,6 +43,8 @@ from app.models.partner_onboarding import (
 )
 from app.models.product_review import ProductReview, ProductReviewImage, ProductReviewReply
 from app.models.product_draft import ProductDraft, ProductDraftFile
+from app.models.product_moderation import ProductDraftModerationEvent, ProductDraftPublication
+from app.models.marketplace_policy import MarketplaceCommissionRule, StoreInventoryLocation
 from app.models.store import Store, StoreMember, StoreProductCounter
 from app.models.user import PhoneOtpChallenge, User, UserAccountToken
 from app.models.warehouse import Warehouse, WarehouseLocation
@@ -80,6 +82,10 @@ __all__ = [
     "ProductReviewReply",
     "ProductDraft",
     "ProductDraftFile",
+    "ProductDraftModerationEvent",
+    "ProductDraftPublication",
+    "MarketplaceCommissionRule",
+    "StoreInventoryLocation",
     "InventoryBalance",
     "InventoryReservation",
     "InventoryMovement",

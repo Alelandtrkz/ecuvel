@@ -1,0 +1,22 @@
+{% set latest_event = draft.moderation_events[0] if draft.moderation_events else none %}
+{% if latest_event and draft.status.value == latest_event.decision and latest_event.decision in ['CHANGES_REQUESTED', 'REJECTED'] %}
+{% set reason_labels = {
+  'IMAGES_LOW_QUALITY': 'Imágenes de baja calidad',
+  'INCORRECT_INFORMATION': 'Información incorrecta',
+  'MISLEADING_TITLE': 'Título engañoso',
+  'INCOMPLETE_DESCRIPTION': 'Descripción incompleta',
+  'INCORRECT_SPECIFICATIONS': 'Especificaciones incorrectas',
+  'VARIANT_INCONSISTENCY': 'Variantes inconsistentes',
+  'PROHIBITED_PRODUCT': 'Producto no permitido',
+  'OTHER': 'Otro'
+} %}
+<aside class="partner-moderation-feedback partner-moderation-feedback--{{ latest_event.decision|lower }}" role="status">
+  <i data-lucide="{{ 'list-restart' if latest_event.decision == 'CHANGES_REQUESTED' else 'ban' }}" aria-hidden="true"></i>
+  <div>
+    <strong>{{ 'Correcciones solicitadas por ECUVEL' if latest_event.decision == 'CHANGES_REQUESTED' else 'Publicación rechazada por ECUVEL' }}</strong>
+    <p><b>Motivo:</b> {{ reason_labels.get(latest_event.reason_code, latest_event.reason_code or 'Sin detalle') }}</p>
+    {% if latest_event.note %}<p>{{ latest_event.note }}</p>{% endif %}
+    <small>Decisión registrada el {{ latest_event.created_at|ecuador_datetime }}.</small>
+  </div>
+</aside>
+{% endif %}

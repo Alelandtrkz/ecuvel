@@ -119,6 +119,77 @@ class SellerOfferNotFoundError(InventoryServiceError):
     """No se encontró la oferta del vendedor."""
 
 
+def initialize_offer_inventory(
+    session: Session,
+    *,
+    offer: SellerOffer,
+    location: WarehouseLocation,
+    quantity: int,
+    actor_user_id: uuid.UUID,
+    reference_id: uuid.UUID,
+) -> InventoryBalance:
+    """Materialize publication stock without committing the outer transaction."""
+
+    if quantity < 0:
+        raise InvalidInventoryQuantityError("El stock inicial no puede ser negativo.")
+    warehouse = session.get(Warehouse, location.warehouse_id)
+    if (
+        warehouse is None
+        or not warehouse.is_active
+        or warehouse.seller_store_id != offer.store_id
+        or not location.is_active
+        or location.location_type not in SELLABLE_LOCATION_TYPES
+    ):
+        raise WarehouseLocationNotFoundError(
+            "La ubicación no pertenece al inventario vendible de la tienda."
+        )
+
+    balance = session.scalar(
+        select(InventoryBalance)
+        .where(
+            InventoryBalance.offer_id == offer.id,
+            InventoryBalance.location_id == location.id,
+        )
+        .with_for_update()
+    )
+    if balance is None:
+        balance = InventoryBalance(
+            offer_id=offer.id,
+            location_id=location.id,
+            on_hand_quantity=quantity,
+            reserved_quantity=0,
+            blocked_quantity=0,
+        )
+        session.add(balance)
+        session.flush()
+    elif balance.on_hand_quantity != quantity:
+        raise InventoryServiceError(
+            "La oferta publicada ya tiene un saldo inicial diferente."
+        )
+
+    if quantity > 0:
+        idempotency_key = f"draft-publication:{reference_id}:{offer.id}"
+        movement = session.scalar(
+            select(InventoryMovement).where(
+                InventoryMovement.idempotency_key == idempotency_key
+            )
+        )
+        if movement is None:
+            session.add(InventoryMovement(
+                balance_id=balance.id,
+                movement_type=InventoryMovementType.ADJUSTMENT_IN,
+                delta_on_hand=quantity,
+                delta_reserved=0,
+                delta_blocked=0,
+                reference_type="DRAFT_PUBLICATION",
+                reference_id=reference_id,
+                idempotency_key=idempotency_key,
+                actor_user_id=actor_user_id,
+                notes="Stock inicial al aprobar la publicación.",
+            ))
+    return balance
+
+
 class InvalidReceivingLocationError(InventoryServiceError):
     """La ubicación no permite recibir mercancía."""
 

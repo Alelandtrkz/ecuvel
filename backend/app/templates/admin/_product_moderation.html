@@ -1,0 +1,74 @@
+{% macro moderation_panel(draft, draft_view, preview, source='list') -%}
+<section class="admin-product-validation" id="admin-product-review">
+  <header>
+    <div><span>Prevalidación objetiva</span><h2>{{ 'Prevalidación completada' if preview.dashboard.can_submit else 'Prevalidación con observaciones' }}</h2></div>
+    <i data-lucide="{{ 'badge-check' if preview.dashboard.can_submit else 'triangle-alert' }}" aria-hidden="true"></i>
+  </header>
+  <ul>
+    {% for item in draft_view.checklist %}
+      <li class="{{ 'is-complete' if item.complete else 'needs-attention' }}">
+        <i data-lucide="{{ 'check' if item.complete else 'x' }}" aria-hidden="true"></i>
+        <span><strong>{{ item.label }}</strong><small>{{ item.message }}</small></span>
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+
+{% if draft.status.value == 'SUBMITTED' %}
+<form class="admin-product-review-form" method="post" action="{{ url_for('admin.approve_product', draft_id=draft.id) }}" data-product-moderation-form>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="source" value="{{ source }}">
+  <h2>Lista de control de calidad</h2>
+  <p>La prevalidación orienta; la decisión final corresponde al equipo de ECUVEL.</p>
+  <div class="admin-product-checks">
+    {% set checks = [
+      ('images', 'Imágenes adecuadas y relacionadas con el producto'),
+      ('identity', 'Título, marca y modelo coherentes'),
+      ('description', 'Descripción clara y no engañosa'),
+      ('specifications', 'Especificaciones coherentes y suficientes'),
+      ('variants', 'Variantes, colores, SKU, precios y stock coherentes'),
+      ('category', 'Categoría y subcategoría correctas'),
+      ('documentation', 'Documentación requerida correcta')
+    ] %}
+    {% for key, label in checks %}
+      {% if key != 'documentation' or draft_view.template.required_documents %}
+      <label><input type="checkbox" name="checklist" value="{{ key }}" data-moderation-check><span><i data-lucide="check" aria-hidden="true"></i>{{ label }}</span></label>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <div class="admin-product-review-actions">
+    <button type="button" class="admin-button admin-button--secondary" data-moderation-open><i data-lucide="list-restart"></i>Solicitar correcciones</button>
+    <button type="button" class="admin-button admin-button--danger-soft" data-moderation-open><i data-lucide="x"></i>Rechazar</button>
+    <button type="submit" class="admin-button" data-approve-product disabled><i data-lucide="circle-check"></i>Aprobar producto</button>
+  </div>
+</form>
+
+<dialog class="admin-product-dialog" data-moderation-dialog aria-labelledby="moderation-dialog-title">
+  <form method="post" action="{{ url_for('admin.request_product_changes', draft_id=draft.id) }}" data-moderation-decision-form>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="source" value="{{ source }}">
+    <header><span><i data-lucide="triangle-alert"></i></span><h2 id="moderation-dialog-title">Solicitar correcciones o rechazar</h2><button type="button" data-moderation-close aria-label="Cerrar"><i data-lucide="x"></i></button></header>
+    <div class="admin-product-dialog__body">
+      <fieldset><legend>Motivo de la acción</legend><div class="admin-product-reasons">
+        {% set reasons = {
+          'IMAGES_LOW_QUALITY': 'Imágenes de baja calidad',
+          'INCORRECT_INFORMATION': 'Información incorrecta',
+          'MISLEADING_TITLE': 'Título engañoso',
+          'INCOMPLETE_DESCRIPTION': 'Descripción incompleta',
+          'INCORRECT_SPECIFICATIONS': 'Especificaciones incorrectas',
+          'VARIANT_INCONSISTENCY': 'Variantes inconsistentes',
+          'PROHIBITED_PRODUCT': 'Producto no permitido',
+          'OTHER': 'Otro'
+        } %}
+        {% for key, label in reasons.items() %}<label><input type="radio" name="reason_code" value="{{ key }}" required><span>{{ label }}</span></label>{% endfor %}
+      </div></fieldset>
+      <label class="admin-product-dialog__note">Observaciones personalizadas<small>Proporciona detalles específicos para que la tienda pueda corregir el problema.</small><textarea name="note" maxlength="2000" rows="5" placeholder="Escribe tus comentarios aquí..."></textarea></label>
+      <p class="admin-product-dialog__notice"><i data-lucide="info"></i><span>Al <strong>solicitar correcciones</strong>, el producto vuelve a la tienda. Al <strong>rechazar</strong>, queda invalidado para esta publicación.</span></p>
+    </div>
+    <footer><button type="button" class="admin-button admin-button--secondary" data-moderation-close>Cancelar</button><button type="submit" class="admin-button admin-button--danger" formaction="{{ url_for('admin.reject_product', draft_id=draft.id) }}"><i data-lucide="ban"></i>Confirmar rechazo</button><button type="submit" class="admin-button"><i data-lucide="list-restart"></i>Enviar a corrección</button></footer>
+  </form>
+</dialog>
+{% elif draft.publication %}
+<a class="admin-button admin-product-public-link" href="{{ url_for('storefront.product_detail', product_slug=draft.publication.product.slug) }}" target="_blank" rel="noopener"><i data-lucide="external-link"></i>Ver producto publicado</a>
+{% endif %}
+{%- endmacro %}

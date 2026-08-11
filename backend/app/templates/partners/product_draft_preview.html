@@ -26,10 +26,11 @@
   'REJECTED': 'Rechazado'
 } %}
 <main class="partner-page partner-page--preview">
+  {% include "partners/_product_moderation_feedback.html" %}
   <section class="partner-preview-shell" aria-labelledby="draft-preview-title">
     <header class="partner-preview-header">
       <div>
-        <p class="partner-eyebrow"><i data-lucide="lock-keyhole" aria-hidden="true"></i> Vista privada · No publicado</p>
+        <p class="partner-eyebrow"><i data-lucide="{{ 'badge-check' if draft.publication else 'lock-keyhole' }}" aria-hidden="true"></i> Vista privada · {{ 'Publicado' if draft.publication else 'No publicado' }}</p>
         <h1 id="draft-preview-title">{{ draft.title or "Producto sin título" }}</h1>
         <p>Revisa la información guardada y comprueba cómo se verá el producto antes de enviarlo.</p>
       </div>
@@ -38,6 +39,7 @@
           <i data-lucide="pencil" aria-hidden="true"></i> Volver a editar
         </a>
       {% endif %}
+      {% if draft.publication %}<a class="partner-button partner-button--primary" href="{{ url_for('storefront.product_detail', product_slug=draft.publication.product.slug) }}" target="_blank" rel="noopener"><i data-lucide="external-link" aria-hidden="true"></i> Ver publicación</a>{% endif %}
     </header>
 
     <nav class="partner-preview-tabs" role="tablist" aria-label="Secciones de vista previa">

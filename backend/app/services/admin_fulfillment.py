@@ -279,7 +279,10 @@ def _warehouse_options(session: Session) -> tuple[AdminFulfillmentOption, ...]:
         AdminFulfillmentOption(str(identifier), f"{code} · {name}")
         for identifier, code, name in session.execute(
             select(Warehouse.id, Warehouse.code, Warehouse.name)
-            .where(Warehouse.is_active.is_(True))
+            .where(
+                Warehouse.is_active.is_(True),
+                Warehouse.seller_store_id.is_(None),
+            )
             .order_by(Warehouse.name, Warehouse.code)
         )
     )

@@ -161,6 +161,18 @@ class ProductDraft(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         order_by="ProductDraftFile.position",
     )
 
+    moderation_events: Mapped[list["ProductDraftModerationEvent"]] = relationship(
+        "ProductDraftModerationEvent",
+        back_populates="draft",
+        order_by="ProductDraftModerationEvent.created_at.desc()",
+    )
+
+    publication: Mapped["ProductDraftPublication | None"] = relationship(
+        "ProductDraftPublication",
+        back_populates="draft",
+        uselist=False,
+    )
+
     __table_args__ = (
         UniqueConstraint("store_id", "seller_sku", name="uq_product_drafts_store_sku"),
         UniqueConstraint("seller_sku", name="uq_product_drafts_seller_sku"),

@@ -511,7 +511,8 @@ def variant_rows_complete(variants: list[dict[str, Any]]) -> bool:
             price = Decimal(str(row.get("price") or ""))
             compare_at_raw = str(row.get("compare_at_price") or "").strip()
             compare_at_price = Decimal(compare_at_raw) if compare_at_raw else None
-            stock = int(str(row.get("stock") or ""))
+            stock_value = row.get("stock")
+            stock = int(str(stock_value if stock_value is not None else ""))
         except (InvalidOperation, TypeError, ValueError):
             return False
         if (

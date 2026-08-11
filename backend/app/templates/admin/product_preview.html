@@ -1,0 +1,25 @@
+{% extends "admin/base.html" %}
+{% from "components/product_overview.html" import product_overview %}
+{% from "components/product_specs.html" import product_specs %}
+{% from "admin/_product_moderation.html" import moderation_panel %}
+{% block admin_title %}Vista previa · {{ draft.title }} | ECUVEL Admin{% endblock %}
+{% block styles %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/product-detail.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='css/admin-products.css') }}">{% endblock %}
+{% block admin_content %}
+<main class="admin-product-preview">
+  <header class="admin-product-preview__bar">
+    <a href="{{ url_for('admin.products', status={'SUBMITTED':'review','APPROVED':'approved','CHANGES_REQUESTED':'changes','REJECTED':'rejected'}.get(draft.status.value, 'review'), draft=draft.id) }}"><i data-lucide="arrow-left"></i>Volver a moderación</a>
+    <div class="admin-product-preview__bar-actions">
+      <span>Vista privada de moderación · {{ 'Publicado' if draft.publication else 'No publicado' }}</span>
+      {% if draft.status.value == 'SUBMITTED' %}<button class="admin-button admin-button--secondary" type="button" data-preview-moderation-open><i data-lucide="list-restart"></i>Solicitar correcciones</button><button class="admin-button admin-button--danger-soft" type="button" data-preview-moderation-open><i data-lucide="x"></i>Rechazar</button><a class="admin-button" href="#admin-product-review"><i data-lucide="circle-check"></i>Aprobar producto</a>{% elif draft.publication %}<a class="admin-button" href="{{ url_for('storefront.product_detail', product_slug=draft.publication.product.slug) }}" target="_blank" rel="noopener"><i data-lucide="external-link"></i>Ver publicación</a>{% endif %}
+    </div>
+  </header>
+  <div class="admin-product-preview__notice"><i data-lucide="eye"></i>Estás viendo una simulación 1:1 basada en el mismo componente de la página pública.</div>
+  <div class="product-detail-page content-container">
+    {{ product_overview(preview.product, true) }}
+    <section class="product-detail-section"><div class="detail-section-heading"><span>Conoce el producto</span><h2>Descripción</h2></div>{% if preview.product.description %}<p class="product-description">{{ preview.product.description }}</p>{% else %}<div class="detail-empty-state"><p>Descripción pendiente.</p></div>{% endif %}</section>
+    <section class="product-detail-section"><div class="detail-section-heading"><span>Ficha técnica</span><h2>Especificaciones</h2></div>{{ product_specs(preview.product.specifications) }}</section>
+    <section class="product-detail-section admin-product-preview__review">{{ moderation_panel(draft, draft_view, preview, 'preview') }}</section>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}{{ super() }}<script src="{{ url_for('static', filename='js/product-detail.js') }}" defer></script><script src="{{ url_for('static', filename='js/admin-products.js') }}" defer></script>{% endblock %}

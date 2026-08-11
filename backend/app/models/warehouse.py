@@ -62,10 +62,24 @@ class Warehouse(
         server_default="true",
     )
 
+    # Null identifies an ECUVEL logistics point. A value identifies a
+    # seller-owned commercial warehouse that must stay outside logistics KPIs.
+    seller_store_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stores.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
     locations: Mapped[list["WarehouseLocation"]] = relationship(
         "WarehouseLocation",
         back_populates="warehouse",
         cascade="all, delete-orphan",
+    )
+
+    seller_store: Mapped["Store | None"] = relationship(
+        "Store",
+        back_populates="inventory_warehouses",
     )
 
 

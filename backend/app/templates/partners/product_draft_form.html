@@ -11,6 +11,7 @@
 {% set variant_config = draft.variant_configuration or {} %}
 {% set family_enabled = variant_config and (variant_config.get('version', 1) < 4 or variant_config.get('enabled') == true) %}
 <main class="partner-page partner-page--draft">
+  {% include "partners/_product_moderation_feedback.html" %}
   <div class="partner-draft-layout" data-product-draft>
     <header class="partner-draft-hero">
       <p class="partner-breadcrumb">

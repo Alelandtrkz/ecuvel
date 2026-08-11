@@ -5167,3 +5167,18 @@ body.has-partner-order-drawer { overflow: hidden; }
   .partner-sales-product p { grid-column: 2; justify-items: start; grid-auto-flow: column; gap: 8px; }
   .partner-sales-drawer-summary { grid-template-columns: 1fr; }
 }
+.partner-moderation-feedback {
+  display: flex;
+  gap: .9rem;
+  margin: 0 auto 1.25rem;
+  padding: 1rem 1.15rem;
+  max-width: 1540px;
+  color: #7b4a00;
+  background: #fff5df;
+  border: 1px solid #f3d18a;
+  border-radius: 14px;
+}
+.partner-moderation-feedback--rejected { color: #9e1d22; background: #fff0f0; border-color: #f3b8bb; }
+.partner-moderation-feedback > svg { flex: 0 0 auto; width: 1.35rem; }
+.partner-moderation-feedback p { margin: .35rem 0 0; }
+.partner-moderation-feedback small { display: block; margin-top: .45rem; opacity: .8; }

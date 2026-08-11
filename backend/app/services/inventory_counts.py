@@ -126,7 +126,11 @@ def start_physical_inventory_count(
     normalized_notes = " ".join((notes or "").strip().split())[:500] or None
     warehouse = session.scalar(
         select(Warehouse)
-        .where(Warehouse.id == warehouse_id, Warehouse.is_active.is_(True))
+        .where(
+            Warehouse.id == warehouse_id,
+            Warehouse.is_active.is_(True),
+            Warehouse.seller_store_id.is_(None),
+        )
         .with_for_update()
     )
     if warehouse is None:

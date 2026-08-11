@@ -150,9 +150,14 @@ def _selected_variant(
     return available or principal or rows[0]
 
 
-def _image_url(draft: ProductDraft, file: ProductDraftFile) -> str:
+def _image_url(
+    draft: ProductDraft,
+    file: ProductDraftFile,
+    *,
+    media_endpoint: str,
+) -> str:
     return url_for(
-        "partners.product_draft_file",
+        media_endpoint,
         draft_id=draft.id,
         file_id=file.id,
     )
@@ -163,6 +168,7 @@ def _gallery_images(
     files: Sequence[ProductDraftFile],
     *,
     product_name: str,
+    media_endpoint: str,
 ) -> tuple[DraftPreviewImage, ...]:
     ordered = sorted(
         files,
@@ -170,8 +176,8 @@ def _gallery_images(
     )
     return tuple(
         DraftPreviewImage(
-            url=_image_url(draft, item),
-            thumbnail_url=_image_url(draft, item),
+            url=_image_url(draft, item, media_endpoint=media_endpoint),
+            thumbnail_url=_image_url(draft, item, media_endpoint=media_endpoint),
             alt=f"{product_name}, vista {index}",
             width=item.width,
             height=item.height,
@@ -260,6 +266,7 @@ def _variant_payload(
     selected: Mapping[str, Any] | None,
     *,
     base_title: str,
+    media_endpoint: str,
 ) -> dict[str, Any]:
     variants: list[dict[str, Any]] = []
     for row in rows:
@@ -268,6 +275,7 @@ def _variant_payload(
         images = _gallery_images(
             view.draft,
             _files_for_variant(view, row),
+            media_endpoint=media_endpoint,
             product_name=f"{base_title} — {row.get('name') or 'Variante'}",
         )
         variants.append({
@@ -323,6 +331,7 @@ def build_product_draft_preview(
     *,
     requested_sku: str | None = None,
     selected_view: str | None = None,
+    media_endpoint: str = "partners.product_draft_file",
 ) -> DraftPreviewContext:
     draft = view.draft
     configuration = draft.variant_configuration or {}
@@ -342,8 +351,14 @@ def build_product_draft_preview(
     # gallery selected during conversion. Those files can still carry their
     # archived color binding until final submission, so keep the complete view.
     selected_files = _files_for_variant(view, selected) if family_enabled else view.image_files
-    images = _gallery_images(draft, selected_files, product_name=full_title)
-    payload = _variant_payload(view, active_rows, selected, base_title=base_title) if family_enabled else {
+    images = _gallery_images(
+        draft, selected_files, product_name=full_title,
+        media_endpoint=media_endpoint,
+    )
+    payload = _variant_payload(
+        view, active_rows, selected, base_title=base_title,
+        media_endpoint=media_endpoint,
+    ) if family_enabled else {
         "base_title": base_title,
         "axes": [],
         "visual_axis_key": None,
