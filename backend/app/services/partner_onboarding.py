@@ -31,6 +31,7 @@ from app.models.enums import (
     StoreContractAcceptanceStatus,
     StoreContractOtpChannel,
     StoreMemberRole,
+    StoreOnboardingDocumentStatus,
     StoreOnboardingStage,
     StoreOnboardingStatus,
     StoreStatus,
@@ -79,6 +80,24 @@ STEPS: dict[int, StepSpec] = {
     5: StepSpec(5, "Añadir datos para el pago", "Paso 5 de 5", ("bank_account_owner", "bank_account_number", "bank_name", "bank_id_number", "bank_email")),
 }
 
+DOCUMENT_TYPES = {
+    "IDENTITY_OR_BUSINESS": "Documento de identidad / empresa",
+    "IDENTITY_CARD": "Cédula de identidad",
+    "PASSPORT": "Pasaporte",
+    "COMPANY_REGISTRATION": "Registro mercantil",
+    "CORPORATE_ACTS_CERTIFICATE": "Certificado de actos societarios",
+    "BANK_CERTIFICATE": "Certificado bancario",
+    "OTHER": "Otro documento",
+}
+
+ADMIN_APPROVAL_CHECKS = (
+    "identity",
+    "address_contact",
+    "banking",
+    "documents",
+    "no_pending_corrections",
+)
+
 
 def get_or_create_onboarding(session: Session, user_id) -> StoreOnboarding:
     onboarding = session.scalar(
@@ -125,6 +144,30 @@ def save_step(
     if step == 4 and staged_documents:
         if storage_root is None:
             raise PartnerOnboardingStateError("No se configuró el almacenamiento de documentos.")
+        replacement = None
+        replacement_id = _optional_uuid(data.get("replaces_document_id"))
+        if replacement_id is not None:
+            if len(staged_documents) != 1:
+                raise PartnerOnboardingValidationError(
+                    "Carga un único archivo para reemplazar el documento indicado.",
+                    {"documents": "Selecciona un solo archivo de reemplazo."},
+                )
+            replacement = session.get(StoreOnboardingDocument, replacement_id)
+            if (
+                replacement is None
+                or replacement.onboarding_id != onboarding.id
+                or replacement.status != StoreOnboardingDocumentStatus.REJECTED
+            ):
+                raise PartnerOnboardingValidationError(
+                    "El documento a reemplazar no es válido.",
+                    {"documents": "Actualiza la página y vuelve a intentarlo."},
+                )
+        requested_type = _clean(data.get("document_type")).upper()
+        document_type = (
+            replacement.document_type
+            if replacement is not None
+            else requested_type if requested_type in DOCUMENT_TYPES else "IDENTITY_OR_BUSINESS"
+        )
         for staged in staged_documents:
             promote_private_file(staged, root=storage_root)
             session.add(
@@ -135,7 +178,8 @@ def save_step(
                     mime_type=staged.media_type,
                     size_bytes=staged.size_bytes,
                     sha256=staged.sha256,
-                    document_type="IDENTITY_OR_BUSINESS",
+                    document_type=document_type,
+                    replaces_document_id=replacement.id if replacement is not None else None,
                 )
             )
     onboarding.current_step = max(onboarding.current_step, min(step + 1, 5))
@@ -194,6 +238,7 @@ def submit_for_review(session: Session, user_id) -> StoreOnboarding:
         raise PartnerOnboardingStateError("La solicitud ya fue enviada.")
     for step in range(1, 6):
         validate_step(onboarding, step, require_documents=True)
+    _validate_requested_corrections_resolved(onboarding)
     now = datetime.now(timezone.utc)
     store = onboarding.store
     if store is None:
@@ -244,24 +289,79 @@ def review_onboarding(
     reviewer_user_id,
     decision: str,
     comments: str | None = None,
+    issues: list[dict] | None = None,
+    checklist: dict[str, bool] | None = None,
+    expected_updated_at: str | None = None,
+    require_checklist: bool = False,
 ) -> StoreOnboarding:
     onboarding = session.get(StoreOnboarding, _uuid(onboarding_id), with_for_update=True)
     if onboarding is None:
         raise PartnerOnboardingStateError("No se encontró la solicitud.")
+    if onboarding.status != StoreOnboardingStatus.SUBMITTED:
+        raise PartnerOnboardingStateError(
+            "La solicitud cambió mientras la revisabas. Actualiza la página."
+        )
+    if expected_updated_at and onboarding.updated_at.isoformat() != expected_updated_at:
+        raise PartnerOnboardingStateError(
+            "La solicitud cambió mientras la revisabas. Actualiza la página."
+        )
     now = datetime.now(timezone.utc)
     normalized = decision.strip().lower()
     if normalized == "approve":
+        if require_checklist and (
+            checklist is None
+            or any(checklist.get(key) is not True for key in ADMIN_APPROVAL_CHECKS)
+        ):
+            raise PartnerOnboardingValidationError(
+                "Confirma todos los puntos del checklist antes de aprobar."
+            )
+        if onboarding.store is None:
+            raise PartnerOnboardingValidationError(
+                "La solicitud no tiene una tienda asociada y no puede aprobarse."
+            )
+        current_documents = [
+            document
+            for document in onboarding.documents
+            if document.status != StoreOnboardingDocumentStatus.REJECTED
+        ]
+        if not current_documents:
+            raise PartnerOnboardingValidationError(
+                "La solicitud no tiene documentaciÃ³n vigente para aprobar."
+            )
+        unresolved = _unresolved_document_issues(onboarding)
+        if unresolved:
+            raise PartnerOnboardingValidationError(
+                "Aún existen documentos que requieren reemplazo."
+            )
         onboarding.status = StoreOnboardingStatus.APPROVED
         onboarding.current_stage = StoreOnboardingStage.CONTRACT_ACCEPTANCE
         onboarding.approved_at = now
         if onboarding.store:
             onboarding.store.status = StoreStatus.PENDING_REVIEW
+        for document in onboarding.documents:
+            if document.status == StoreOnboardingDocumentStatus.PENDING_REVIEW:
+                document.status = StoreOnboardingDocumentStatus.APPROVED
         db_decision = StoreVerificationDecision.APPROVED
     elif normalized == "corrections":
+        normalized_issues = _normalize_issues(issues)
+        if not normalized_issues:
+            raise PartnerOnboardingValidationError(
+                "Selecciona al menos una corrección específica."
+            )
         onboarding.status = StoreOnboardingStatus.CORRECTIONS_REQUESTED
         onboarding.current_stage = StoreOnboardingStage.VERIFY_DATA
-        onboarding.current_step = 1
         onboarding.correction_requested_at = now
+        for issue in normalized_issues:
+            if issue.get("target_type") != "DOCUMENT":
+                continue
+            document_id = _optional_uuid(issue.get("target_id"))
+            document = session.get(StoreOnboardingDocument, document_id) if document_id else None
+            if document is None or document.onboarding_id != onboarding.id:
+                raise PartnerOnboardingValidationError(
+                    "Uno de los documentos seleccionados ya no está disponible."
+                )
+            document.status = StoreOnboardingDocumentStatus.REJECTED
+            document.admin_comment = _clean(issue.get("message"))[:500] or None
         db_decision = StoreVerificationDecision.CORRECTIONS_REQUESTED
     elif normalized == "reject":
         onboarding.status = StoreOnboardingStatus.REJECTED
@@ -278,6 +378,8 @@ def review_onboarding(
             reviewer_user_id=reviewer_user_id,
             decision=db_decision,
             comments=_clean(comments),
+            issues_snapshot=normalized_issues if normalized == "corrections" else None,
+            checklist_snapshot=dict(checklist or {}) or None,
         )
     )
     session.flush()
@@ -505,3 +607,101 @@ def _public_store_code() -> str:
 
 def _uuid(value) -> uuid.UUID:
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+def _optional_uuid(value) -> uuid.UUID | None:
+    try:
+        return _uuid(value) if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_issues(issues: list[dict] | None) -> list[dict]:
+    normalized: list[dict] = []
+    for raw in issues or []:
+        if not isinstance(raw, dict):
+            continue
+        target_type = _clean(raw.get("target_type")).upper()
+        reason_code = _clean(raw.get("reason_code")).upper()[:80]
+        message = _clean(raw.get("message"))[:500]
+        if target_type not in {"DOCUMENT", "FIELD"} or not reason_code or not message:
+            continue
+        item = {
+            "target_type": target_type,
+            "reason_code": reason_code,
+            "message": message,
+        }
+        if target_type == "DOCUMENT":
+            target_id = _optional_uuid(raw.get("target_id"))
+            if target_id is None:
+                continue
+            item["target_id"] = str(target_id)
+        else:
+            field = _clean(raw.get("field"))[:80]
+            try:
+                step = int(raw.get("step"))
+            except (TypeError, ValueError):
+                continue
+            if not field or step not in STEPS:
+                continue
+            item.update({"field": field, "step": step})
+            if "previous_value" in raw:
+                item["previous_value"] = _clean(raw.get("previous_value"))
+        normalized.append(item)
+    return normalized
+
+
+def latest_correction_review(onboarding: StoreOnboarding) -> StoreVerificationReview | None:
+    return next(
+        (
+            review
+            for review in reversed(onboarding.reviews)
+            if review.decision == StoreVerificationDecision.CORRECTIONS_REQUESTED
+        ),
+        None,
+    )
+
+
+def _unresolved_document_issues(onboarding: StoreOnboarding) -> list[dict]:
+    review = latest_correction_review(onboarding)
+    unresolved: list[dict] = []
+    for issue in (review.issues_snapshot if review else None) or []:
+        if issue.get("target_type") != "DOCUMENT":
+            continue
+        target_id = _optional_uuid(issue.get("target_id"))
+        replacement = next(
+            (
+                document
+                for document in onboarding.documents
+                if document.replaces_document_id == target_id
+                and document.status != StoreOnboardingDocumentStatus.REJECTED
+            ),
+            None,
+        )
+        if replacement is None:
+            unresolved.append(issue)
+    return unresolved
+
+
+def _validate_requested_corrections_resolved(onboarding: StoreOnboarding) -> None:
+    if onboarding.status != StoreOnboardingStatus.CORRECTIONS_REQUESTED:
+        return
+    unresolved = _unresolved_document_issues(onboarding)
+    if unresolved:
+        raise PartnerOnboardingValidationError(
+            "Reemplaza los documentos indicados antes de reenviar.",
+            {"documents": "Aún hay documentos que requieren reemplazo."},
+        )
+    review = latest_correction_review(onboarding)
+    unchanged: list[dict] = []
+    for issue in (review.issues_snapshot if review else None) or []:
+        if issue.get("target_type") != "FIELD" or "previous_value" not in issue:
+            continue
+        if _clean(getattr(onboarding, issue.get("field", ""), None)) == _clean(issue.get("previous_value")):
+            unchanged.append(issue)
+    if unchanged:
+        steps = sorted({str(item.get("step")) for item in unchanged})
+        raise PartnerOnboardingValidationError(
+            "Actualiza la información solicitada antes de reenviar.",
+            {"corrections": f"Revisa los pasos {', '.join(steps)}."},
+        )

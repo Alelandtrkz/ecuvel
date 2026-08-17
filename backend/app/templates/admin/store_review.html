@@ -1,0 +1,74 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Revisar tienda | ECUVEL Admin{% endblock %}
+{% block styles %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/admin-stores.css') }}">{% endblock %}
+{% block admin_content %}
+<main class="admin-page admin-store-review">
+  <a class="admin-store-back" href="{{ url_for('admin.stores', status='pending' if onboarding.status.value == 'SUBMITTED' else 'all') }}"><i data-lucide="arrow-left"></i>Volver a moderación</a>
+  <header class="admin-store-review__heading">
+    <div><span class="admin-store-status admin-store-status--{{ onboarding.status.value|lower }}">{{ {'SUBMITTED':'Pendiente de revisión','CORRECTIONS_REQUESTED':'Correcciones solicitadas','APPROVED':'Verificación aprobada','CONTRACT_PENDING':'Firma pendiente','COMPLETED':'Activa','REJECTED':'Solicitud cerrada'}.get(onboarding.status.value, onboarding.status.value) }}</span><small>{{ onboarding.store.public_store_code if onboarding.store else 'Código pendiente' }}</small><h1>Revisar solicitud de tienda</h1><p>Información y documentación enviadas por el comercio.</p></div>
+    <p><i data-lucide="clock"></i>Recibido: {{ onboarding.submitted_at|ecuador_datetime if onboarding.submitted_at else 'Sin fecha' }}</p>
+  </header>
+
+  <div class="admin-store-review__grid">
+    <div class="admin-store-review__main">
+      <section class="admin-card admin-store-section"><header><span><i data-lucide="store"></i></span><div><h2>Datos de la tienda</h2><p>Información comercial, legal y de contacto.</p></div></header><dl class="admin-store-data">
+        <div><dt>Nombre de tienda</dt><dd>{{ onboarding.store_name or 'Pendiente' }}</dd></div>
+        <div><dt>Código público</dt><dd>{{ onboarding.store.public_store_code if onboarding.store else 'Pendiente' }}</dd></div>
+        <div><dt>Identificación / RUC</dt><dd>{{ onboarding.legal_id_number or 'Pendiente' }}</dd></div>
+        <div><dt>Provincia</dt><dd>{{ onboarding.province or 'Pendiente' }}</dd></div>
+        <div><dt>Ciudad</dt><dd>{{ onboarding.city or 'Pendiente' }}</dd></div>
+        <div class="is-wide"><dt>Dirección</dt><dd>{{ onboarding.address or 'Pendiente' }}</dd></div>
+        <div><dt>Contacto</dt><dd>{{ onboarding.whatsapp_or_nickname or 'Pendiente' }}</dd></div>
+        <div><dt>Email del owner</dt><dd>{{ onboarding.user.email or 'Pendiente' }}</dd></div>
+      </dl></section>
+
+      <section class="admin-card admin-store-section admin-store-bank"><header><span><i data-lucide="landmark"></i></span><div><h2>Datos bancarios</h2><p>Información privada visible únicamente para ECUVEL staff.</p></div></header><dl class="admin-store-data">
+        <div><dt>Titular</dt><dd>{{ onboarding.bank_account_owner or 'Pendiente' }}</dd></div>
+        <div><dt>Identificación del titular</dt><dd>{{ onboarding.bank_id_number or 'Pendiente' }}</dd></div>
+        <div><dt>Banco</dt><dd>{{ onboarding.bank_name or 'Pendiente' }}</dd></div>
+        <div><dt>Número de cuenta</dt><dd>{{ onboarding.bank_account_number or 'Pendiente' }}</dd></div>
+        <div class="is-wide"><dt>Email bancario</dt><dd>{{ onboarding.bank_email or 'Pendiente' }}</dd></div>
+      </dl></section>
+
+      <section class="admin-card admin-store-section admin-store-history"><header><span><i data-lucide="history"></i></span><div><h2>Historial de revisión</h2><p>Registro append-only de envíos y decisiones.</p></div></header>
+        <ol>{% for review in onboarding.reviews|reverse %}<li><span class="admin-store-history__dot"></span><div><strong>{{ {'PENDING':'Solicitud enviada','CORRECTIONS_REQUESTED':'Correcciones solicitadas','APPROVED':'Verificación aprobada','REJECTED':'Solicitud cerrada'}.get(review.decision.value, review.decision.value) }}</strong><small>{{ review.created_at|ecuador_datetime }} · {{ review.reviewer.full_name if review.reviewer else 'Seller / sistema' }}</small>{% if review.comments %}<p>{{ review.comments }}</p>{% endif %}{% if review.issues_snapshot %}<ul>{% for issue in review.issues_snapshot %}<li>{{ issue.message }}</li>{% endfor %}</ul>{% endif %}</div></li>{% endfor %}</ol>
+      </section>
+    </div>
+
+    <aside class="admin-store-review__side">
+      <section class="admin-card admin-store-documents"><header><div><i data-lucide="folder"></i><h2>Documentación</h2></div><span>{{ onboarding.documents|length }} archivos</span></header>
+        {% if onboarding.documents %}<div class="admin-store-document-list">{% for document in onboarding.documents %}<article class="{{ 'needs-replacement' if document.status.value == 'REJECTED' }}"><i data-lucide="{{ 'file-text' if document.mime_type == 'application/pdf' else 'image' }}"></i><div><strong>{{ document_type_label(document.document_type) }}</strong><small>{{ document.file_name }} · {{ (document.size_bytes / 1024)|round|int }} KB</small><span>{{ document_status_label(document.status) }}</span>{% if document.admin_comment %}<p>{{ document.admin_comment }}</p>{% endif %}</div><nav><a href="{{ url_for('admin.store_document', onboarding_id=onboarding.id, document_id=document.id) }}" target="_blank" rel="noopener">Ver</a><a href="{{ url_for('admin.store_document', onboarding_id=onboarding.id, document_id=document.id, download=1) }}">Descargar</a></nav></article>{% endfor %}</div>{% else %}<p class="admin-store-muted">No existen documentos cargados.</p>{% endif %}
+      </section>
+
+      <section class="admin-card admin-store-contract"><header><i data-lucide="file-signature"></i><h2>Contrato ECUVEL</h2></header><strong>{{ contract_status_label(onboarding) }}</strong>
+        {% if onboarding.contract_acceptance %}<dl><div><dt>Versión</dt><dd>{{ onboarding.contract_acceptance.contract_version }}</dd></div><div><dt>Anexo</dt><dd>{{ onboarding.contract_acceptance.annex_version }}</dd></div>{% if onboarding.contract_acceptance.accepted_at %}<div><dt>Aceptado</dt><dd>{{ onboarding.contract_acceptance.accepted_at|ecuador_datetime }}</dd></div>{% endif %}</dl>{% endif %}
+        {% if onboarding.contract_acceptance and onboarding.contract_acceptance.pdf_storage_key %}<a class="admin-button admin-button--soft" href="{{ url_for('admin.store_contract', onboarding_id=onboarding.id) }}" target="_blank" rel="noopener">Ver contrato aceptado</a>{% endif %}
+      </section>
+
+      {% if onboarding.status.value == 'SUBMITTED' %}<section class="admin-card admin-store-resolution"><h2>Resolución</h2><p>Al aprobar la verificación, el seller podrá continuar con la aceptación del contrato ECUVEL. La tienda se activará únicamente después de completar la firma mediante código de verificación.</p>
+        <form method="post" action="{{ url_for('admin.approve_store', onboarding_id=onboarding.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_updated_at" value="{{ onboarding.updated_at.isoformat() }}">
+          <fieldset><legend>Checklist de verificación</legend>{% for key, label in approval_checks.items() %}<label><input type="checkbox" name="checklist" value="{{ key }}" required><span>{{ label }}</span></label>{% endfor %}</fieldset>
+          <label class="admin-store-note">Nota interna opcional<textarea name="comments" maxlength="1000" placeholder="Observaciones de la aprobación..."></textarea></label>
+          <button class="admin-button admin-store-approve" type="submit"><i data-lucide="badge-check"></i>Aprobar verificación</button>
+        </form>
+        <button class="admin-button admin-store-corrections" type="button" data-store-dialog-open><i data-lucide="list-restart"></i>Solicitar correcciones</button>
+      </section>{% endif %}
+    </aside>
+  </div>
+</main>
+
+{% if onboarding.status.value == 'SUBMITTED' %}<dialog class="admin-store-dialog" data-store-dialog role="dialog" aria-modal="true" aria-labelledby="store-corrections-title">
+  <form method="post" action="{{ url_for('admin.request_store_changes', onboarding_id=onboarding.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_updated_at" value="{{ onboarding.updated_at.isoformat() }}">
+    <header><div><i data-lucide="triangle-alert"></i><h2 id="store-corrections-title">Solicitar correcciones</h2></div><button type="button" data-store-dialog-close aria-label="Cerrar"><i data-lucide="x"></i></button></header>
+    <div class="admin-store-dialog__body"><fieldset><legend>¿Qué debe corregir el seller?</legend><div class="admin-store-reasons">{% for key, label in correction_reasons.items() %}<label><input type="checkbox" name="issue_code" value="{{ key }}"><span>{{ label }}</span></label>{% endfor %}</div></fieldset>
+      <label>Documento afectado<select name="document_id"><option value="">Selecciona cuando el motivo sea documental</option>{% for document in onboarding.documents if document.status.value != 'REJECTED' %}<option value="{{ document.id }}">{{ document_type_label(document.document_type) }} · {{ document.file_name }}</option>{% endfor %}</select></label>
+      <label>Observación personalizada<textarea name="comments" maxlength="500" placeholder="Explica exactamente cómo resolver la corrección..."></textarea></label>
+      <p><i data-lucide="info"></i>El seller conservará los datos ya completados y podrá abrir directamente el paso afectado. Los documentos anteriores se conservarán para auditoría.</p>
+    </div>
+    <footer><button class="admin-button admin-button--soft" type="button" data-store-dialog-close>Cancelar</button><button class="admin-button admin-store-corrections" type="submit">Enviar correcciones</button></footer>
+  </form>
+</dialog>{% endif %}
+{% endblock %}
+{% block scripts %}{{ super() }}<script src="{{ url_for('static', filename='js/admin-stores.js') }}" defer></script>{% endblock %}

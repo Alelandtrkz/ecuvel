@@ -6,13 +6,20 @@
     <a class="partner-button partner-button--secondary" href="{{ url_for('partners.review') }}">Ver datos enviados</a>
   {% elif onboarding.status.value == "CORRECTIONS_REQUESTED" %}
     <h2>Se requieren correcciones</h2>
-    <p>Revisa las observaciones del equipo administrativo y vuelve a enviar la información.</p>
-    <ul class="partner-observations">
-      {% for review in onboarding.reviews if review.decision.value == "CORRECTIONS_REQUESTED" %}
-        <li>{{ review.comments or "Completa la información solicitada." }}</li>
-      {% endfor %}
-    </ul>
-    <a class="partner-button partner-button--primary" href="{{ url_for('partners.onboarding_step', step=1) }}">Corregir información</a>
+    <p>Corrige únicamente los datos observados. La información que ya enviaste se conserva.</p>
+    {% if correction_review %}
+      {% if correction_review.comments %}<p class="partner-correction-summary">{{ correction_review.comments }}</p>{% endif %}
+      {% set field_issues = (correction_review.issues_snapshot or [])|selectattr('target_type', 'equalto', 'FIELD')|list %}
+      {% set document_issues = (correction_review.issues_snapshot or [])|selectattr('target_type', 'equalto', 'DOCUMENT')|list %}
+      {% if field_issues %}<section class="partner-correction-group"><h3>Información a corregir</h3><div class="partner-correction-list">
+        {% for issue in field_issues %}<article><div><strong>Paso {{ issue.step }}</strong><p>{{ issue.message }}</p></div><a href="{{ url_for('partners.onboarding_step', step=issue.step) }}">Corregir dato<i data-lucide="arrow-right" aria-hidden="true"></i></a></article>{% endfor %}
+      </div></section>{% endif %}
+      {% if document_issues %}<section class="partner-correction-group"><h3>Documentos a reemplazar</h3><div class="partner-correction-list">
+        {% for issue in document_issues %}<article><div><strong>Requiere reemplazo</strong><p>{{ issue.message }}</p></div><a href="{{ url_for('partners.onboarding_step', step=4) }}">Reemplazar archivo<i data-lucide="arrow-right" aria-hidden="true"></i></a></article>{% endfor %}
+      </div></section>{% endif %}
+      {% if not field_issues and not document_issues %}<div class="partner-correction-list"><article><div><strong>Información general</strong><p>Completa la información solicitada por ECUVEL.</p></div></article></div>{% endif %}
+    {% endif %}
+    <a class="partner-button partner-button--primary" href="{{ url_for('partners.review') }}">Revisar y reenviar</a>
   {% elif onboarding.status.value == "APPROVED" %}
     <h2>Su tienda ha sido aprobada</h2>
     <p>Ya puedes continuar con la firma del contrato digital para habilitar la venta.</p>

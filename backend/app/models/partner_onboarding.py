@@ -13,7 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.extensions import db
@@ -133,7 +133,20 @@ class StoreOnboardingDocument(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     )
     admin_comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
+    replaces_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("store_onboarding_documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     onboarding: Mapped["StoreOnboarding"] = relationship("StoreOnboarding", back_populates="documents")
+    replaces_document: Mapped["StoreOnboardingDocument | None"] = relationship(
+        "StoreOnboardingDocument",
+        remote_side="StoreOnboardingDocument.id",
+        foreign_keys=[replaces_document_id],
+        uselist=False,
+    )
 
 
 class StoreVerificationReview(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
@@ -159,6 +172,8 @@ class StoreVerificationReview(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         index=True,
     )
     comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    issues_snapshot: Mapped[list[dict] | None] = mapped_column(JSONB, nullable=True)
+    checklist_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     onboarding: Mapped["StoreOnboarding"] = relationship("StoreOnboarding", back_populates="reviews")
     reviewer: Mapped["User | None"] = relationship("User")

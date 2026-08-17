@@ -25,6 +25,7 @@ from werkzeug.exceptions import NotFound
 from app.extensions import db, limiter
 from app.models.enums import ProductDraftFileKind, ProductDraftFileStatus, StoreOnboardingStatus
 from app.services.partner_onboarding import (
+    DOCUMENT_TYPES,
     PartnerOnboardingError,
     PartnerOnboardingValidationError,
     STEPS,
@@ -32,6 +33,7 @@ from app.services.partner_onboarding import (
     contract_pdf_bytes,
     get_or_create_onboarding,
     get_onboarding,
+    latest_correction_review,
     request_contract_otp,
     save_step,
     stage_partner_document,
@@ -150,6 +152,8 @@ def _render_main(onboarding, *, step: int | None = None, errors=None, form=None,
         errors=errors or {},
         form=form_values,
         current_partner_tab="main",
+        document_types=DOCUMENT_TYPES,
+        correction_review=latest_correction_review(onboarding),
     ), status_code
 
 
@@ -161,6 +165,7 @@ def dashboard():
         return redirect(url_for("partners.products"))
     if onboarding.status in {
         StoreOnboardingStatus.SUBMITTED,
+        StoreOnboardingStatus.CORRECTIONS_REQUESTED,
         StoreOnboardingStatus.APPROVED,
         StoreOnboardingStatus.REJECTED,
     }:
@@ -183,7 +188,10 @@ def onboarding_step(step: int):
     onboarding = _get_or_create_for_current_user()
     if step not in STEPS:
         return redirect(url_for("partners.onboarding_step", step=onboarding.current_step))
-    if step > onboarding.current_step:
+    if (
+        onboarding.status != StoreOnboardingStatus.CORRECTIONS_REQUESTED
+        and step > onboarding.current_step
+    ):
         flash("Completa los pasos anteriores antes de continuar.", "warning")
         return redirect(url_for("partners.onboarding_step", step=onboarding.current_step))
     return _render_main(onboarding, step=step)[0]
@@ -267,6 +275,8 @@ def status():
     return render_template(
         "partners/status.html",
         onboarding=onboarding,
+        document_types=DOCUMENT_TYPES,
+        correction_review=latest_correction_review(onboarding),
         current_partner_tab="main",
     )
 

@@ -80,6 +80,22 @@ from app.services.admin_products import (
     get_admin_product_draft,
     get_admin_products_page,
 )
+from app.services.admin_stores import (
+    APPROVAL_CHECK_LABELS,
+    CORRECTION_REASON_LABELS,
+    approve_store_verification,
+    contract_status_label,
+    document_status_label,
+    document_type_label,
+    get_admin_store_review,
+    get_admin_stores_page,
+    request_store_corrections,
+)
+from app.services.partner_onboarding import (
+    PartnerOnboardingError,
+    PartnerOnboardingStateError,
+    PartnerOnboardingValidationError,
+)
 from app.services.payment_proofs import (
     PaymentProofServiceError,
     review_payment_proof,
@@ -106,7 +122,7 @@ from app.services.seller_inbound_packages import (
     SellerInboundPackageReceptionAccessError,
     receive_seller_inbound_package,
 )
-from app.services.private_storage import PrivateStorageError, verify_private_file
+from app.services.private_storage import PrivateStorageError, private_file_path, verify_private_file
 from app.services.product_draft_preview import build_product_draft_preview
 from app.services.product_drafts import (
     build_product_draft_view,
@@ -1107,6 +1123,167 @@ def _draft_uuid(value: str | None) -> uuid.UUID | None:
         return uuid.UUID(str(value)) if value else None
     except (TypeError, ValueError):
         return None
+
+
+@admin.get("/stores")
+@ecuvel_staff_required
+def stores():
+    page = get_admin_stores_page(
+        db.session,
+        tab=request.args.get("status", "pending"),
+        query=request.args.get("q", ""),
+        province=request.args.get("province", ""),
+        city=request.args.get("city", ""),
+        document_state=request.args.get("documents", ""),
+        date_from=request.args.get("date_from", ""),
+        date_to=request.args.get("date_to", ""),
+        page=request.args.get("page", 1, type=int) or 1,
+    )
+    return render_template(
+        "admin/stores.html",
+        page=page,
+        **_shell_context("stores"),
+    )
+
+
+@admin.get("/stores/<uuid:onboarding_id>")
+@ecuvel_staff_required
+def store_review(onboarding_id: uuid.UUID):
+    onboarding = get_admin_store_review(db.session, onboarding_id)
+    if onboarding is None:
+        abort(404)
+    return render_template(
+        "admin/store_review.html",
+        onboarding=onboarding,
+        approval_checks=APPROVAL_CHECK_LABELS,
+        correction_reasons=CORRECTION_REASON_LABELS,
+        document_type_label=document_type_label,
+        document_status_label=document_status_label,
+        contract_status_label=contract_status_label,
+        **_shell_context("stores"),
+    )
+
+
+@admin.get("/stores/<uuid:onboarding_id>/documents/<uuid:document_id>")
+@ecuvel_staff_required
+def store_document(onboarding_id: uuid.UUID, document_id: uuid.UUID):
+    onboarding = get_admin_store_review(db.session, onboarding_id)
+    if onboarding is None:
+        abort(404)
+    document = next((item for item in onboarding.documents if item.id == document_id), None)
+    if document is None or document.mime_type not in {
+        "application/pdf", "image/jpeg", "image/png"
+    }:
+        abort(404)
+    try:
+        path = verify_private_file(
+            root=current_app.config["PARTNER_DOCUMENT_UPLOAD_DIR"],
+            storage_key=document.storage_key,
+            size_bytes=document.size_bytes,
+            sha256=document.sha256,
+        )
+    except PrivateStorageError:
+        abort(404)
+    response = send_file(
+        path,
+        mimetype=document.mime_type,
+        as_attachment=request.args.get("download") == "1",
+        download_name=document.file_name,
+        conditional=False,
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@admin.get("/stores/<uuid:onboarding_id>/contract")
+@ecuvel_staff_required
+def store_contract(onboarding_id: uuid.UUID):
+    onboarding = get_admin_store_review(db.session, onboarding_id)
+    acceptance = onboarding.contract_acceptance if onboarding is not None else None
+    if acceptance is None or not acceptance.pdf_storage_key:
+        abort(404)
+    try:
+        path = private_file_path(
+            current_app.config["PARTNER_CONTRACT_UPLOAD_DIR"],
+            acceptance.pdf_storage_key,
+        )
+    except PrivateStorageError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
+    response = send_file(
+        path,
+        mimetype="application/pdf",
+        as_attachment=request.args.get("download") == "1",
+        download_name="contrato-aceptado-ecuvel-partners.pdf",
+        conditional=False,
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+def _store_review_decision(onboarding_id: uuid.UUID, action: str):
+    try:
+        db.session.remove()
+        with db.session.begin():
+            if action == "approve":
+                approve_store_verification(
+                    db.session,
+                    onboarding_id=onboarding_id,
+                    reviewer_user_id=current_user.id,
+                    checklist_values=request.form.getlist("checklist"),
+                    expected_updated_at=request.form.get("expected_updated_at"),
+                    comments=request.form.get("comments"),
+                )
+            else:
+                request_store_corrections(
+                    db.session,
+                    onboarding_id=onboarding_id,
+                    reviewer_user_id=current_user.id,
+                    form=request.form,
+                )
+    except PartnerOnboardingStateError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    except PartnerOnboardingValidationError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    except PartnerOnboardingError:
+        db.session.rollback()
+        flash("No pudimos guardar la revisión.", "error")
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception("Falló la revisión de onboarding %s", onboarding_id)
+        flash("No pudimos guardar la revisión. Inténtalo nuevamente.", "error")
+    else:
+        flash(
+            "Verificación aprobada. El seller debe aceptar el contrato para activar la tienda."
+            if action == "approve"
+            else "Correcciones enviadas al seller.",
+            "success",
+        )
+        return redirect(url_for("admin.stores", status="contract" if action == "approve" else "corrections"))
+    return redirect(url_for("admin.store_review", onboarding_id=onboarding_id))
+
+
+@admin.post("/stores/<uuid:onboarding_id>/approve")
+@limiter.limit("30 per hour")
+@ecuvel_staff_required
+def approve_store(onboarding_id: uuid.UUID):
+    return _store_review_decision(onboarding_id, "approve")
+
+
+@admin.post("/stores/<uuid:onboarding_id>/request-corrections")
+@limiter.limit("30 per hour")
+@ecuvel_staff_required
+def request_store_changes(onboarding_id: uuid.UUID):
+    return _store_review_decision(onboarding_id, "corrections")
 
 
 @admin.get("/products")

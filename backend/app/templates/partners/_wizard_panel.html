@@ -6,6 +6,25 @@
     <p class="partner-form__subtitle">{{ spec.subtitle }}</p>
   </div>
 
+  {% if correction_review and correction_review.issues_snapshot %}
+    {% set step_issues = correction_review.issues_snapshot
+      |selectattr('target_type', 'equalto', 'FIELD')
+      |selectattr('step', 'equalto', step)
+      |list %}
+    {% set document_issues = correction_review.issues_snapshot
+      |selectattr('target_type', 'equalto', 'DOCUMENT')
+      |list if step == 4 else [] %}
+    {% if step_issues or document_issues %}
+      <aside class="partner-correction-box" aria-label="Correcciones solicitadas para este paso">
+        <strong><i data-lucide="message-square-warning" aria-hidden="true"></i> Correcciones solicitadas</strong>
+        <ul>
+          {% for issue in step_issues %}<li>{{ issue.message }}</li>{% endfor %}
+          {% for issue in document_issues %}<li>{{ issue.message }}</li>{% endfor %}
+        </ul>
+      </aside>
+    {% endif %}
+  {% endif %}
+
   {% if step == 1 %}
     <label class="partner-field">Nombre de la tienda
       <input name="store_name" value="{{ form.get('store_name', '') }}" required minlength="2">
@@ -35,16 +54,35 @@
       {% if errors.whatsapp_or_nickname %}<small>{{ errors.whatsapp_or_nickname }}</small>{% endif %}
     </label>
   {% elif step == 4 %}
-    <p>Añada cualquiera de los siguientes documentos:</p>
+    <p>Añade los documentos legales que permitan verificar tu comercio.</p>
     <ul class="partner-doc-list">
       <li>Certificado de Actos Societarios Inscritos</li>
       <li>Certificado de registro de persona jurídica</li>
       <li>Pasaporte</li>
       <li>Cédula de identidad</li>
     </ul>
+    <label class="partner-field">Tipo de documento
+      <select name="document_type" required>
+        {% for value, label in document_types.items() if value != 'IDENTITY_OR_BUSINESS' %}
+          <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    {% set rejected_documents = onboarding.documents|selectattr('status.value', 'equalto', 'REJECTED')|list %}
+    {% if rejected_documents %}
+      <label class="partner-field">Documento que vas a reemplazar
+        <select name="replaces_document_id">
+          <option value="">Es un documento adicional</option>
+          {% for document in rejected_documents %}
+            <option value="{{ document.id }}">{{ document.file_name }} · Requiere reemplazo</option>
+          {% endfor %}
+        </select>
+        <small class="partner-field__hint">Selecciona el archivo observado por ECUVEL cuando cargues su nueva versión.</small>
+      </label>
+    {% endif %}
     <label class="partner-uploader">
       <i data-lucide="paperclip" aria-hidden="true"></i>
-      <span>Seleccione o arrastre un archivo aquí</span>
+      <span>Selecciona o arrastra un archivo aquí</span>
       <small>Formato: JPG, PNG, PDF. Tamaño máximo: 32 MB.</small>
       <strong>Subir un archivo</strong>
       <input class="visually-hidden" type="file" name="documents" accept=".jpg,.jpeg,.png,.pdf,image/jpeg,image/png,application/pdf" multiple>
@@ -52,7 +90,19 @@
     {% if onboarding.documents %}
       <ul class="partner-uploaded">
         {% for document in onboarding.documents %}
-          <li>{{ document.file_name }} · {{ (document.size_bytes / 1024)|round|int }} KB</li>
+          <li class="partner-uploaded__item{% if document.status.value == 'REJECTED' %} is-rejected{% endif %}">
+            <span>
+              <strong>{{ document_types.get(document.document_type, document.document_type) }}</strong>
+              {{ document.file_name }} · {{ (document.size_bytes / 1024)|round|int }} KB
+            </span>
+            {% if document.status.value == 'REJECTED' %}
+              <em>Requiere reemplazo</em>
+            {% elif document.replaces_document_id %}
+              <em class="is-pending">Reemplazo enviado · Pendiente de revisión</em>
+            {% else %}
+              <em class="is-pending">{{ document.status.value|replace('_', ' ')|title }}</em>
+            {% endif %}
+          </li>
         {% endfor %}
       </ul>
     {% endif %}

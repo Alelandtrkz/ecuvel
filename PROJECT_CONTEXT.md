@@ -1,6 +1,6 @@
 # Contexto permanente de ECUVEL
 
-Última actualización: 2026-08-11.
+Última actualización: 2026-08-17.
 
 Este archivo resume el estado funcional y técnico de ECUVEL para que una persona o agente pueda orientarse rápido antes de trabajar. No reemplaza las migraciones, pruebas ni el código fuente. Debe mantenerse como una memoria viva del proyecto.
 
@@ -61,11 +61,11 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 
 ### ECUVEL Partners
 
-`/partners` es el área privada para vendedores autenticados. Incluye onboarding de tienda, revisión por CLI, contrato con código de confirmación, activación de tienda, productos, reseñas, pedidos y ventas. Los productos nacen como `ProductDraft`; al ser aprobados por ECUVEL conservan el borrador y su historial, pero pasan a mostrarse como la oferta pública autoritativa sin duplicar filas en “Mis productos”. El vendedor ve motivos y observaciones de corrección/rechazo y puede reenviar los estados `CHANGES_REQUESTED`. El flujo de pedidos separa la preparación de la tienda mediante `SellerInboundPackage` del fulfillment hacia el comprador mediante `OrderPackage`. Ventas deriva importes de `SellerOrder` y utiliza `SellerPayout`/`SellerPayoutItem` para liquidaciones ECUVEL → tienda.
+`/partners` es el área privada para vendedores autenticados. Incluye onboarding de tienda, correcciones estructuradas, contrato con código de confirmación, activación de tienda, productos, reseñas, pedidos y ventas. En el onboarding, una observación administrativa abre directamente el paso afectado; los documentos reemplazados permanecen privados y auditables, mientras la nueva versión queda pendiente de revisión. Los productos nacen como `ProductDraft`; al ser aprobados por ECUVEL conservan el borrador y su historial, pero pasan a mostrarse como la oferta pública autoritativa sin duplicar filas en “Mis productos”. El vendedor ve motivos y observaciones de corrección/rechazo y puede reenviar los estados `CHANGES_REQUESTED`. El flujo de pedidos separa la preparación de la tienda mediante `SellerInboundPackage` del fulfillment hacia el comprador mediante `OrderPackage`. Ventas deriva importes de `SellerOrder` y utiliza `SellerPayout`/`SellerPayoutItem` para liquidaciones ECUVEL → tienda.
 
 ### ECUVEL Admin
 
-`/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. `/admin/products` implementa la cola real de moderación: tabs por estado, búsqueda, paginación, panel de prevalidación determinística, checklist manual, preview privada que reutiliza el detalle público, correcciones, rechazo, aprobación y publicación transaccional. `/admin/fulfillment` es el centro de control de paquetes de entrada que ya fueron recibidos por ECUVEL: lista ubicación, custodia, destino, último movimiento, tiempo en estado y desviaciones; el detalle permite asignar/reasignar traslado y crear una corrección de ruta mediante POST. `/admin/scanner` es la superficie de ejecución física: recepción vendedor → ECUVEL, pickup a transportista, llegada inter-puntos, entrega completa al comprador y consulta read-only. Reutiliza los servicios canónicos de dominio con CSRF, rate limit, locking, idempotencia y Post/Redirect/Get. Los GET son read-only. Los módulos no implementados se identifican como “Próximamente”.
+`/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. `/admin/products` implementa la cola real de moderación: tabs por estado, búsqueda, paginación, panel de prevalidación determinística, checklist manual, preview privada que reutiliza el detalle público, correcciones, rechazo, aprobación y publicación transaccional. `/admin/stores` implementa la moderación real del onboarding: listado y KPI, búsqueda/filtros, documentos y contrato privados, historial append-only, correcciones por campo/documento y aprobación de verificación con checklist. Aprobar solo habilita el contrato; no activa ni verifica la tienda. `/admin/fulfillment` es el centro de control de paquetes de entrada que ya fueron recibidos por ECUVEL: lista ubicación, custodia, destino, último movimiento, tiempo en estado y desviaciones; el detalle permite asignar/reasignar traslado y crear una corrección de ruta mediante POST. `/admin/scanner` es la superficie de ejecución física: recepción vendedor → ECUVEL, pickup a transportista, llegada inter-puntos, entrega completa al comprador y consulta read-only. Reutiliza los servicios canónicos de dominio con CSRF, rate limit, locking, idempotencia y Post/Redirect/Get. Los GET son read-only. Los módulos no implementados se identifican como “Próximamente”.
 
 ## Flujos críticos
 
@@ -111,10 +111,11 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 1. Usuario inicia `/partners`.
 2. Completa datos y documentos.
 3. Envía solicitud.
-4. Revisión CLI aprueba, rechaza o pide correcciones.
-5. Si se aprueba, firma contrato mediante código de confirmación.
-6. La tienda queda activa y verificada.
-7. Productos queda disponible para crear borradores.
+4. ECUVEL staff revisa en `/admin/stores` y puede solicitar correcciones específicas; cada reenvío crea un nuevo evento `PENDING` sin borrar el historial.
+5. Aprobar la verificación cambia el onboarding a `APPROVED` y habilita el contrato, pero conserva `Store.PENDING_REVIEW` e `is_verified=False`.
+6. El seller solicita OTP, acepta las declaraciones y firma el contrato mediante el servicio canónico.
+7. Solo esa aceptación cambia el onboarding a `COMPLETED`, la tienda a `ACTIVE + verified` y provisiona su ubicación comercial predeterminada.
+8. Productos queda disponible para crear borradores.
 
 ### Borradores de producto
 
@@ -162,7 +163,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - `User.public_account_code` permite buscar al comprador en la entrega física, pero no sustituye documento, QR firmado, OTP ni otra autenticación; la confirmación humana es obligatoria.
 - Las transiciones de Fulfillment Admin son exclusivamente POST y actualizan atómicamente estado actual, traslado, custodia y evento; los eventos logísticos no se editan ni eliminan.
 - Los GET públicos o de cliente no deben mutar pagos, pedidos, reservas, inventario ni fulfillment.
-- La revisión web de comprobantes y la moderación/publicación de productos están limitadas a ECUVEL staff activo y reutilizan reglas transaccionales del dominio; otras moderaciones sensibles continúan por CLI cuando no existe una interfaz web explícita.
+- La revisión web de comprobantes, productos y onboarding de tiendas está limitada a ECUVEL staff activo y reutiliza reglas transaccionales del dominio; otras moderaciones sensibles continúan por CLI cuando no existe una interfaz web explícita.
 - No se deben ejecutar comandos destructivos como reset de Git, limpieza masiva, downgrade de base o borrado de volúmenes sin autorización explícita.
 
 ## Comandos y validaciones habituales
@@ -192,7 +193,7 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 ## Límites actuales y pendientes conocidos
 
 - No hay pasarela de tarjeta real; tarjeta permanece deshabilitada.
-- Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes y la moderación/publicación de productos están disponibles para ECUVEL staff; reseñas y onboarding continúan por CLI donde no haya una interfaz administrativa explícita.
+- Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes, la moderación/publicación de productos y la moderación del onboarding de tiendas están disponibles para ECUVEL staff; reseñas continúan por CLI donde no haya una interfaz administrativa explícita.
 - Pedidos ya tiene listado, detalle, revisión de pago y enlaces bidireccionales con Fulfillment, Scanner e Inventario. Fulfillment Admin ya tiene lista y detalle operativos. Escáner cubre las cinco operaciones físicas y la consulta rápida; Inventario cubre paquetes, esperados, existencias, movimientos y conteo físico por punto. Marketplace, finanzas, gestión completa de incidencias y auditoría completa todavía no tienen pantallas operativas propias.
 - No existe todavía un QR firmado, token de retiro de un solo uso ni OTP para entrega. El código público `U-...` solo identifica la cuenta y la entrega depende de verificación física explícita del operador.
 - No hay gestión completa de inventario para vendedores desde Partners.

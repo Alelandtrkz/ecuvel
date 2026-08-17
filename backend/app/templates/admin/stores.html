@@ -1,0 +1,55 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Moderación de tiendas | ECUVEL Admin{% endblock %}
+{% block styles %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/admin-stores.css') }}">{% endblock %}
+{% block admin_content %}
+<main class="admin-page admin-stores-page">
+  <header class="admin-page-heading admin-stores-heading">
+    <div><p class="admin-eyebrow">Marketplace</p><h1>Moderación de tiendas</h1><p>Revisa solicitudes reales, solicita correcciones y habilita el paso de verificación al contrato ECUVEL.</p></div>
+  </header>
+
+  <section class="admin-store-kpis" aria-label="Indicadores de onboarding">
+    <article class="admin-card"><span>Solicitudes hoy</span><strong>{{ page.requests_today }}</strong><i data-lucide="inbox"></i><small>Envíos pendientes recibidos hoy</small></article>
+    <article class="admin-card"><span>Pendientes</span><strong>{{ page.counts.pending }}</strong><i data-lucide="clipboard-clock"></i><small>{{ 'Requiere atención' if page.counts.pending else 'Cola al día' }}</small></article>
+    <article class="admin-card"><span>Tiempo medio de primera revisión</span><strong>{% if page.average_first_review_minutes is not none %}{{ page.average_first_review_minutes }} min{% else %}—{% endif %}</strong><i data-lucide="timer"></i><small>{{ 'Desde el envío hasta la primera decisión' if page.average_first_review_minutes is not none else 'Sin datos suficientes' }}</small></article>
+  </section>
+
+  <section class="admin-card admin-stores-panel">
+    <nav class="admin-store-tabs" aria-label="Estado de las solicitudes">
+      {% for key, label in [('pending','Pendientes'),('corrections','Correcciones'),('contract','Contrato pendiente'),('active','Activas'),('all','Todas')] %}
+        <a class="{{ 'is-active' if page.tab == key }}" href="{{ url_for('admin.stores', status=key) }}" {% if page.tab == key %}aria-current="page"{% endif %}>{{ label }} <span>{{ page.counts[key] }}</span></a>
+      {% endfor %}
+    </nav>
+
+    <form class="admin-store-filters" method="get">
+      <input type="hidden" name="status" value="{{ page.tab }}">
+      <label class="admin-store-search"><i data-lucide="search"></i><span class="visually-hidden">Buscar solicitudes</span><input name="q" value="{{ page.query }}" maxlength="160" placeholder="Buscar por tienda, RUC, código, email o ubicación..."></label>
+      <label><span>Provincia</span><select name="province"><option value="">Todas</option>{% for option in page.provinces %}<option value="{{ option }}" {{ 'selected' if page.province == option }}>{{ option }}</option>{% endfor %}</select></label>
+      <label><span>Ciudad</span><select name="city"><option value="">Todas</option>{% for option in page.cities %}<option value="{{ option }}" {{ 'selected' if page.city == option }}>{{ option }}</option>{% endfor %}</select></label>
+      <label><span>Documentos</span><select name="documents"><option value="">Todos</option><option value="pending" {{ 'selected' if page.document_state == 'pending' }}>Pendientes</option><option value="approved" {{ 'selected' if page.document_state == 'approved' }}>Aprobados</option><option value="replacement" {{ 'selected' if page.document_state == 'replacement' }}>Requieren reemplazo</option></select></label>
+      <label><span>Desde</span><input type="date" name="date_from" value="{{ page.date_from }}"></label>
+      <label><span>Hasta</span><input type="date" name="date_to" value="{{ page.date_to }}"></label>
+      <button class="admin-button" type="submit">Aplicar</button>
+      {% if page.query or page.province or page.city or page.document_state or page.date_from or page.date_to %}<a class="admin-store-clear" href="{{ url_for('admin.stores', status=page.tab) }}">Limpiar</a>{% endif %}
+    </form>
+
+    {% if page.rows %}
+      <div class="admin-store-table-wrap"><table class="admin-store-table"><thead><tr><th>Tienda</th><th>Solicitante</th><th>Ubicación</th><th>Registro</th><th>Documentos</th><th>Estado</th><th>Acción</th></tr></thead><tbody>
+      {% for row in page.rows %}{% set item = row.onboarding %}
+        <tr class="{{ 'is-active-store' if item.status.value == 'COMPLETED' }}">
+          <td data-label="Tienda"><strong>{{ item.store_name or 'Tienda sin nombre' }}</strong><small>{{ item.store.public_store_code if item.store else 'Código pendiente' }} · {{ item.legal_id_number or 'RUC pendiente' }}</small></td>
+          <td data-label="Solicitante"><strong>{{ item.user.full_name or 'Usuario ECUVEL' }}</strong><small>{{ item.user.email or 'Sin email' }}</small></td>
+          <td data-label="Ubicación">{{ item.city or 'Pendiente' }}<small>{{ item.province or '' }}</small></td>
+          <td data-label="{{ 'Activación' if item.status.value == 'COMPLETED' else 'Registro' }}">{{ item.completed_at|ecuador_datetime if item.status.value == 'COMPLETED' and item.completed_at else (item.submitted_at|ecuador_datetime if item.submitted_at else 'Sin envío') }}</td>
+          <td data-label="Documentos"><strong>{{ row.document_count }} {{ 'documento' if row.document_count == 1 else 'documentos' }}</strong><small>{% if row.replacement_documents %}{{ row.replacement_documents }} requiere reemplazo{% elif row.pending_documents %}{{ row.approved_documents }} aprobados · {{ row.pending_documents }} pendientes{% else %}{{ row.approved_documents }} aprobados{% endif %}</small></td>
+          <td data-label="Estado"><span class="admin-store-status admin-store-status--{{ item.status.value|lower }}">{{ row.status_label }}</span>{% if item.status.value == 'COMPLETED' %}<small>{{ 'Verificada · Contrato aceptado' if item.store and item.store.is_verified else 'Activación inconsistente' }}</small>{% endif %}</td>
+          <td data-label="Acción"><a class="admin-button admin-button--soft" href="{{ url_for('admin.store_review', onboarding_id=item.id) }}">{{ 'Revisar solicitud' if item.status.value == 'SUBMITTED' else ('Ver detalle' if item.status.value == 'COMPLETED' else 'Ver solicitud') }}</a></td>
+        </tr>
+      {% endfor %}
+      </tbody></table></div>
+      <footer class="admin-store-pagination"><span>Mostrando {{ page.rows|length }} de {{ page.total }} solicitudes</span><nav aria-label="Paginación">{% if page.page > 1 %}<a href="{{ url_for('admin.stores', status=page.tab, q=page.query, province=page.province, city=page.city, documents=page.document_state, date_from=page.date_from, date_to=page.date_to, page=page.page-1) }}">Anterior</a>{% endif %}<span>Página {{ page.page }} de {{ page.pages }}</span>{% if page.page < page.pages %}<a href="{{ url_for('admin.stores', status=page.tab, q=page.query, province=page.province, city=page.city, documents=page.document_state, date_from=page.date_from, date_to=page.date_to, page=page.page+1) }}">Siguiente</a>{% endif %}</nav></footer>
+    {% else %}
+      <div class="admin-store-empty"><i data-lucide="store"></i><h2>No hay solicitudes en este estado</h2><p>{% if page.query %}Prueba otra búsqueda o limpia los filtros.{% else %}Las solicitudes aparecerán aquí cuando los sellers completen el onboarding.{% endif %}</p></div>
+    {% endif %}
+  </section>
+</main>
+{% endblock %}
