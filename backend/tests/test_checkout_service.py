@@ -31,6 +31,7 @@ from app.models.enums import (
     PaymentMethod,
     PaymentStatus,
     ReservationStatus,
+    SellerCommissionType,
     SellerOrderStatus,
     StoreStatus,
 )
@@ -198,6 +199,35 @@ def test_bank_transfer_checkout_creates_complete_pending_order(
     assert balance.reserved_quantity == 2
     assert session.scalar(select(func.count(SellerOrder.id))) == 1
     assert session.scalar(select(func.count(OrderItem.id))) == 1
+
+
+def test_checkout_preserves_fixed_commission_compatibility(session: Session):
+    base = create_catalog_and_stock(session, stock=10)
+    offer = session.get(SellerOffer, base.offer_id)
+    offer.price = Decimal("1.00")
+    offer.compare_at_price = None
+    offer.commission_type = SellerCommissionType.FIXED
+    offer.commission_rate = Decimal("0.00")
+    offer.commission_fixed_amount = Decimal("0.25")
+    offer.commission_currency = "USD"
+    session.commit()
+
+    with session.begin():
+        result = _checkout(
+            session, base, _cart((base.offer_id, 3, True)), "fixed-commission"
+        )
+
+    seller_order = session.scalar(
+        select(SellerOrder).where(SellerOrder.order_id == result.order_id)
+    )
+    item = session.scalar(
+        select(OrderItem).where(OrderItem.seller_order_id == seller_order.id)
+    )
+    assert item.commission_rate_snapshot == Decimal("0.00")
+    assert item.quantity == 3
+    assert item.commission_amount_snapshot == Decimal("0.75")
+    assert seller_order.commission_total == Decimal("0.75")
+    assert seller_order.seller_net_total == Decimal("2.25")
 
 
 def test_checkout_creates_one_seller_order_per_store(session: Session):

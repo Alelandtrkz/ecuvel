@@ -75,6 +75,7 @@ from app.services.product_drafts import (
     create_or_reuse_draft_from_selection,
     delete_product_draft_file,
     delete_product_draft_color_media,
+    draft_commission_display_rows,
     get_product_draft_for_user,
     reorder_product_draft_images,
     save_product_draft,
@@ -1116,6 +1117,7 @@ def product_draft_preview(draft_id):
         "partners/product_draft_preview.html",
         view=view,
         preview=preview,
+        commission_rows=draft_commission_display_rows(db.session, draft),
         current_partner_tab="products",
     )
 

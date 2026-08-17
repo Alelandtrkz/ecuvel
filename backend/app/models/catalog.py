@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.extensions import db
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import OfferStatus
+from app.models.enums import OfferStatus, SellerCommissionType
 
 
 class Category(
@@ -351,6 +351,26 @@ class SellerOffer(
         server_default="0.00",
     )
 
+    commission_type: Mapped[SellerCommissionType] = mapped_column(
+        Enum(
+            SellerCommissionType,
+            name="seller_commission_type",
+            native_enum=True,
+            validate_strings=True,
+        ),
+        nullable=False,
+        default=SellerCommissionType.PERCENTAGE,
+        server_default=SellerCommissionType.PERCENTAGE.value,
+    )
+
+    commission_fixed_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(12, 2), nullable=True,
+    )
+
+    commission_currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="USD", server_default="USD",
+    )
+
     status: Mapped[OfferStatus] = mapped_column(
         Enum(
             OfferStatus,
@@ -399,6 +419,16 @@ class SellerOffer(
         CheckConstraint(
             "commission_rate >= 0 AND commission_rate <= 100",
             name="seller_offer_commission_valid",
+        ),
+        CheckConstraint(
+            "(commission_type = 'PERCENTAGE' AND commission_fixed_amount IS NULL) "
+            "OR (commission_type = 'FIXED' AND commission_rate = 0 "
+            "AND commission_fixed_amount > 0 AND commission_fixed_amount < price)",
+            name="seller_offer_commission_mode_valid",
+        ),
+        CheckConstraint(
+            "commission_currency = 'USD'",
+            name="seller_offer_commission_currency_valid",
         ),
     )
 

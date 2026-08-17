@@ -135,9 +135,11 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 4. Aprobar bloquea y revalida el borrador, la tienda, categorías, variantes, medios, comisión y ubicación comercial de stock. Después materializa `Product`, solo las `ProductVariant` activas, una `SellerOffer` por presentación, `ProductMedia`, `InventoryBalance`, movimiento inicial, `ProductDraftPublication` y evento `APPROVED`.
 5. `ProductDraftPublication` es único por borrador y producto; evita duplicados y conserva la trazabilidad del origen. El borrador aprobado no se elimina.
 6. Las variantes V4, sus SKU estables, configuración, eje visual y asociaciones de media por color se conservan en el catálogo público. El storefront usa sus selectores, galerías, precio y stock normales.
-7. La comisión se resuelve de forma explícita por precedencia Store+Category → Category → Global y se copia como snapshot en `SellerOffer.commission_rate`. Sin regla no se publica.
-8. Cada tienda debe tener una `StoreInventoryLocation` predeterminada y activa dentro de un `Warehouse` comercial asociado a la propia tienda. El stock inicial nunca usa `admin_operating_warehouse_id` ni un punto logístico ECUVEL.
-9. Los archivos del draft siguen privados. Al aprobar se verifican y copian a almacenamiento de catálogo con identificadores públicos nuevos; si falla la operación, se revierten las filas y se eliminan las copias creadas.
+7. La comisión comercial no admite excepciones por tienda. Para cada presentación con precio menor a USD 3.00 se aplica USD 0.25 fijo; desde USD 3.00 se utiliza el porcentaje de la categoría más específica, luego sus ancestros y finalmente una regla global explícita. El precio debe ser mayor a USD 0.25.
+8. La comisión se calcula con `Decimal`, centavos y `ROUND_HALF_UP`; se muestra dinámicamente mientras se edita y queda congelada por SKU al enviar. Moderación y publicación usan exclusivamente ese snapshot. Un reenvío después de correcciones crea un snapshot nuevo.
+9. Cada tienda `ACTIVE + VERIFIED` recibe de forma idempotente una `StoreInventoryLocation` predeterminada y activa dentro de un `Warehouse` comercial asociado a la propia tienda. La publicación vuelve a garantizarla como backstop. El stock inicial nunca usa `admin_operating_warehouse_id` ni un punto logístico ECUVEL.
+10. Cada `SellerOffer` conserva `commission_type`, porcentaje o tarifa fija y moneda. La comisión del seller ya cubre marketplace y logística seller → red ECUVEL en esta fase; no se añaden cargos paralelos de transporte o handling al seller.
+11. Los archivos del draft siguen privados. Al aprobar se verifican y copian a almacenamiento de catálogo con identificadores públicos nuevos; si falla la operación, se revierten las filas y se eliminan las copias creadas.
 
 ## Reglas importantes del proyecto
 
@@ -150,6 +152,8 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - En Partners, el código de producto vive actualmente en `ProductDraft.seller_sku`; `ProductDraft.barcode` debe reflejar el mismo valor.
 - La condición de borradores de producto queda fija en `NEW`.
 - Los borradores no publican productos ni ofertas por sí solos; solo la aprobación administrativa POST ejecuta la publicación real.
+- Un borrador `SUBMITTED` sin snapshot de comisión nunca se recalcula silenciosamente al aprobar: debe volver a `CHANGES_REQUESTED` y ser reenviado por el seller.
+- Los cambios futuros de precio de una oferta requerirán un flujo comercial explícito porque cruzar USD 2.99 → USD 3.00 cambia de tarifa fija a porcentaje; esta fase no modifica ofertas publicadas silenciosamente.
 - Existe un contrato puro de conversión de borrador V4 (con migración diferida no destructiva de V2/V3) reutilizado por el servicio transaccional de publicación. La configuración pública `ProductMedia`/variantes conserva bindings por color y SKU.
 - Los archivos privados no deben ir bajo `static`.
 - El acceso de administrador ECUVEL no se deriva de ser `OWNER` o `ADMINISTRATOR` de una tienda; exige `User.is_ecuvel_staff`.
@@ -192,6 +196,7 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 - Pedidos ya tiene listado, detalle, revisión de pago y enlaces bidireccionales con Fulfillment, Scanner e Inventario. Fulfillment Admin ya tiene lista y detalle operativos. Escáner cubre las cinco operaciones físicas y la consulta rápida; Inventario cubre paquetes, esperados, existencias, movimientos y conteo físico por punto. Marketplace, finanzas, gestión completa de incidencias y auditoría completa todavía no tienen pantallas operativas propias.
 - No existe todavía un QR firmado, token de retiro de un solo uso ni OTP para entrega. El código público `U-...` solo identifica la cuenta y la entrega depende de verificación física explícita del operador.
 - No hay gestión completa de inventario para vendedores desde Partners.
+- Checkout ya copia a `OrderItem` el importe monetario de comisión y la tasa (cero para tarifa fija). Antes de construir liquidaciones históricas completas conviene añadir snapshots explícitos de `commission_type` y tarifa fija unitaria; el importe congelado actual sí permite calcular el neto de la venta sin consultar reglas vigentes.
 - No hay favoritos anónimos persistentes, listas múltiples, notificaciones, chat, social login, 2FA, passkeys ni panel de vendedor completo.
 - No hay SMTP/SMS productivo integrado; los backends de desarrollo/pruebas son controlados por configuración.
 - Las imágenes reales de catálogo y logos persistentes aún son limitados; se usan placeholders cuando corresponde.
@@ -201,6 +206,9 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 - Scanner e Inventario comparten el punto operativo mediante la clave de sesión firmada `admin_operating_warehouse_id`. Toda lectura y mutación vuelve a validar que el almacén y la ubicación existan y estén activos.
 - El inventario físico de paquetes usa dos fuentes canónicas: `SellerInboundPackage + LogisticsPackageState` para paquetes de tiendas y `OrderPackage` para paquetes de salida al comprador.
 - El stock comercial continúa separado en `InventoryBalance`. La disponibilidad se calcula como existencia menos reservado y bloqueado; nunca debe inferirse de la cantidad de paquetes físicos.
+- Publicar inicializa `InventoryBalance` en la bodega del seller y no crea paquetes, trazabilidad o inventario físico ECUVEL. La reserva aumenta `reserved` sin reducir `on_hand`; picking consume ambos una sola vez. El drop-off no vuelve a descontar stock.
+- Los almacenes seller (`Warehouse.seller_store_id IS NOT NULL`) no son puntos operativos y quedan excluidos de Scanner, Fulfillment, selectores y KPI de Admin Inventory. La red beta usa actualmente Punto A como único Punto ECUVEL, aunque el modelo admite múltiples puntos.
+- El circuito físico ECUVEL empieza únicamente cuando un paquete real de entrada se recibe mediante Scanner; hasta entonces el stock publicado sigue siendo inventario comercial del seller.
 - `/admin/inventory` ofrece Paquetes, Existencias y Movimientos; `/admin/inventory/expected` separa paquetes esperados que todavía no forman parte del inventario físico del punto.
 - Los conteos físicos usan `PhysicalInventoryCount`, `PhysicalInventoryCountExpectedPackage` y `PhysicalInventoryCountScan`. El baseline queda congelado al iniciar, solo puede existir un conteo abierto por almacén, los escaneos duplicados son idempotentes y el conteo finalizado es inmutable desde los servicios web.
 - Rechazar una recepción fuera de ruta solo registra `INCIDENT_REPORTED`; no cambia ubicación, custodia, estado ni traslado. Aceptarla usa la recepción normal y marca la desviación de forma explícita.

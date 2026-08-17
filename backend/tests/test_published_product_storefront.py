@@ -5,6 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Product
 from app.storefront import _media_urls_for_variant, _variant_value_key
+from app.services.product_drafts import capture_submission_commission_snapshots
 from app.services.product_publication import (
     MODERATION_CHECKS,
     publish_product_draft,
@@ -37,6 +38,7 @@ def _publish(app, session, tmp_path, *, family: bool):
         subcategory=subcategory,
         media_root=source_root,
     )
+    capture_submission_commission_snapshots(session, draft)
     session.commit()
     result = publish_product_draft(
         session,

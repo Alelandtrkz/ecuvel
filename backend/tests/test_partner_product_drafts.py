@@ -5,6 +5,7 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 from PIL import Image
@@ -15,6 +16,7 @@ from app.extensions import db
 from app.catalog.product_templates import PRODUCT_TEMPLATES, validate_template_registry
 from app.models import (
     Category,
+    MarketplaceCommissionRule,
     Product,
     ProductDraft,
     ProductDraftFile,
@@ -90,6 +92,16 @@ def _login(client, user: User):
         },
         follow_redirects=False,
     )
+
+
+def _configure_commission(session, draft: ProductDraft, rate: str = "8.00"):
+    session.add(MarketplaceCommissionRule(
+        category_id=draft.subcategory_id,
+        store_id=None,
+        commission_rate=Decimal(rate),
+        is_active=True,
+    ))
+    session.commit()
 
 
 def _enabled_store(session, user: User, *, role: StoreMemberRole = StoreMemberRole.OWNER) -> Store:
@@ -311,6 +323,14 @@ def test_product_draft_form_removes_highlights_and_package_content_section(clien
     assert "Agregar variante" in html
     assert "Generar combinaciones" not in html
     assert "Precio de venta" in html
+    assert 'data-commission-policy' in html
+    assert 'data-single-commission-summary' in html
+    assert "Comisión ECUVEL" in html
+    assert "Determinada automáticamente por ECUVEL" in html
+    assert "Comisión aplicable" in html
+    assert 'name="commission_rate"' not in html
+    assert 'name="commission_fixed_amount"' not in html
+    assert 'name="commission_type"' not in html
     assert 'data-partner-select' in html
     assert 'class="partner-select__native"' in html
     assert 'data-partner-select-button' in html
@@ -640,6 +660,7 @@ def test_valid_draft_submits_without_highlights_or_package_contents(client, sess
     user = _user(session)
     _enabled_store(session, user)
     draft = _create_draft_via_selector(client, session, user)
+    _configure_commission(session, draft)
     client.post(
         f"/partners/products/drafts/{draft.id}/files",
         data={
@@ -673,12 +694,22 @@ def test_valid_draft_submits_without_highlights_or_package_contents(client, sess
     assert submitted.completion_percentage == 100
     assert submitted.highlights == []
     assert submitted.package_contents == []
+    assert submitted.pricing_data["commission_snapshot"]["rate_percent"] == "8.00"
+
+    preview = client.get(f"/partners/products/drafts/{draft.id}/preview")
+    preview_html = preview.get_data(as_text=True)
+    assert preview.status_code == 200
+    assert "Condiciones comerciales" in preview_html
+    assert "Resumen comercial" in preview_html
+    assert "Comisión fijada al enviar." in preview_html
+    assert "8.00%" in preview_html
 
 
 def test_saved_draft_can_be_submitted_from_summary_without_creating_catalog_rows(client, session):
     user = _user(session)
     _enabled_store(session, user)
     draft = _create_draft_via_selector(client, session, user)
+    _configure_commission(session, draft)
     upload = client.post(
         f"/partners/products/drafts/{draft.id}/files",
         data={

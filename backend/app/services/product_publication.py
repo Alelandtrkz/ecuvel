@@ -24,14 +24,17 @@ from app.models import (
 from app.models.enums import OfferStatus, ProductDraftStatus, StoreStatus
 from app.services.inventory import InventoryServiceError, initialize_offer_inventory
 from app.services.marketplace_policy import (
-    CommissionRuleMissingError,
+    CommissionSnapshotError,
     StoreInventoryLocationMissingError,
-    resolve_default_store_inventory_location,
-    resolve_marketplace_commission,
+    commission_from_snapshot,
+    ensure_store_inventory_location,
 )
 from app.services.private_storage import private_file_path, verify_private_file
 from app.services.product_drafts import build_product_draft_view
-from app.services.product_variant_builder import publication_payload_from_draft
+from app.services.product_variant_builder import (
+    family_variants_enabled,
+    publication_payload_from_draft,
+)
 
 
 MODERATION_CHECKS = (
@@ -184,19 +187,8 @@ def _grams(value) -> int | None:
     return int((_decimal(value, "El peso") * 1000).quantize(Decimal("1")))
 
 
-def _family_enabled(draft: ProductDraft) -> bool:
-    configuration = draft.variant_configuration or {}
-    return (
-        configuration.get("version", 1) < 4
-        or (
-            configuration.get("enabled") is True
-            and configuration.get("mode") == "family"
-        )
-    )
-
-
 def _variant_rows(draft: ProductDraft) -> list[dict]:
-    if _family_enabled(draft):
+    if family_variants_enabled(draft.variant_configuration):
         return [dict(row) for row in draft.variants or [] if row.get("enabled", True)]
     return [{
         "variant_id": str(draft.id),
@@ -321,27 +313,40 @@ def publish_product_draft(
         raise ProductModerationValidationError("La categoría seleccionada no está activa.")
 
     try:
-        commission = resolve_marketplace_commission(
-            session, store_id=draft.store_id, category_id=draft.subcategory_id,
-        )
-    except CommissionRuleMissingError as exc:
-        raise ProductModerationValidationError(str(exc)) from exc
-    try:
-        inventory_location = resolve_default_store_inventory_location(
-            session, store_id=draft.store_id,
-        )
+        inventory_location = ensure_store_inventory_location(session, store=store)
     except StoreInventoryLocationMissingError as exc:
         raise ProductModerationValidationError(str(exc)) from exc
     publication_payload = publication_payload_from_draft(draft)
     rows = (
         [dict(row) for row in publication_payload["variants"]]
-        if _family_enabled(draft)
+        if family_variants_enabled(draft.variant_configuration)
         else _variant_rows(draft)
     )
     if not rows:
         raise ProductModerationValidationError("La familia no tiene variantes activas.")
 
-    family_enabled = _family_enabled(draft)
+    raw_snapshots = (
+        dict((draft.variant_configuration or {}).get("commission_snapshots") or {})
+        if family_variants_enabled(draft.variant_configuration)
+        else {str(draft.seller_sku or ""): (draft.pricing_data or {}).get("commission_snapshot")}
+    )
+    commissions = {}
+    try:
+        for row in rows:
+            sku = str(row.get("sku") or "").strip()
+            commissions[sku] = commission_from_snapshot(
+                raw_snapshots.get(sku),
+                expected_price=row.get("price"),
+                expected_category_id=draft.subcategory_id,
+            )
+    except CommissionSnapshotError as exc:
+        raise ProductModerationValidationError(str(exc)) from exc
+    if set(raw_snapshots) != set(commissions):
+        raise ProductModerationValidationError(
+            "El snapshot de comisión no corresponde a todas las variantes activas."
+        )
+
+    family_enabled = family_variants_enabled(draft.variant_configuration)
     product_data = publication_payload["product"]
     product = Product(
         id=uuid.uuid4(),
@@ -368,11 +373,13 @@ def publish_product_draft(
         session.add_all(media_rows)
         dimensions = draft.dimensions_data or {}
         shared = _shared_attributes(draft)
+        approved_commissions: list[dict] = []
         for row in rows:
             sku = str(row.get("sku") or "").strip()
             if not sku:
                 raise ProductModerationValidationError("Una presentación no tiene SKU.")
             price = _decimal(row.get("price"), "El precio")
+            commission = commissions[sku]
             stock = _integer(row.get("stock"), "El stock")
             if price <= 0:
                 raise ProductModerationValidationError("El precio debe ser mayor a cero.")
@@ -405,7 +412,10 @@ def publish_product_draft(
                 currency="USD",
                 price=price,
                 compare_at_price=compare_price,
+                commission_type=commission.mode,
                 commission_rate=commission.rate,
+                commission_fixed_amount=commission.fixed_amount,
+                commission_currency=commission.currency,
                 status=OfferStatus.ACTIVE,
             )
             session.add_all((variant, offer))
@@ -421,6 +431,25 @@ def publish_product_draft(
                 )
             except InventoryServiceError as exc:
                 raise ProductModerationValidationError(str(exc)) from exc
+            approved_commissions.append({
+                "sku": sku,
+                "mode": commission.mode.value,
+                "rate_percent": (
+                    str(commission.rate_percent)
+                    if commission.rate_percent is not None else None
+                ),
+                "fixed_amount": (
+                    str(commission.fixed_amount)
+                    if commission.fixed_amount is not None else None
+                ),
+                "commission_amount": str(commission.commission_amount),
+                "seller_net_amount": str(commission.seller_net_amount),
+                "price": str(commission.price),
+                "category_id": str(commission.category_id),
+                "category_path": list(commission.category_path),
+                "rule_id": str(commission.rule_id) if commission.rule_id else None,
+                "source": commission.source,
+            })
 
         mapping = ProductDraftPublication(
             draft_id=draft.id,
@@ -437,9 +466,7 @@ def publish_product_draft(
                 note=None,
                 checklist_snapshot={
                     **checklist,
-                    "commission_rule_id": str(commission.rule_id),
-                    "commission_scope": commission.scope,
-                    "commission_rate": str(commission.rate),
+                    "commission_snapshots": approved_commissions,
                     "inventory_location_id": str(inventory_location.id),
                 },
                 actor_user_id=actor_user_id,

@@ -9,7 +9,15 @@ from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 
 from app.extensions import db
-from app.models import Store, StoreContractAcceptance, StoreMember, StoreOnboarding, User
+from app.models import (
+    Store,
+    StoreContractAcceptance,
+    StoreInventoryLocation,
+    StoreMember,
+    StoreOnboarding,
+    User,
+    Warehouse,
+)
 from app.models.enums import (
     StoreContractAcceptanceStatus,
     StoreMemberRole,
@@ -156,4 +164,16 @@ def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client
     assert store.is_verified is True
     assert acceptance.status == StoreContractAcceptanceStatus.ACCEPTED
     assert acceptance.pdf_storage_key
+    seller_warehouses = session.scalars(
+        select(Warehouse).where(Warehouse.seller_store_id == store.id)
+    ).all()
+    assert len(seller_warehouses) == 1
+    mapping = session.scalar(
+        select(StoreInventoryLocation).where(
+            StoreInventoryLocation.store_id == store.id,
+            StoreInventoryLocation.is_default.is_(True),
+        )
+    )
+    assert mapping is not None
+    assert mapping.location.warehouse_id == seller_warehouses[0].id
     assert client.get("/partners/products").status_code == 200

@@ -14,8 +14,13 @@ from app.services.product_draft_preview import (
     DraftPreviewContext,
     build_product_draft_preview,
 )
-from app.services.product_drafts import ProductDraftView, build_product_draft_view
+from app.services.product_drafts import (
+    ProductDraftView,
+    build_product_draft_view,
+    draft_commission_display_rows,
+)
 from app.services.product_publication import MODERATION_CHECKS, MODERATION_REASONS
+from app.services.product_variant_builder import family_variants_enabled
 
 
 STATUS_FILTERS = {
@@ -56,6 +61,8 @@ class AdminProductPage:
     selected: AdminProductRow | None
     selected_view: ProductDraftView | None
     selected_preview: DraftPreviewContext | None
+    selected_commissions: tuple[dict, ...]
+    selected_commission_snapshot_complete: bool
     status_key: str
     query: str
     page: int
@@ -74,15 +81,8 @@ def _decimal(value) -> Decimal | None:
     return parsed if parsed.is_finite() else None
 
 
-def _family_enabled(draft: ProductDraft) -> bool:
-    config = draft.variant_configuration or {}
-    return config.get("version", 1) < 4 or (
-        config.get("enabled") is True and config.get("mode") == "family"
-    )
-
-
 def _price_label(draft: ProductDraft) -> str:
-    if _family_enabled(draft):
+    if family_variants_enabled(draft.variant_configuration):
         prices = [
             _decimal(row.get("price"))
             for row in draft.variants or []
@@ -115,7 +115,7 @@ def _cover(draft: ProductDraft) -> ProductDraftFile | None:
 def _row(draft: ProductDraft) -> AdminProductRow:
     active_variants = (
         sum(1 for item in draft.variants or [] if item.get("enabled", True))
-        if _family_enabled(draft) else 1
+        if family_variants_enabled(draft.variant_configuration) else 1
     )
     return AdminProductRow(
         draft=draft,
@@ -124,6 +124,22 @@ def _row(draft: ProductDraft) -> AdminProductRow:
         active_variants=active_variants,
         status_label=STATUS_LABELS.get(draft.status, draft.status.value),
     )
+
+
+def commission_snapshot_complete(
+    draft: ProductDraft,
+    commission_rows: tuple[dict, ...],
+) -> bool:
+    if family_variants_enabled(draft.variant_configuration):
+        expected = {
+            str(item.get("sku") or "").strip()
+            for item in draft.variants or []
+            if item.get("enabled", True)
+        }
+    else:
+        expected = {str(draft.seller_sku or "").strip()}
+    actual = {str(item.get("sku") or "").strip() for item in commission_rows}
+    return bool(expected) and "" not in expected and actual == expected
 
 
 def _options():
@@ -207,11 +223,20 @@ def get_admin_products_page(
         )
         if selected_view else None
     )
+    selected_commissions = (
+        draft_commission_display_rows(session, selected_draft)
+        if selected_draft is not None else ()
+    )
     return AdminProductPage(
         rows=rows,
         selected=selected_row,
         selected_view=selected_view,
         selected_preview=selected_preview,
+        selected_commissions=selected_commissions,
+        selected_commission_snapshot_complete=(
+            commission_snapshot_complete(selected_draft, selected_commissions)
+            if selected_draft is not None else False
+        ),
         status_key=status_key,
         query=normalized_query,
         page=page,

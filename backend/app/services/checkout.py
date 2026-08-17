@@ -5,7 +5,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from sqlalchemy import func, select
@@ -28,6 +28,7 @@ from app.models.enums import (
     OfferStatus,
     PaymentMethod,
     PaymentStatus,
+    SellerCommissionType,
     StoreStatus,
     UserStatus,
 )
@@ -193,12 +194,18 @@ def _checkout_image_url(
 
 
 def _line_commission(row: _CheckoutRow) -> Decimal:
+    if row.offer.commission_type == SellerCommissionType.FIXED:
+        if row.offer.commission_fixed_amount is None:
+            raise CheckoutPriceError("La oferta no tiene una tarifa fija válida.")
+        return (row.offer.commission_fixed_amount * row.quantity).quantize(
+            MONEY_QUANTUM, rounding=ROUND_HALF_UP
+        )
     return (
         row.offer.price
         * row.quantity
         * row.offer.commission_rate
         / Decimal("100")
-    ).quantize(MONEY_QUANTUM)
+    ).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
 
 
 def _selected_items(cart_state: object) -> dict[uuid.UUID, int]:

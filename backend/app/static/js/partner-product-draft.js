@@ -8,6 +8,64 @@
   let submitting = false;
   let refreshChecklist = null;
   let autosaveNow = null;
+  const commissionPolicy = (() => {
+    try {
+      return JSON.parse(document.querySelector("[data-commission-policy]")?.textContent || "{}");
+    } catch (_error) {
+      return {};
+    }
+  })();
+
+  const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+  const commissionEstimate = (rawPrice) => {
+    const parsedPrice = Number(rawPrice);
+    const price = roundMoney(parsedPrice);
+    const minimum = Number(commissionPolicy.minimum_price || 0.25);
+    const threshold = Number(commissionPolicy.threshold || 3);
+    const fixed = Number(commissionPolicy.fixed_amount || 0.25);
+    if (!Number.isFinite(parsedPrice) || !Number.isFinite(price) || price <= minimum) return null;
+    if (price < threshold) {
+      return { mode: "FIXED", label: `$${fixed.toFixed(2)} fijo`, amount: fixed, net: roundMoney(price - fixed) };
+    }
+    const rate = Number(commissionPolicy.rate_percent);
+    if (!commissionPolicy.available || !Number.isFinite(rate)) return { mode: "MISSING" };
+    const amount = roundMoney(price * rate / 100);
+    return { mode: "PERCENTAGE", label: `${rate.toFixed(2).replace(/\.00$/, "")}% / $${amount.toFixed(2)}`, amount, net: roundMoney(price - amount) };
+  };
+
+  const renderSingleCommission = () => {
+    const summary = document.querySelector("[data-single-commission-summary]");
+    const priceInput = document.querySelector('[name="price"]');
+    if (!summary || !priceInput) return;
+    const estimate = commissionEstimate(priceInput.value);
+    const set = (selector, value) => { const node = summary.querySelector(selector); if (node) node.textContent = value; };
+    if (!estimate) {
+      set("[data-commission-label]", "Comisión ECUVEL");
+      set("[data-commission-value]", "Pendiente");
+      set("[data-commission-source]", commissionPolicy.minimum_price_message || "Define un precio válido.");
+      set("[data-commission-amount]", "—");
+      set("[data-commission-net]", "—");
+      return;
+    }
+    if (estimate.mode === "MISSING") {
+      set("[data-commission-value]", "Sin regla configurada");
+      set("[data-commission-source]", "ECUVEL debe configurar la comisión de esta categoría antes del envío.");
+      set("[data-commission-amount]", "—");
+      set("[data-commission-net]", "—");
+      return;
+    }
+    set("[data-commission-label]", estimate.mode === "FIXED" ? "Tarifa ECUVEL" : "Comisión ECUVEL");
+    set("[data-commission-value]", estimate.mode === "FIXED" ? `$${estimate.amount.toFixed(2)}` : estimate.label.split(" /")[0]);
+    set("[data-commission-source]", estimate.mode === "FIXED"
+      ? "Tarifa fija para productos menores a USD 3.00."
+      : `Determinada por: ${(commissionPolicy.category_path || []).join(" › ")}`);
+    set("[data-commission-amount]", `$${estimate.amount.toFixed(2)}`);
+    set("[data-commission-net]", `$${estimate.net.toFixed(2)}`);
+  };
+
+  document.querySelector('[name="price"]')?.addEventListener("input", renderSingleCommission);
+  renderSingleCommission();
 
   const refreshIcons = () => {
     if (window.lucide?.createIcons) window.lucide.createIcons();
@@ -1458,12 +1516,16 @@
       if (!state.fields.length) return showMessage("Agrega al menos un campo de variante.", "error");
       const options = collectEditorOptions();
       if (!options) return showMessage("Selecciona un valor para cada campo.", "error");
-      const priceNumber = Number(editorPrice?.value || "");
-      const compareNumber = String(editorComparePrice?.value || "").trim()
+      const rawPriceNumber = Number(editorPrice?.value || "");
+      const priceNumber = roundMoney(rawPriceNumber);
+      const rawCompareNumber = String(editorComparePrice?.value || "").trim()
         ? Number(editorComparePrice.value) : null;
+      const compareNumber = rawCompareNumber === null ? null : roundMoney(rawCompareNumber);
       const stockNumber = Number(editorStock?.value || "");
-      if (!Number.isFinite(priceNumber) || priceNumber <= 0) return showMessage("El precio debe ser mayor a cero.", "error");
-      if (compareNumber !== null && (!Number.isFinite(compareNumber) || compareNumber <= priceNumber)) return showMessage("El precio anterior debe ser mayor al precio actual.", "error");
+      if (!Number.isFinite(rawPriceNumber) || !Number.isFinite(priceNumber) || priceNumber <= Number(commissionPolicy.minimum_price || 0.25)) return showMessage(commissionPolicy.minimum_price_message || "El precio debe ser mayor a USD 0.25.", "error");
+      const estimate = commissionEstimate(priceNumber);
+      if (estimate?.mode === "MISSING") return showMessage(estimate.label, "error");
+      if (compareNumber !== null && (!Number.isFinite(rawCompareNumber) || !Number.isFinite(compareNumber) || compareNumber <= priceNumber)) return showMessage("El precio anterior debe ser mayor al precio actual.", "error");
       if (!Number.isInteger(stockNumber) || stockNumber < 0) return showMessage("El stock debe ser un entero no negativo.", "error");
       const duplicate = state.variants.find((row) => row.variantId !== state.editingId && rowKey(row.options) === rowKey(options));
       if (duplicate) return showMessage(`La variante ${rowName(duplicate)} ya existe.`, "error");
@@ -1508,14 +1570,14 @@
         }
         if (row) {
           row.options = options;
-          row.price = editorPrice?.value || "";
-          row.compareAtPrice = editorComparePrice?.value || "";
+          row.price = priceNumber.toFixed(2);
+          row.compareAtPrice = compareNumber === null ? "" : compareNumber.toFixed(2);
           row.stock = editorStock?.value || "";
         }
       } else {
         const row = {
           variantId: newId(), previousCombinationKey: "", options, sku: "",
-          price: editorPrice?.value || "", compareAtPrice: editorComparePrice?.value || "",
+          price: priceNumber.toFixed(2), compareAtPrice: compareNumber === null ? "" : compareNumber.toFixed(2),
           stock: editorStock?.value || "", enabled: true,
         };
         state.variants.push(row);
@@ -1624,7 +1686,7 @@
         identity.appendChild(strong);
         const skuCell = document.createElement("code"); skuCell.className = "partner-variant-row__sku"; skuCell.textContent = row.sku || "SKU al guardar";
         const price = document.createElement("input"); price.name = "variant_price[]"; price.value = row.price; price.inputMode = "decimal"; price.placeholder = "0.00";
-        price.addEventListener("input", () => { row.price = price.value; renderCommercialSummary(); });
+        price.addEventListener("input", () => { row.price = price.value; renderCommercialSummary(); renderRowCommission(); });
         const comparePrice = document.createElement("input"); comparePrice.name = "variant_compare_at_price[]"; comparePrice.value = row.compareAtPrice || ""; comparePrice.inputMode = "decimal"; comparePrice.placeholder = "Opcional";
         comparePrice.addEventListener("input", () => { row.compareAtPrice = comparePrice.value; });
         const stock = document.createElement("input"); stock.name = "variant_stock[]"; stock.value = row.stock; stock.inputMode = "numeric"; stock.placeholder = "0";
@@ -1642,6 +1704,14 @@
         const priceLabel = document.createElement("label"); priceLabel.title = "Precio actual"; priceLabel.append(price);
         const compareLabel = document.createElement("label"); compareLabel.title = "Precio anterior"; compareLabel.append(comparePrice);
         priceCell.append(priceLabel, compareLabel);
+        const commissionCell = document.createElement("span"); commissionCell.className = "partner-variant-row__commission";
+        const netCell = document.createElement("strong"); netCell.className = "partner-variant-row__net";
+        const renderRowCommission = () => {
+          const estimate = commissionEstimate(row.price);
+          commissionCell.textContent = estimate && estimate.mode !== "MISSING" ? estimate.label : (estimate ? "Sin regla" : "Pendiente");
+          netCell.textContent = estimate && estimate.mode !== "MISSING" ? `$${estimate.net.toFixed(2)}` : "—";
+        };
+        renderRowCommission();
         const mediaState = document.createElement("span"); mediaState.className = "partner-variant-row__media";
         const visualValue = visualField ? slug(row.options[visualField]?.label) : "";
         const imageCount = visualValue
@@ -1657,7 +1727,7 @@
         const remove = document.createElement("button"); remove.type = "button"; remove.className = "is-danger"; remove.setAttribute("aria-label", "Eliminar variante"); remove.innerHTML = '<i data-lucide="trash-2" aria-hidden="true"></i>';
         remove.addEventListener("click", () => deleteVariant(row));
         actions.append(edit, duplicate, remove);
-        element.append(hiddenId, hiddenOptions, hiddenKey, enabledCell, identity, skuCell, stockCell, priceCell, mediaState, actions);
+        element.append(hiddenId, hiddenOptions, hiddenKey, enabledCell, identity, skuCell, stockCell, priceCell, commissionCell, netCell, mediaState, actions);
         rowsContainer?.appendChild(element);
       });
       if (table) table.hidden = !state.variants.length;
@@ -1898,14 +1968,18 @@
       if (!activeRows.length) return false;
       return activeRows.every((row) => {
         const key = String(row.querySelector("[name='variant_combination_key[]']")?.value || "").trim();
-        const price = parseNumber(String(row.querySelector("[name='variant_price[]']")?.value || "").trim());
+        const parsedPrice = parseNumber(String(row.querySelector("[name='variant_price[]']")?.value || "").trim());
+        const price = parsedPrice === null ? null : roundMoney(parsedPrice);
         const compareRaw = String(row.querySelector("[name='variant_compare_at_price[]']")?.value || "").trim();
-        const compare = compareRaw ? parseNumber(compareRaw) : null;
+        const parsedCompare = compareRaw ? parseNumber(compareRaw) : null;
+        const compare = parsedCompare === null ? null : roundMoney(parsedCompare);
         const stockRaw = String(row.querySelector("[name='variant_stock[]']")?.value || "").trim();
         const stock = /^\d+$/.test(stockRaw) ? Number(stockRaw) : null;
-        return Boolean(key) && price !== null && price > 0
+        const estimate = price === null ? null : commissionEstimate(price);
+        return Boolean(key) && price !== null && price > Number(commissionPolicy.minimum_price || 0.25)
           && (compare === null || compare > price)
-          && stock !== null && stock >= 0;
+          && stock !== null && stock >= 0
+          && estimate?.mode !== "MISSING";
       });
     }
 
@@ -1929,9 +2003,13 @@
       changed = setItem("attributes", attributesComplete()) || changed;
       changed = setItem("variants", variantsComplete()) || changed;
 
-      const price = parseNumber(fieldValue("price"));
+      const parsedPrice = parseNumber(fieldValue("price"));
+      const price = parsedPrice === null ? null : roundMoney(parsedPrice);
+      const priceEstimate = price === null ? null : commissionEstimate(price);
       const familyEnabled = Boolean(document.querySelector("[data-variants-toggle]")?.checked);
-      changed = setItem("price", familyEnabled ? variantsComplete() : price !== null && price > 0) || changed;
+      changed = setItem("price", familyEnabled ? variantsComplete() : price !== null
+        && price > Number(commissionPolicy.minimum_price || 0.25)
+        && priceEstimate?.mode !== "MISSING") || changed;
 
       const stockRaw = fieldValue("stock_quantity");
       const stock = /^\d+$/.test(stockRaw) ? Number(stockRaw) : null;

@@ -15,6 +15,7 @@ from app.catalog.product_templates import (
     VariantAxis,
     variant_axes_for_product_type,
 )
+from app.services.marketplace_policy import MINIMUM_PRICE_MESSAGE, MINIMUM_SELLER_PRICE
 
 
 VARIANT_CONFIGURATION_VERSION = 4
@@ -38,6 +39,21 @@ _COLOR_SWATCHES = {
     "plata": "#CBD5E1",
     "dorado": "#D4AF37",
 }
+
+
+def family_variants_enabled(configuration: Mapping[str, Any] | None) -> bool:
+    """Return whether a draft configuration represents a sellable family.
+
+    Empty configurations are simple products. Legacy configurations before V4
+    represented families implicitly; V4 requires both the explicit flag and
+    family mode.
+    """
+    normalized = configuration or {}
+    if not normalized:
+        return False
+    if normalized.get("version", 1) < VARIANT_CONFIGURATION_VERSION:
+        return True
+    return normalized.get("enabled") is True and normalized.get("mode") == "family"
 
 
 def _slug(value: str) -> str:
@@ -395,6 +411,14 @@ def build_variant_state(
         seen_variant_ids.add(variant_id)
         seen_combinations.add(combination_key)
         enabled = bool(posted.get("enabled"))
+        posted_price = str(posted.get("price", form.get("price") or "")).strip()
+        if enabled and final:
+            try:
+                normalized_price = Decimal(posted_price)
+            except (InvalidOperation, TypeError, ValueError):
+                normalized_price = None
+            if normalized_price is not None and normalized_price <= MINIMUM_SELLER_PRICE:
+                errors[f"variants.{index}.price"] = MINIMUM_PRICE_MESSAGE
         for axis_data, value in zip(axes, values, strict=True):
             axis_values[axis_data["key"]].setdefault(value["key"], value)
             if enabled:
@@ -422,7 +446,7 @@ def build_variant_state(
             },
             "name": name,
             "sku": sku,
-            "price": str(posted.get("price", form.get("price") or "")).strip(),
+            "price": posted_price,
             "compare_at_price": str(posted.get("compare_at_price", "")).strip(),
             "stock": str(posted.get("stock", form.get("stock_quantity") or "")).strip(),
             "enabled": enabled,
@@ -517,7 +541,7 @@ def variant_rows_complete(variants: list[dict[str, Any]]) -> bool:
             return False
         if (
             not price.is_finite()
-            or price <= 0
+            or price <= MINIMUM_SELLER_PRICE
             or (
                 compare_at_price is not None
                 and (not compare_at_price.is_finite() or compare_at_price <= price)

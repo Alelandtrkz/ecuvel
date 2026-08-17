@@ -108,3 +108,73 @@
   .admin-product-preview__bar { top: 4rem; padding: .75rem 1rem; align-items: flex-start; flex-direction: column; }
   .admin-product-preview__bar-actions { width: 100%; align-items: flex-start; flex-direction: column; }
 }
+.admin-product-publication-error {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  color: #991b1b;
+  background: #fff1f2;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+}
+
+.admin-product-publication-error svg { flex: 0 0 1.25rem; }
+.admin-product-publication-error p { margin: 0.2rem 0 0; }
+
+.admin-product-commission {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #d9e2df;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.admin-product-commission > header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 0.9rem;
+}
+
+.admin-product-commission > header span:first-child {
+  display: block;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.admin-product-commission h2 { margin: 0.2rem 0 0; font-size: 1.05rem; }
+
+.admin-product-commission > header > span {
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-product-commission > header > span.is-complete { color: #047857; background: #ecfdf5; }
+.admin-product-commission > header > span.needs-attention { color: #b45309; background: #fff7ed; }
+.admin-product-commission > header > span svg { width: 1rem; height: 1rem; }
+
+.admin-product-commission__table { overflow-x: auto; }
+.admin-product-commission table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.admin-product-commission th,
+.admin-product-commission td { padding: 0.7rem 0.55rem; text-align: left; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+.admin-product-commission th { color: #64748b; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; }
+.admin-product-commission td small { display: block; margin-top: 0.2rem; color: #64748b; }
+.admin-product-commission__missing { padding: 0.85rem; color: #991b1b; background: #fff1f2; border-radius: 12px; }
+.admin-product-commission__scope { display: flex; gap: 0.45rem; align-items: flex-start; margin: 0.85rem 0 0; color: #475569; font-size: 0.78rem; line-height: 1.45; }
+.admin-product-commission__scope svg { flex: 0 0 1rem; width: 1rem; height: 1rem; }
+
+@media (max-width: 760px) {
+  .admin-product-commission > header { flex-direction: column; }
+}

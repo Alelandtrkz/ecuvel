@@ -13,6 +13,7 @@ from app.models import (
 from app.models.enums import ProductDraftStatus
 from app.models.enums import ProductDraftFileStatus
 from app.services.admin_products import get_admin_products_page
+from app.services.product_drafts import capture_submission_commission_snapshots
 from tests.product_moderation_helpers import (
     create_commission_rule,
     create_complete_simple_draft,
@@ -311,6 +312,7 @@ def test_admin_approval_endpoint_gates_checklist_and_publishes_atomically(
     )
     create_seller_location(session, store)
     create_commission_rule(session, rate="8.00", category=category)
+    capture_submission_commission_snapshots(session, draft)
     session.commit()
     app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"] = str(tmp_path / "drafts")
     app.config["PRODUCT_CATALOG_MEDIA_DIR"] = str(tmp_path / "catalog")
@@ -321,7 +323,8 @@ def test_admin_approval_endpoint_gates_checklist_and_publishes_atomically(
         f"/admin/products/{draft.id}/approve",
         data={"checklist": ["images"]},
     )
-    assert blocked.status_code == 302
+    assert blocked.status_code == 422
+    assert "Completa toda la lista de control" in blocked.get_data(as_text=True)
     session.expire_all()
     assert session.get(ProductDraft, draft.id).status == ProductDraftStatus.SUBMITTED
     assert session.scalar(select(func.count(Product.id))) == 0

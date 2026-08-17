@@ -9,8 +9,9 @@
 {% set dimensions = draft.dimensions_data or {} %}
 {% set warranty = draft.warranty_data or {} %}
 {% set variant_config = draft.variant_configuration or {} %}
-{% set family_enabled = variant_config and (variant_config.get('version', 1) < 4 or variant_config.get('enabled') == true) %}
+{% set family_enabled = view.family_enabled %}
 <main class="partner-page partner-page--draft">
+  <script type="application/json" data-commission-policy>{{ view.commission_policy|tojson }}</script>
   {% include "partners/_product_moderation_feedback.html" %}
   <div class="partner-draft-layout" data-product-draft>
     <header class="partner-draft-hero">
@@ -169,7 +170,7 @@
             </div>
             <div class="partner-variant-table partner-variant-table--manual" data-variant-table {% if not draft.variants %}hidden{% endif %}>
               <div class="partner-variant-table__head">
-                <span>Estado</span><span>Variante</span><span>SKU</span><span>Stock</span><span>Precio</span><span>Imágenes</span><span aria-hidden="true"></span>
+                <span>Estado</span><span>Variante</span><span>SKU</span><span>Stock</span><span>Precio</span><span>Comisión ECUVEL</span><span>Recibirás</span><span>Imágenes</span><span aria-hidden="true"></span>
               </div>
               <div data-variant-rows></div>
             </div>
@@ -418,6 +419,18 @@
             <input form="partner-product-draft-form" name="price" value="{{ price.get('price', '') }}" placeholder="$ 0.00">
             {% if errors.price %}<em class="partner-error">{{ errors.price }}</em>{% endif %}
           </label>
+          <div class="partner-commission-summary" data-single-commission-summary aria-live="polite">
+            <div class="partner-commission-summary__head">
+              <span data-commission-label>Comisión ECUVEL</span>
+              <strong data-commission-value>Pendiente</strong>
+            </div>
+            <p data-commission-source>La comisión se determina automáticamente por el precio y la categoría.</p>
+            <dl>
+              <div><dt>Comisión estimada</dt><dd data-commission-amount>—</dd></div>
+              <div><dt>Recibirás aproximadamente</dt><dd data-commission-net>—</dd></div>
+            </dl>
+            <small><i data-lucide="lock" aria-hidden="true"></i> Determinada automáticamente por ECUVEL</small>
+          </div>
           <label class="partner-draft-field">
             <span>Precio anterior</span>
             <input form="partner-product-draft-form" name="compare_at_price" value="{{ price.get('compare_at_price', '') }}" placeholder="$ 0.00">
@@ -451,6 +464,10 @@
             </li>
           {% endfor %}
         </ul>
+      </section>
+      <section class="partner-draft-card partner-commission-submit-note">
+        <strong>Comisión aplicable</strong>
+        <p>Al enviar el producto a revisión, esta comisión quedará fijada para esta revisión. Si ECUVEL cambia posteriormente las tarifas, esta solicitud no se modificará mientras permanezca en revisión.</p>
       </section>
     </aside>
   </div>

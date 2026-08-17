@@ -18,7 +18,10 @@ from app.services.product_publication import (
     publish_product_draft,
     record_moderation_decision,
 )
-from app.services.product_drafts import submit_saved_product_draft
+from app.services.product_drafts import (
+    capture_submission_commission_snapshots,
+    submit_saved_product_draft,
+)
 from tests.product_moderation_helpers import (
     create_commission_rule,
     create_complete_simple_draft,
@@ -89,7 +92,8 @@ def _base(session, tmp_path):
 def test_partner_preview_shows_current_feedback_but_not_stale_feedback(
     app, session, tmp_path,
 ):
-    seller, moderator, _store, _category, draft = _base(session, tmp_path)
+    seller, moderator, _store, category, draft = _base(session, tmp_path)
+    create_commission_rule(session, rate="8.00", category=category)
     record_moderation_decision(
         session,
         draft_id=draft.id,
@@ -152,6 +156,7 @@ def test_partner_preview_links_to_public_product_after_approval(
     seller, moderator, store, category, draft = _base(session, tmp_path)
     create_seller_location(session, store)
     create_commission_rule(session, rate="8.00", category=category)
+    capture_submission_commission_snapshots(session, draft)
     session.commit()
     result = publish_product_draft(
         session,

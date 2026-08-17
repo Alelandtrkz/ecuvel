@@ -82,7 +82,6 @@ class Warehouse(
         back_populates="inventory_warehouses",
     )
 
-
 class WarehouseLocation(
     UUIDPrimaryKeyMixin,
     TimestampMixin,

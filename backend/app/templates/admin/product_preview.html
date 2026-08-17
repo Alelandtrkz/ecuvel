@@ -18,7 +18,7 @@
     {{ product_overview(preview.product, true) }}
     <section class="product-detail-section"><div class="detail-section-heading"><span>Conoce el producto</span><h2>Descripción</h2></div>{% if preview.product.description %}<p class="product-description">{{ preview.product.description }}</p>{% else %}<div class="detail-empty-state"><p>Descripción pendiente.</p></div>{% endif %}</section>
     <section class="product-detail-section"><div class="detail-section-heading"><span>Ficha técnica</span><h2>Especificaciones</h2></div>{{ product_specs(preview.product.specifications) }}</section>
-    <section class="product-detail-section admin-product-preview__review">{{ moderation_panel(draft, draft_view, preview, 'preview') }}</section>
+    <section class="product-detail-section admin-product-preview__review">{{ moderation_panel(draft, draft_view, preview, 'preview', commission_rows, commission_snapshot_complete, publication_error|default(none)) }}</section>
   </div>
 </main>
 {% endblock %}

@@ -38,6 +38,7 @@ from app.models.enums import (
 )
 from app.services.mail import OutgoingMail, mail_service
 from app.services.phone_otp import get_phone_otp_sender, mask_phone
+from app.services.marketplace_policy import ensure_store_inventory_location
 from app.services.private_storage import (
     PrivateStorageError,
     StagedPrivateFile,
@@ -394,6 +395,7 @@ def accept_contract(
     if onboarding.store:
         onboarding.store.status = StoreStatus.ACTIVE
         onboarding.store.is_verified = True
+        ensure_store_inventory_location(session, store=onboarding.store)
     session.flush()
     return acceptance
 

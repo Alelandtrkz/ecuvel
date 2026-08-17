@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping, Sequence
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, object_session, selectinload
 from werkzeug.datastructures import FileStorage, MultiDict
 
 from app.catalog.product_templates import (
@@ -40,9 +40,17 @@ from app.services.private_storage import (
     stage_private_upload,
 )
 from app.services.public_identifiers import assign_product_code_to_draft
+from app.services.marketplace_policy import (
+    CommissionRuleMissingError,
+    InvalidSellerPriceError,
+    MINIMUM_PRICE_MESSAGE,
+    ResolvedSellerCommission,
+    resolve_marketplace_commission,
+)
 from app.services.product_variant_builder import (
     available_variant_axes,
     build_variant_state,
+    family_variants_enabled,
     variant_rows_complete,
 )
 
@@ -94,6 +102,8 @@ class ProductDraftView:
     image_files: tuple[ProductDraftFile, ...]
     document_files: tuple[ProductDraftFile, ...]
     available_variant_axes: tuple[dict[str, Any], ...]
+    commission_policy: dict[str, Any]
+    family_enabled: bool
 
 
 def create_or_reuse_draft_from_selection(
@@ -189,6 +199,28 @@ def build_product_draft_view(draft: ProductDraft) -> ProductDraftView:
     document_files = tuple(
         _sort_files(item for item in active_files if item.kind == ProductDraftFileKind.DOCUMENT)
     )
+    policy: dict[str, Any] = {
+        "threshold": "3.00",
+        "fixed_amount": "0.25",
+        "minimum_price": "0.25",
+        "minimum_price_message": MINIMUM_PRICE_MESSAGE,
+        "rate_percent": None,
+        "category_path": [draft.category.name, draft.subcategory.name],
+        "available": False,
+    }
+    session = object_session(draft)
+    if session is not None:
+        try:
+            resolved_policy = resolve_marketplace_commission(
+                session, category_id=draft.subcategory_id, price="3.00"
+            )
+            policy.update({
+                "rate_percent": str(resolved_policy.rate_percent),
+                "category_path": list(resolved_policy.category_labels),
+                "available": True,
+            })
+        except (InvalidSellerPriceError, CommissionRuleMissingError):
+            pass
     return ProductDraftView(
         draft=draft,
         template=template,
@@ -196,6 +228,8 @@ def build_product_draft_view(draft: ProductDraft) -> ProductDraftView:
         image_files=image_files,
         document_files=document_files,
         available_variant_axes=available_variant_axes(template, draft.attributes),
+        commission_policy=policy,
+        family_enabled=family_variants_enabled(draft.variant_configuration),
     )
 
 
@@ -280,6 +314,7 @@ def save_product_draft(
         draft.status = ProductDraftStatus.INCOMPLETE
     if final:
         _finalize_variant_mode(draft)
+        capture_submission_commission_snapshots(session, draft)
         draft.status = ProductDraftStatus.SUBMITTED
         draft.submitted_at = datetime.now(timezone.utc)
         draft.completion_percentage = 100
@@ -304,7 +339,7 @@ def submit_saved_product_draft(
     _ensure_editable(draft)
     assign_product_code_to_draft(session, draft)
     template = get_product_template(draft.template_key)
-    family_enabled = _family_variants_enabled(draft.variant_configuration)
+    family_enabled = family_variants_enabled(draft.variant_configuration)
     persisted_variant_errors: dict[str, str] = {}
     if family_enabled:
         variant_form = _variant_form_from_saved_draft(draft)
@@ -319,7 +354,7 @@ def submit_saved_product_draft(
         )
         draft.variant_configuration = configuration
         draft.variants = variants
-        family_enabled = _family_variants_enabled(configuration)
+        family_enabled = family_variants_enabled(configuration)
     variant_sources = _variant_source_fields(draft.variant_configuration) if family_enabled else set()
 
     errors: dict[str, str] = dict(persisted_variant_errors)
@@ -345,6 +380,7 @@ def submit_saved_product_draft(
         raise ProductDraftValidationError("Revisa la información del producto.", errors)
 
     _finalize_variant_mode(draft)
+    capture_submission_commission_snapshots(session, draft)
     draft.status = ProductDraftStatus.SUBMITTED
     draft.submitted_at = datetime.now(timezone.utc)
     draft.completion_percentage = 100
@@ -378,6 +414,138 @@ def _variant_form_from_saved_draft(draft: ProductDraft) -> MultiDict:
         form.add("variant_stock[]", str(row.get("stock") if row.get("stock") is not None else ""))
         form.add("variant_enabled[]", "1" if row.get("enabled", True) else "0")
     return form
+
+
+def draft_commission_presentations(
+    session: Session,
+    draft: ProductDraft,
+) -> tuple[tuple[str, str, ResolvedSellerCommission], ...]:
+    """Resolve current editor prices; never trust commission fields from forms."""
+
+    if family_variants_enabled(draft.variant_configuration):
+        source_rows = [row for row in (draft.variants or []) if row.get("enabled", True)]
+    else:
+        source_rows = [{
+            "sku": draft.seller_sku,
+            "name": draft.title or "Producto",
+            "price": (draft.pricing_data or {}).get("price"),
+        }]
+    resolved: list[tuple[str, str, ResolvedSellerCommission]] = []
+    for row in source_rows:
+        sku = str(row.get("sku") or "").strip()
+        if not sku:
+            raise ProductDraftValidationError(
+                "Revisa la información del producto.",
+                {"variants": "Cada presentación necesita un SKU estable."},
+            )
+        try:
+            commission = resolve_marketplace_commission(
+                session,
+                category_id=draft.subcategory_id,
+                price=str(row.get("price") or ""),
+            )
+        except (InvalidSellerPriceError, CommissionRuleMissingError) as exc:
+            key = "price" if not family_variants_enabled(draft.variant_configuration) else f"variants.{sku}"
+            raise ProductDraftValidationError(
+                "Revisa la información comercial del producto.", {key: str(exc)}
+            ) from exc
+        resolved.append((sku, str(row.get("name") or draft.title or sku), commission))
+    return tuple(resolved)
+
+
+def capture_submission_commission_snapshots(
+    session: Session,
+    draft: ProductDraft,
+) -> None:
+    """Freeze server-resolved commission terms for one submission cycle."""
+    captured_at = datetime.now(timezone.utc).isoformat()
+    presentations = draft_commission_presentations(session, draft)
+    if family_variants_enabled(draft.variant_configuration):
+        configuration = dict(draft.variant_configuration or {})
+        configuration["commission_snapshots"] = {
+            sku: commission.as_snapshot(captured_at=captured_at)
+            for sku, _name, commission in presentations
+        }
+        configuration["commission_captured_at"] = captured_at
+        draft.variant_configuration = configuration
+        pricing = dict(draft.pricing_data or {})
+        pricing.pop("commission_snapshot", None)
+        draft.pricing_data = pricing
+        return
+    pricing = dict(draft.pricing_data or {})
+    pricing["commission_snapshot"] = presentations[0][2].as_snapshot(
+        captured_at=captured_at
+    )
+    draft.pricing_data = pricing
+    configuration = dict(draft.variant_configuration or {})
+    configuration.pop("commission_snapshots", None)
+    configuration.pop("commission_captured_at", None)
+    draft.variant_configuration = configuration
+
+
+def draft_commission_display_rows(
+    session: Session,
+    draft: ProductDraft,
+) -> tuple[dict[str, Any], ...]:
+    """Return seller/admin-safe commercial rows, frozen while under review."""
+
+    frozen = draft.status in {
+        ProductDraftStatus.SUBMITTED,
+        ProductDraftStatus.APPROVED,
+        ProductDraftStatus.REJECTED,
+    }
+    snapshots: dict[str, Any]
+    if family_variants_enabled(draft.variant_configuration):
+        snapshots = dict((draft.variant_configuration or {}).get("commission_snapshots") or {})
+        names = {
+            str(row.get("sku") or ""): str(row.get("name") or row.get("sku") or "Presentación")
+            for row in (draft.variants or []) if row.get("enabled", True)
+        }
+    else:
+        snapshots = {
+            str(draft.seller_sku or ""): (draft.pricing_data or {}).get("commission_snapshot")
+        }
+        names = {str(draft.seller_sku or ""): draft.title or "Producto"}
+
+    if frozen:
+        rows = []
+        for sku, snapshot in snapshots.items():
+            if not isinstance(snapshot, Mapping):
+                continue
+            rows.append({
+                "sku": sku,
+                "name": names.get(sku, sku),
+                "mode": snapshot.get("mode"),
+                "price": _decimal_or_none(snapshot.get("price")),
+                "rate_percent": snapshot.get("rate_percent"),
+                "fixed_amount": _decimal_or_none(snapshot.get("fixed_amount")),
+                "commission_amount": _decimal_or_none(snapshot.get("commission_amount")),
+                "seller_net_amount": _decimal_or_none(snapshot.get("seller_net_amount")),
+                "category_labels": list(snapshot.get("category_labels") or ()),
+                "captured_at": snapshot.get("captured_at"),
+                "frozen": True,
+            })
+        return tuple(rows)
+
+    try:
+        live = draft_commission_presentations(session, draft)
+    except ProductDraftValidationError:
+        return ()
+    return tuple({
+        "sku": sku,
+        "name": name,
+        "mode": commission.mode.value,
+        "price": commission.price,
+        "rate_percent": (
+            str(commission.rate_percent) if commission.rate_percent is not None else None
+        ),
+        "fixed_amount": commission.fixed_amount,
+        "commission_amount": commission.commission_amount,
+        "seller_net_amount": commission.seller_net_amount,
+        "category_labels": list(commission.category_labels),
+        "captured_at": None,
+        "frozen": False,
+    } for sku, name, commission in live)
 
 
 def stage_product_draft_upload(
@@ -686,7 +854,7 @@ def calculate_checklist(
         active = [item for item in draft.files if item.status == ProductDraftFileStatus.ACTIVE]
         image_files = tuple(item for item in active if item.kind == ProductDraftFileKind.IMAGE)
         document_files = tuple(item for item in active if item.kind == ProductDraftFileKind.DOCUMENT)
-    family_enabled = _family_variants_enabled(draft.variant_configuration)
+    family_enabled = family_variants_enabled(draft.variant_configuration)
     variant_sources = _variant_source_fields(draft.variant_configuration) if family_enabled else set()
     required_attrs = [
         item for item in template.fields
@@ -785,7 +953,7 @@ def _apply_form_to_draft(draft: ProductDraft, template: ProductTemplate, form: M
     )
     draft.variant_configuration = variant_configuration
     draft.variants = variants
-    family_enabled = _family_variants_enabled(variant_configuration)
+    family_enabled = family_variants_enabled(variant_configuration)
     variant_sources = _variant_source_fields(variant_configuration) if family_enabled else set()
     if family_enabled:
         snapshot = dict(variant_configuration.get("source_snapshot") or {})
@@ -858,9 +1026,9 @@ def _validate_final_requirements(draft: ProductDraft, template: ProductTemplate)
     gallery_complete, gallery_message = _gallery_completion(draft, tuple(images))
     if not gallery_complete:
         errors["images"] = gallery_message
-    family_enabled = _family_variants_enabled(draft.variant_configuration)
-    if not family_enabled and (price is None or price <= 0):
-        errors["price"] = "El precio debe ser mayor a cero."
+    family_enabled = family_variants_enabled(draft.variant_configuration)
+    if not family_enabled and (price is None or price <= Decimal("0.25")):
+        errors["price"] = MINIMUM_PRICE_MESSAGE
     if not family_enabled and (stock is None or stock < 0):
         errors["stock_quantity"] = "El stock debe ser un entero no negativo."
     if not draft.dimensions_data.get("product_weight_kg"):
@@ -930,20 +1098,11 @@ def _parse_variants(form: MultiDict, product_code: str | None) -> list[dict[str,
 
 
 def _variants_complete(draft: ProductDraft) -> bool:
-    if not _family_variants_enabled(draft.variant_configuration):
+    if not family_variants_enabled(draft.variant_configuration):
         return True
     if not draft.variants:
         return not draft.variant_configuration
     return variant_rows_complete(draft.variants)
-
-
-def _family_variants_enabled(configuration: Mapping[str, Any] | None) -> bool:
-    configuration = configuration or {}
-    if not configuration:
-        return False
-    if configuration.get("version", 1) < 4:
-        return True
-    return configuration.get("enabled") is True and configuration.get("mode") == "family"
 
 
 def _variant_source_fields(configuration: Mapping[str, Any] | None) -> set[str]:
@@ -960,7 +1119,7 @@ def _finalize_variant_mode(draft: ProductDraft) -> None:
     if not configuration:
         return
 
-    if _family_variants_enabled(configuration):
+    if family_variants_enabled(configuration):
         configuration.pop("source_snapshot", None)
         configuration.pop("single_media_value_key", None)
         configuration["archived_family"] = False
@@ -993,7 +1152,7 @@ def _finalize_variant_mode(draft: ProductDraft) -> None:
 
 def _visual_axis_and_values(configuration: Mapping[str, Any] | None) -> tuple[str | None, set[str]]:
     configuration = configuration or {}
-    if not _family_variants_enabled(configuration):
+    if not family_variants_enabled(configuration):
         return None, set()
     visual_key = configuration.get("visual_axis_key")
     if not visual_key:
@@ -1012,7 +1171,7 @@ def _reconcile_variant_image_bindings(
     draft: ProductDraft,
     previous_configuration: Mapping[str, Any] | None,
 ) -> None:
-    if draft.variant_configuration and not _family_variants_enabled(draft.variant_configuration):
+    if draft.variant_configuration and not family_variants_enabled(draft.variant_configuration):
         return
     previous_visual, _previous_values = _visual_axis_and_values(previous_configuration)
     visual_key, visual_values = _visual_axis_and_values(draft.variant_configuration)

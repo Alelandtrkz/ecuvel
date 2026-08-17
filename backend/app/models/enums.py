@@ -87,6 +87,11 @@ class OfferStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class SellerCommissionType(StrEnum):
+    PERCENTAGE = "PERCENTAGE"
+    FIXED = "FIXED"
+
+
 class OrderStatus(StrEnum):
     PENDING_PAYMENT = "PENDING_PAYMENT"
     CONFIRMED = "CONFIRMED"

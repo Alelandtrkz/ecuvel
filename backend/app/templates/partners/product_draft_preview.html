@@ -88,6 +88,7 @@
               </button>
             </form>
             <small>El servidor volverá a validar todos los datos.</small>
+            <small>Al enviar, la comisión quedará fijada para esta solicitud.</small>
           {% elif editable %}
             <button class="partner-button partner-button--primary" type="button" disabled>Enviar a revisión</button>
             <small>Completa los pendientes antes de enviar.</small>
@@ -149,6 +150,33 @@
               {% else %}Pendiente{% endif %}
             </dd></div>
           </dl>
+        </section>
+
+        <section class="partner-preview-card partner-preview-commercial" aria-labelledby="preview-commercial-title">
+          <header><div><span>Condiciones comerciales</span><h2 id="preview-commercial-title">Resumen comercial</h2></div></header>
+          {% if commission_rows %}
+            <div class="partner-preview-commercial-table">
+              <div class="partner-preview-commercial-table__head"><span>Presentación</span><span>Precio</span><span>Comisión ECUVEL</span><span>Recibirás</span></div>
+              {% for row in commission_rows %}
+                <div>
+                  <span><strong>{{ row.name }}</strong><small>{{ row.sku }}</small></span>
+                  <span>{{ row.price|money('USD') }}</span>
+                  <span>
+                    {% if row.mode == 'FIXED' %}{{ row.fixed_amount|money('USD') }} fijo
+                    {% else %}{{ row.rate_percent }}% · {{ row.commission_amount|money('USD') }}{% endif %}
+                  </span>
+                  <span><strong>{{ row.seller_net_amount|money('USD') }}</strong></span>
+                </div>
+              {% endfor %}
+            </div>
+            <p class="partner-preview-commercial__source">
+              {{ 'Comisión fijada al enviar.' if commission_rows[0].frozen else 'Estimación actual; se fijará al enviar.' }}
+              Categoría: {{ commission_rows[0].category_labels|join(' › ') }}
+              {% if commission_rows[0].captured_at %} · {{ commission_rows[0].captured_at }}{% endif %}
+            </p>
+          {% else %}
+            <div class="partner-preview-gallery-warning"><strong>Comisión pendiente</strong><span>Corrige el precio o configura la tarifa de la categoría antes de enviar.</span></div>
+          {% endif %}
         </section>
       </div>
     </section>

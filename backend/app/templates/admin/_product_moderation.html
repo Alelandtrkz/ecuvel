@@ -1,4 +1,10 @@
-{% macro moderation_panel(draft, draft_view, preview, source='list') -%}
+{% macro moderation_panel(draft, draft_view, preview, source='list', commission_rows=(), commission_snapshot_complete=false, publication_error=none) -%}
+{% if publication_error %}
+<div class="admin-product-publication-error" role="alert">
+  <i data-lucide="circle-alert" aria-hidden="true"></i>
+  <div><strong>No se pudo publicar</strong><p>{{ publication_error }}</p></div>
+</div>
+{% endif %}
 <section class="admin-product-validation" id="admin-product-review">
   <header>
     <div><span>Prevalidación objetiva</span><h2>{{ 'Prevalidación completada' if preview.dashboard.can_submit else 'Prevalidación con observaciones' }}</h2></div>
@@ -12,6 +18,31 @@
       </li>
     {% endfor %}
   </ul>
+</section>
+
+<section class="admin-product-commission" aria-labelledby="admin-product-commission-title">
+  <header>
+    <div><span>Condiciones comerciales</span><h2 id="admin-product-commission-title">Comisión ECUVEL fijada al enviar</h2></div>
+    <span class="{{ 'is-complete' if commission_snapshot_complete else 'needs-attention' }}">
+      <i data-lucide="{{ 'shield-check' if commission_snapshot_complete else 'triangle-alert' }}" aria-hidden="true"></i>
+      {{ 'Snapshot completo' if commission_snapshot_complete else 'Snapshot ausente o incompleto' }}
+    </span>
+  </header>
+  {% if commission_rows %}
+  <div class="admin-product-commission__table"><table>
+    <thead><tr><th>Presentación</th><th>Precio</th><th>Comisión</th><th>Recibe la tienda</th><th>Política</th></tr></thead>
+    <tbody>{% for row in commission_rows %}<tr>
+      <td><strong>{{ row.name }}</strong><small>{{ row.sku }}</small></td>
+      <td>{{ row.price|money }}</td>
+      <td><strong>{{ row.commission_amount|money }}</strong><small>{% if row.mode == 'FIXED' %}Tarifa fija {{ row.fixed_amount|money }} por unidad{% else %}{{ row.rate_percent }}% del precio{% endif %}</small></td>
+      <td><strong>{{ row.seller_net_amount|money }}</strong></td>
+      <td><span>{{ row.category_labels|join(' / ') }}</span><small>{% if row.captured_at %}Fijada: {{ row.captured_at }}{% else %}Estimación actual{% endif %}</small></td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}
+  <p class="admin-product-commission__missing">El producto no tiene una comisión fijada al momento del envío. Devuélvelo al vendedor para volver a enviarlo.</p>
+  {% endif %}
+  <p class="admin-product-commission__scope"><i data-lucide="truck" aria-hidden="true"></i>La comisión incluye el servicio de marketplace y la logística de la tienda hacia la red ECUVEL. No se añade otra tarifa al vendedor por ese tramo.</p>
 </section>
 
 {% if draft.status.value == 'SUBMITTED' %}

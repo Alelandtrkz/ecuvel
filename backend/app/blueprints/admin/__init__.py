@@ -76,6 +76,7 @@ from app.services.admin_orders import (
     get_admin_payment_review,
 )
 from app.services.admin_products import (
+    commission_snapshot_complete,
     get_admin_product_draft,
     get_admin_products_page,
 )
@@ -107,7 +108,10 @@ from app.services.seller_inbound_packages import (
 )
 from app.services.private_storage import PrivateStorageError, verify_private_file
 from app.services.product_draft_preview import build_product_draft_preview
-from app.services.product_drafts import build_product_draft_view
+from app.services.product_drafts import (
+    build_product_draft_view,
+    draft_commission_display_rows,
+)
 from app.services.product_publication import (
     ProductModerationError,
     normalize_moderation_checklist,
@@ -1135,11 +1139,17 @@ def product_preview(draft_id: uuid.UUID):
         selected_view="storefront",
         media_endpoint="admin.product_file",
     )
+    commission_rows = draft_commission_display_rows(db.session, draft)
     return render_template(
         "admin/product_preview.html",
         draft=draft,
         draft_view=draft_view,
         preview=preview,
+        commission_rows=commission_rows,
+        commission_snapshot_complete=commission_snapshot_complete(
+            draft, commission_rows
+        ),
+        publication_error=None,
         **_shell_context("products"),
     )
 
@@ -1180,6 +1190,50 @@ def _moderation_redirect(draft_id: uuid.UUID):
     if request.form.get("source") == "preview":
         return redirect(url_for("admin.product_preview", draft_id=draft_id))
     return redirect(url_for("admin.products", status="review", draft=draft_id))
+
+
+def _render_product_publication_error(draft_id: uuid.UUID, message: str):
+    """Render a failed publication beside the controls that triggered it."""
+
+    if request.form.get("source") == "preview":
+        draft = get_admin_product_draft(db.session, draft_id)
+        if draft is None:
+            flash(message, "error")
+            return _moderation_redirect(draft_id)
+        draft_view = build_product_draft_view(draft)
+        preview = build_product_draft_preview(
+            draft_view,
+            requested_sku=request.args.get("variant"),
+            selected_view="storefront",
+            media_endpoint="admin.product_file",
+        )
+        commission_rows = draft_commission_display_rows(db.session, draft)
+        return render_template(
+            "admin/product_preview.html",
+            draft=draft,
+            draft_view=draft_view,
+            preview=preview,
+            commission_rows=commission_rows,
+            commission_snapshot_complete=commission_snapshot_complete(
+                draft, commission_rows
+            ),
+            publication_error=message,
+            **_shell_context("products"),
+        ), 422
+
+    page = get_admin_products_page(
+        db.session,
+        status_key="review",
+        query="",
+        page=1,
+        selected_id=draft_id,
+    )
+    return render_template(
+        "admin/products.html",
+        page=page,
+        publication_error=message,
+        **_shell_context("products"),
+    ), 422
 
 
 def _record_product_decision(draft_id: uuid.UUID, decision: str):
@@ -1246,23 +1300,26 @@ def approve_product(draft_id: uuid.UUID):
     except ProductModerationError as exc:
         db.session.rollback()
         remove_copied_publication_files(copied_files)
-        flash(str(exc), "error")
+        return _render_product_publication_error(draft_id, str(exc))
     except IntegrityError:
         db.session.rollback()
         remove_copied_publication_files(copied_files)
         current_app.logger.info(
             "Conflicto de identificador al publicar el producto %s", draft_id
         )
-        flash(
+        return _render_product_publication_error(
+            draft_id,
             "No se pudo publicar porque un SKU, código de barras u otro "
             "identificador ya existe en el catálogo.",
-            "error",
         )
     except Exception:
         db.session.rollback()
         remove_copied_publication_files(copied_files)
         current_app.logger.exception("Falló la publicación del producto %s", draft_id)
-        flash("No pudimos publicar el producto. No se guardó ningún cambio parcial.", "error")
+        return _render_product_publication_error(
+            draft_id,
+            "No pudimos publicar el producto. No se guardó ningún cambio parcial.",
+        )
     else:
         flash(
             "El producto ya estaba publicado."

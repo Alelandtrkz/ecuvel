@@ -10,6 +10,7 @@ from flask import url_for
 from app.models import ProductDraft, ProductDraftFile
 from app.services.cart import CART_LOW_STOCK_THRESHOLD, MAX_CART_QUANTITY
 from app.services.product_drafts import ChecklistItem, ProductDraftView
+from app.services.product_variant_builder import family_variants_enabled
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,15 +104,6 @@ def _integer(value: Any) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
-
-
-def _family_enabled(draft: ProductDraft) -> bool:
-    configuration = draft.variant_configuration or {}
-    if not configuration:
-        return False
-    if configuration.get("version", 1) < 4:
-        return True
-    return configuration.get("enabled") is True and configuration.get("mode") == "family"
 
 
 def _availability(stock: int | None) -> tuple[int, bool, str, str, bool]:
@@ -335,7 +327,7 @@ def build_product_draft_preview(
 ) -> DraftPreviewContext:
     draft = view.draft
     configuration = draft.variant_configuration or {}
-    family_enabled = _family_enabled(draft)
+    family_enabled = family_variants_enabled(draft.variant_configuration)
     active_rows = [dict(row) for row in (draft.variants or []) if row.get("enabled", True)] if family_enabled else []
     inactive_count = sum(1 for row in (draft.variants or []) if not row.get("enabled", True)) if family_enabled else 0
     selected = _selected_variant(active_rows, configuration, requested_sku) if family_enabled else None
