@@ -25,6 +25,7 @@ from werkzeug.exceptions import NotFound
 from app.extensions import db, limiter
 from app.models.enums import ProductDraftFileKind, ProductDraftFileStatus, StoreOnboardingStatus
 from app.services.partner_onboarding import (
+    CORRECTION_REASON_LABELS,
     DOCUMENT_TYPES,
     PartnerOnboardingError,
     PartnerOnboardingValidationError,
@@ -38,6 +39,7 @@ from app.services.partner_onboarding import (
     save_step,
     stage_partner_document,
     submit_for_review,
+    unresolved_correction_issues,
 )
 from app.services.partner_product_categories import (
     PARTNER_PRODUCT_DRAFT_SESSION_KEY,
@@ -153,7 +155,10 @@ def _render_main(onboarding, *, step: int | None = None, errors=None, form=None,
         form=form_values,
         current_partner_tab="main",
         document_types=DOCUMENT_TYPES,
+        correction_reason_labels=CORRECTION_REASON_LABELS,
+        correction_documents={str(document.id): document for document in onboarding.documents},
         correction_review=latest_correction_review(onboarding),
+        pending_corrections=unresolved_correction_issues(onboarding),
     ), status_code
 
 
@@ -276,7 +281,10 @@ def status():
         "partners/status.html",
         onboarding=onboarding,
         document_types=DOCUMENT_TYPES,
+        correction_reason_labels=CORRECTION_REASON_LABELS,
+        correction_documents={str(document.id): document for document in onboarding.documents},
         correction_review=latest_correction_review(onboarding),
+        pending_corrections=unresolved_correction_issues(onboarding),
         current_partner_tab="main",
     )
 

@@ -31,7 +31,7 @@
       </dl></section>
 
       <section class="admin-card admin-store-section admin-store-history"><header><span><i data-lucide="history"></i></span><div><h2>Historial de revisión</h2><p>Registro append-only de envíos y decisiones.</p></div></header>
-        <ol>{% for review in onboarding.reviews|reverse %}<li><span class="admin-store-history__dot"></span><div><strong>{{ {'PENDING':'Solicitud enviada','CORRECTIONS_REQUESTED':'Correcciones solicitadas','APPROVED':'Verificación aprobada','REJECTED':'Solicitud cerrada'}.get(review.decision.value, review.decision.value) }}</strong><small>{{ review.created_at|ecuador_datetime }} · {{ review.reviewer.full_name if review.reviewer else 'Seller / sistema' }}</small>{% if review.comments %}<p>{{ review.comments }}</p>{% endif %}{% if review.issues_snapshot %}<ul>{% for issue in review.issues_snapshot %}<li>{{ issue.message }}</li>{% endfor %}</ul>{% endif %}</div></li>{% endfor %}</ol>
+        <ol>{% for review in onboarding.reviews|reverse %}<li><span class="admin-store-history__dot"></span><div><strong>{{ {'PENDING':'Solicitud enviada','CORRECTIONS_REQUESTED':'Correcciones solicitadas','APPROVED':'Verificación aprobada','REJECTED':'Solicitud cerrada'}.get(review.decision.value, review.decision.value) }}</strong><small>{{ review.created_at|ecuador_datetime }} · {{ review.reviewer.full_name if review.reviewer else 'Seller / sistema' }}</small>{% if review.comments %}<p>{{ review.comments }}</p>{% endif %}{% if review.issues_snapshot %}<ul>{% for issue in review.issues_snapshot %}{% set document = documents_by_id.get(issue.target_id) if issue.target_type == 'DOCUMENT' else none %}<li><strong>{{ document_type_label(document.document_type) if document else ('Paso ' ~ issue.step if issue.target_type == 'FIELD' and issue.step else 'Corrección') }} · {{ correction_reasons.get(issue.reason_code, issue.reason_code or 'Observación') }}</strong><br>{{ issue.message or review.comments or 'Sin observación adicional.' }}</li>{% endfor %}</ul>{% endif %}</div></li>{% endfor %}</ol>
       </section>
     </div>
 
@@ -62,9 +62,26 @@
   <form method="post" action="{{ url_for('admin.request_store_changes', onboarding_id=onboarding.id) }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_updated_at" value="{{ onboarding.updated_at.isoformat() }}">
     <header><div><i data-lucide="triangle-alert"></i><h2 id="store-corrections-title">Solicitar correcciones</h2></div><button type="button" data-store-dialog-close aria-label="Cerrar"><i data-lucide="x"></i></button></header>
-    <div class="admin-store-dialog__body"><fieldset><legend>¿Qué debe corregir el seller?</legend><div class="admin-store-reasons">{% for key, label in correction_reasons.items() %}<label><input type="checkbox" name="issue_code" value="{{ key }}"><span>{{ label }}</span></label>{% endfor %}</div></fieldset>
-      <label>Documento afectado<select name="document_id"><option value="">Selecciona cuando el motivo sea documental</option>{% for document in onboarding.documents if document.status.value != 'REJECTED' %}<option value="{{ document.id }}">{{ document_type_label(document.document_type) }} · {{ document.file_name }}</option>{% endfor %}</select></label>
-      <label>Observación personalizada<textarea name="comments" maxlength="500" placeholder="Explica exactamente cómo resolver la corrección..."></textarea></label>
+    <div class="admin-store-dialog__body">
+      <section class="admin-store-document-issues" aria-labelledby="document-corrections-title">
+        <header><div><h3 id="document-corrections-title">Documentos</h3><p>Indica por separado qué problema tiene cada archivo.</p></div><button class="admin-button admin-button--soft" type="button" data-document-issue-add><i data-lucide="plus"></i>Añadir corrección documental</button></header>
+        <div class="admin-store-document-issue-list" data-document-issue-list data-max-issues="20">
+          <fieldset class="admin-store-document-issue" data-document-issue-row><legend>Corrección documental 1</legend>
+            <label>Documento<select name="document_issue_target"><option value="">Selecciona un documento</option>{% for document in onboarding.documents if document.status.value != 'REJECTED' %}<option value="{{ document.id }}">{{ document_type_label(document.document_type) }} · {{ document.file_name }}</option>{% endfor %}</select></label>
+            <label>Motivo<select name="document_issue_reason"><option value="">Selecciona un motivo</option>{% for key, label in document_correction_reasons.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+            <label class="is-wide">Observación<textarea name="document_issue_message" maxlength="500" placeholder="Explica exactamente qué debe corregirse en este documento..."></textarea></label>
+            <button class="admin-store-remove-issue" type="button" data-document-issue-remove aria-label="Eliminar esta corrección documental"><i data-lucide="trash-2"></i>Eliminar</button>
+          </fieldset>
+        </div>
+        <template data-document-issue-template><fieldset class="admin-store-document-issue" data-document-issue-row><legend>Corrección documental</legend>
+          <label>Documento<select name="document_issue_target"><option value="">Selecciona un documento</option>{% for document in onboarding.documents if document.status.value != 'REJECTED' %}<option value="{{ document.id }}">{{ document_type_label(document.document_type) }} · {{ document.file_name }}</option>{% endfor %}</select></label>
+          <label>Motivo<select name="document_issue_reason"><option value="">Selecciona un motivo</option>{% for key, label in document_correction_reasons.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+          <label class="is-wide">Observación<textarea name="document_issue_message" maxlength="500" placeholder="Explica exactamente qué debe corregirse en este documento..."></textarea></label>
+          <button class="admin-store-remove-issue" type="button" data-document-issue-remove aria-label="Eliminar esta corrección documental"><i data-lucide="trash-2"></i>Eliminar</button>
+        </fieldset></template>
+      </section>
+      <fieldset><legend>Otra información</legend><div class="admin-store-reasons">{% for key, label in field_correction_reasons.items() %}<label><input type="checkbox" name="field_issue_code" value="{{ key }}"><span>{{ label }}</span></label>{% endfor %}</div></fieldset>
+      <label>Observación general opcional<textarea name="comments" maxlength="1000" placeholder="Añade contexto general para esta revisión..."></textarea></label>
       <p><i data-lucide="info"></i>El seller conservará los datos ya completados y podrá abrir directamente el paso afectado. Los documentos anteriores se conservarán para auditoría.</p>
     </div>
     <footer><button class="admin-button admin-button--soft" type="button" data-store-dialog-close>Cancelar</button><button class="admin-button admin-store-corrections" type="submit">Enviar correcciones</button></footer>

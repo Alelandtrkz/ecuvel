@@ -83,6 +83,8 @@ from app.services.admin_products import (
 from app.services.admin_stores import (
     APPROVAL_CHECK_LABELS,
     CORRECTION_REASON_LABELS,
+    DOCUMENT_CORRECTION_REASON_LABELS,
+    FIELD_CORRECTION_REASON_LABELS,
     approve_store_verification,
     contract_status_label,
     document_status_label,
@@ -1157,6 +1159,9 @@ def store_review(onboarding_id: uuid.UUID):
         onboarding=onboarding,
         approval_checks=APPROVAL_CHECK_LABELS,
         correction_reasons=CORRECTION_REASON_LABELS,
+        document_correction_reasons=DOCUMENT_CORRECTION_REASON_LABELS,
+        field_correction_reasons=FIELD_CORRECTION_REASON_LABELS,
+        documents_by_id={str(document.id): document for document in onboarding.documents},
         document_type_label=document_type_label,
         document_status_label=document_status_label,
         contract_status_label=contract_status_label,

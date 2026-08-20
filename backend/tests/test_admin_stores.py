@@ -27,6 +27,8 @@ from app.models.enums import (
     StoreVerificationDecision,
     UserStatus,
 )
+from app.services.admin_stores import approve_store_verification
+from app.services.partner_onboarding import PartnerOnboardingValidationError
 
 
 pytestmark = pytest.mark.integration
@@ -129,6 +131,34 @@ def _submitted_onboarding(session, app, *, name: str = "Tienda Nova"):
     ])
     session.commit()
     return seller, store, onboarding, document
+
+
+def _add_document(
+    session,
+    app,
+    onboarding: StoreOnboarding,
+    *,
+    document_type: str,
+    file_name: str,
+) -> StoreOnboardingDocument:
+    payload = f"%PDF-1.4\n% {file_name}\n%%EOF\n".encode()
+    storage_key = f"onboarding/tests/{uuid.uuid4().hex}.pdf"
+    path = Path(app.config["PARTNER_DOCUMENT_UPLOAD_DIR"]) / storage_key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    document = StoreOnboardingDocument(
+        onboarding_id=onboarding.id,
+        storage_key=storage_key,
+        file_name=file_name,
+        mime_type="application/pdf",
+        size_bytes=len(payload),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        document_type=document_type,
+        status=StoreOnboardingDocumentStatus.PENDING_REVIEW,
+    )
+    session.add(document)
+    session.flush()
+    return document
 
 
 def test_admin_store_moderation_access_list_and_private_document(app, session, client):
@@ -269,6 +299,271 @@ def test_corrections_replacement_resubmission_and_approval_keep_store_pending(
         item.status != StoreOnboardingDocumentStatus.PENDING_REVIEW
         for item in onboarding.documents
     )
+
+
+def test_multiple_document_corrections_are_saved_in_one_review_and_visible_to_seller(
+    app, session, client
+):
+    seller, _store, onboarding, identity = _submitted_onboarding(session, app)
+    bank = _add_document(
+        session,
+        app,
+        onboarding,
+        document_type="BANK_CERTIFICATE",
+        file_name="certificado-bancario.pdf",
+    )
+    registration = _add_document(
+        session,
+        app,
+        onboarding,
+        document_type="CORPORATE_ACTS_CERTIFICATE",
+        file_name="actos-societarios.pdf",
+    )
+    unaffected = _add_document(
+        session,
+        app,
+        onboarding,
+        document_type="PASSPORT",
+        file_name="pasaporte.pdf",
+    )
+    staff = _user(session, staff=True, name="Alejandro Admin")
+    session.commit()
+    reviews_before = len(onboarding.reviews)
+
+    _login(client, staff)
+    response = client.post(
+        f"/admin/stores/{onboarding.id}/request-corrections",
+        data={
+            "expected_updated_at": onboarding.updated_at.isoformat(),
+            "document_issue_target": [str(identity.id), str(bank.id), str(registration.id)],
+            "document_issue_reason": [
+                "DOCUMENT_UNREADABLE",
+                "DOCUMENT_INCORRECT",
+                "DOCUMENT_INCOMPLETE",
+            ],
+            "document_issue_message": [
+                "La fotografía está borrosa.",
+                "El titular no coincide con los datos bancarios.",
+                "Falta la segunda página del documento.",
+            ],
+            "comments": "Revisión documental del expediente.",
+        },
+    )
+    assert response.status_code == 302
+    assert "status=corrections" in response.headers["Location"]
+
+    session.expire_all()
+    onboarding = session.get(StoreOnboarding, onboarding.id)
+    review = onboarding.reviews[-1]
+    assert onboarding.status == StoreOnboardingStatus.CORRECTIONS_REQUESTED
+    assert len(onboarding.reviews) == reviews_before + 1
+    assert len(review.issues_snapshot) == 3
+    assert review.comments == "Revisión documental del expediente."
+    assert [issue["target_id"] for issue in review.issues_snapshot] == [
+        str(identity.id),
+        str(bank.id),
+        str(registration.id),
+    ]
+    for document_id, message in (
+        (identity.id, "La fotografía está borrosa."),
+        (bank.id, "El titular no coincide con los datos bancarios."),
+        (registration.id, "Falta la segunda página del documento."),
+    ):
+        document = session.get(StoreOnboardingDocument, document_id)
+        assert document.status == StoreOnboardingDocumentStatus.REJECTED
+        assert document.admin_comment == message
+    assert session.get(StoreOnboardingDocument, unaffected.id).status == StoreOnboardingDocumentStatus.PENDING_REVIEW
+
+    _login(client, seller)
+    seller_status = client.get("/partners/onboarding/status").get_data(as_text=True)
+    assert "Registro mercantil" in seller_status
+    assert "Documento ilegible" in seller_status
+    assert "La fotografía está borrosa." in seller_status
+    assert "Certificado bancario" in seller_status
+    assert "Documento incorrecto" in seller_status
+    assert "El titular no coincide con los datos bancarios." in seller_status
+    assert "Certificado de actos societarios" in seller_status
+    assert "Documento incompleto" in seller_status
+
+
+def test_multiple_document_corrections_reject_foreign_and_duplicate_payload_atomically(
+    app, session, client
+):
+    _seller, _store, onboarding, local_document = _submitted_onboarding(session, app)
+    _other_seller, _other_store, _other_onboarding, foreign_document = _submitted_onboarding(
+        session, app, name="Tienda Fuera de Alcance"
+    )
+    staff = _user(session, staff=True)
+    session.commit()
+    reviews_before = len(onboarding.reviews)
+    expected_updated_at = onboarding.updated_at.isoformat()
+    _login(client, staff)
+
+    foreign = client.post(
+        f"/admin/stores/{onboarding.id}/request-corrections",
+        data={
+            "expected_updated_at": expected_updated_at,
+            "document_issue_target": [str(local_document.id), str(foreign_document.id)],
+            "document_issue_reason": ["DOCUMENT_UNREADABLE", "DOCUMENT_INCORRECT"],
+            "document_issue_message": ["Documento local borroso.", "Documento ajeno."],
+        },
+    )
+    assert foreign.status_code == 302
+    session.expire_all()
+    assert session.get(StoreOnboarding, onboarding.id).status == StoreOnboardingStatus.SUBMITTED
+    assert len(session.get(StoreOnboarding, onboarding.id).reviews) == reviews_before
+    assert session.get(StoreOnboardingDocument, local_document.id).status == StoreOnboardingDocumentStatus.PENDING_REVIEW
+
+    duplicate = client.post(
+        f"/admin/stores/{onboarding.id}/request-corrections",
+        data={
+            "expected_updated_at": expected_updated_at,
+            "document_issue_target": [str(local_document.id), str(local_document.id)],
+            "document_issue_reason": ["DOCUMENT_UNREADABLE", "DOCUMENT_UNREADABLE"],
+            "document_issue_message": ["Primera fila.", "Fila repetida."],
+        },
+    )
+    assert duplicate.status_code == 302
+    session.expire_all()
+    assert session.get(StoreOnboarding, onboarding.id).status == StoreOnboardingStatus.SUBMITTED
+    assert len(session.get(StoreOnboarding, onboarding.id).reviews) == reviews_before
+    assert session.get(StoreOnboardingDocument, local_document.id).status == StoreOnboardingDocumentStatus.PENDING_REVIEW
+
+    different_reasons = client.post(
+        f"/admin/stores/{onboarding.id}/request-corrections",
+        data={
+            "expected_updated_at": expected_updated_at,
+            "document_issue_target": [str(local_document.id), str(local_document.id)],
+            "document_issue_reason": ["DOCUMENT_UNREADABLE", "DOCUMENT_INCOMPLETE"],
+            "document_issue_message": ["El archivo está borroso.", "También falta una página."],
+        },
+    )
+    assert different_reasons.status_code == 302
+    assert "status=corrections" in different_reasons.headers["Location"]
+    session.expire_all()
+    onboarding = session.get(StoreOnboarding, onboarding.id)
+    local_document = session.get(StoreOnboardingDocument, local_document.id)
+    assert onboarding.status == StoreOnboardingStatus.CORRECTIONS_REQUESTED
+    assert len(onboarding.reviews) == reviews_before + 1
+    assert len(onboarding.reviews[-1].issues_snapshot) == 2
+    assert local_document.admin_comment == "El archivo está borroso.\nTambién falta una página."
+
+
+def test_partial_multiple_document_replacement_blocks_resubmission_and_keeps_links(
+    app, session, client
+):
+    seller, _store, onboarding, identity = _submitted_onboarding(session, app)
+    bank = _add_document(
+        session,
+        app,
+        onboarding,
+        document_type="BANK_CERTIFICATE",
+        file_name="banco-original.pdf",
+    )
+    staff = _user(session, staff=True)
+    session.commit()
+
+    _login(client, staff)
+    client.post(
+        f"/admin/stores/{onboarding.id}/request-corrections",
+        data={
+            "expected_updated_at": onboarding.updated_at.isoformat(),
+            "document_issue_target": [str(identity.id), str(bank.id)],
+            "document_issue_reason": ["DOCUMENT_UNREADABLE", "DOCUMENT_INCORRECT"],
+            "document_issue_message": ["Reemplaza la identidad.", "Reemplaza el certificado."],
+        },
+    )
+
+    _login(client, seller)
+    first_replacement = client.post(
+        "/partners/onboarding/step/4",
+        data={
+            "document_type": "COMPANY_REGISTRATION",
+            "replaces_document_id": str(identity.id),
+            "documents": (io.BytesIO(b"%PDF-1.4\n% identity replacement\n%%EOF\n"), "identidad-nueva.pdf"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert first_replacement.status_code == 302
+    assert client.post("/partners/onboarding/review").status_code == 302
+    session.expire_all()
+    assert session.get(StoreOnboarding, onboarding.id).status == StoreOnboardingStatus.CORRECTIONS_REQUESTED
+
+    second_replacement = client.post(
+        "/partners/onboarding/step/4",
+        data={
+            "document_type": "BANK_CERTIFICATE",
+            "replaces_document_id": str(bank.id),
+            "documents": (io.BytesIO(b"%PDF-1.4\n% bank replacement\n%%EOF\n"), "banco-nuevo.pdf"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert second_replacement.status_code == 302
+    assert client.post("/partners/onboarding/review").status_code == 302
+
+    session.expire_all()
+    onboarding = session.get(StoreOnboarding, onboarding.id)
+    assert onboarding.status == StoreOnboardingStatus.SUBMITTED
+    replacements = {
+        document.file_name: document.replaces_document_id
+        for document in onboarding.documents
+        if document.replaces_document_id is not None
+    }
+    assert replacements["identidad-nueva.pdf"] == identity.id
+    assert replacements["banco-nuevo.pdf"] == bank.id
+
+
+def test_approval_without_current_documents_uses_correct_utf8_message(app, session):
+    _seller, _store, onboarding, document = _submitted_onboarding(session, app)
+    staff = _user(session, staff=True)
+    session.delete(document)
+    session.commit()
+
+    with pytest.raises(PartnerOnboardingValidationError) as exc_info:
+        approve_store_verification(
+            session,
+            onboarding_id=onboarding.id,
+            reviewer_user_id=staff.id,
+            checklist_values=[
+                "identity",
+                "address_contact",
+                "banking",
+                "documents",
+                "no_pending_corrections",
+            ],
+            expected_updated_at=onboarding.updated_at.isoformat(),
+            comments=None,
+        )
+    assert str(exc_info.value) == "La solicitud no tiene documentación vigente para aprobar."
+    assert not any(marker in str(exc_info.value) for marker in ("Ã", "Â", "�"))
+    session.rollback()
+
+
+def test_structured_field_corrections_remain_supported(app, session, client):
+    _seller, _store, onboarding, document = _submitted_onboarding(session, app)
+    staff = _user(session, staff=True)
+    session.commit()
+    original_bank_account = onboarding.bank_account_number
+
+    _login(client, staff)
+    response = client.post(
+        f"/admin/stores/{onboarding.id}/request-corrections",
+        data={
+            "expected_updated_at": onboarding.updated_at.isoformat(),
+            "field_issue_code": ["BANK_DATA_INCORRECT", "ADDRESS_INCOMPLETE"],
+            "comments": "Verifica los datos señalados.",
+        },
+    )
+    assert response.status_code == 302
+
+    session.expire_all()
+    onboarding = session.get(StoreOnboarding, onboarding.id)
+    issues = onboarding.reviews[-1].issues_snapshot
+    assert [issue["target_type"] for issue in issues] == ["FIELD", "FIELD"]
+    assert issues[0]["field"] == "bank_account_number"
+    assert issues[0]["previous_value"] == original_bank_account
+    assert issues[1]["field"] == "address"
+    assert session.get(StoreOnboardingDocument, document.id).status == StoreOnboardingDocumentStatus.PENDING_REVIEW
 
 
 def test_admin_store_decision_rejects_stale_version(app, session, client):

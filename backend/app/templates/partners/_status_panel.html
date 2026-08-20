@@ -9,13 +9,14 @@
     <p>Corrige únicamente los datos observados. La información que ya enviaste se conserva.</p>
     {% if correction_review %}
       {% if correction_review.comments %}<p class="partner-correction-summary">{{ correction_review.comments }}</p>{% endif %}
+      {% if pending_corrections %}<p class="partner-correction-pending"><strong>{{ pending_corrections|length }}</strong> {{ 'corrección pendiente' if pending_corrections|length == 1 else 'correcciones pendientes' }} antes de reenviar.</p>{% endif %}
       {% set field_issues = (correction_review.issues_snapshot or [])|selectattr('target_type', 'equalto', 'FIELD')|list %}
       {% set document_issues = (correction_review.issues_snapshot or [])|selectattr('target_type', 'equalto', 'DOCUMENT')|list %}
       {% if field_issues %}<section class="partner-correction-group"><h3>Información a corregir</h3><div class="partner-correction-list">
         {% for issue in field_issues %}<article><div><strong>Paso {{ issue.step }}</strong><p>{{ issue.message }}</p></div><a href="{{ url_for('partners.onboarding_step', step=issue.step) }}">Corregir dato<i data-lucide="arrow-right" aria-hidden="true"></i></a></article>{% endfor %}
       </div></section>{% endif %}
       {% if document_issues %}<section class="partner-correction-group"><h3>Documentos a reemplazar</h3><div class="partner-correction-list">
-        {% for issue in document_issues %}<article><div><strong>Requiere reemplazo</strong><p>{{ issue.message }}</p></div><a href="{{ url_for('partners.onboarding_step', step=4) }}">Reemplazar archivo<i data-lucide="arrow-right" aria-hidden="true"></i></a></article>{% endfor %}
+        {% for issue in document_issues %}{% set document = correction_documents.get(issue.target_id) %}<article><div><strong>{{ document_types.get(document.document_type, document.document_type) if document else 'Documento' }}</strong><span class="partner-correction-reason">{{ correction_reason_labels.get(issue.reason_code, 'Requiere reemplazo') }}</span><p>{{ issue.message or correction_review.comments or 'ECUVEL solicitó reemplazar este documento.' }}</p></div><a href="{{ url_for('partners.onboarding_step', step=4) }}">Reemplazar archivo<i data-lucide="arrow-right" aria-hidden="true"></i></a></article>{% endfor %}
       </div></section>{% endif %}
       {% if not field_issues and not document_issues %}<div class="partner-correction-list"><article><div><strong>Información general</strong><p>Completa la información solicitada por ECUVEL.</p></div></article></div>{% endif %}
     {% endif %}

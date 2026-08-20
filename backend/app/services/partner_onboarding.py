@@ -98,6 +98,18 @@ ADMIN_APPROVAL_CHECKS = (
     "no_pending_corrections",
 )
 
+CORRECTION_REASON_LABELS = {
+    "DOCUMENT_UNREADABLE": "Documento ilegible",
+    "DOCUMENT_INCOMPLETE": "Documento incompleto",
+    "DOCUMENT_INCORRECT": "Documento incorrecto",
+    "LEGAL_ID_MISMATCH": "Identificación/RUC no coincide",
+    "ADDRESS_INCOMPLETE": "Dirección incompleta",
+    "CONTACT_INCORRECT": "Datos de contacto incorrectos",
+    "BANK_DATA_INCORRECT": "Datos bancarios incorrectos",
+    "BANK_OWNER_MISMATCH": "Información del titular no coincide",
+    "OTHER": "Otro",
+}
+
 
 def get_or_create_onboarding(session: Session, user_id) -> StoreOnboarding:
     onboarding = session.scalar(
@@ -326,7 +338,7 @@ def review_onboarding(
         ]
         if not current_documents:
             raise PartnerOnboardingValidationError(
-                "La solicitud no tiene documentaciÃ³n vigente para aprobar."
+                "La solicitud no tiene documentación vigente para aprobar."
             )
         unresolved = _unresolved_document_issues(onboarding)
         if unresolved:
@@ -348,20 +360,32 @@ def review_onboarding(
             raise PartnerOnboardingValidationError(
                 "Selecciona al menos una corrección específica."
             )
-        onboarding.status = StoreOnboardingStatus.CORRECTIONS_REQUESTED
-        onboarding.current_stage = StoreOnboardingStage.VERIFY_DATA
-        onboarding.correction_requested_at = now
+        document_messages: dict[uuid.UUID, list[str]] = {}
+        documents_by_id = {document.id: document for document in onboarding.documents}
         for issue in normalized_issues:
             if issue.get("target_type") != "DOCUMENT":
                 continue
             document_id = _optional_uuid(issue.get("target_id"))
-            document = session.get(StoreOnboardingDocument, document_id) if document_id else None
-            if document is None or document.onboarding_id != onboarding.id:
+            document = documents_by_id.get(document_id)
+            if (
+                document is None
+                or document.onboarding_id != onboarding.id
+                or document.status == StoreOnboardingDocumentStatus.REJECTED
+            ):
                 raise PartnerOnboardingValidationError(
                     "Uno de los documentos seleccionados ya no está disponible."
                 )
+            messages = document_messages.setdefault(document.id, [])
+            message = _clean(issue.get("message"))[:500]
+            if message and message not in messages:
+                messages.append(message)
+        onboarding.status = StoreOnboardingStatus.CORRECTIONS_REQUESTED
+        onboarding.current_stage = StoreOnboardingStage.VERIFY_DATA
+        onboarding.correction_requested_at = now
+        for document_id, messages in document_messages.items():
+            document = documents_by_id[document_id]
             document.status = StoreOnboardingDocumentStatus.REJECTED
-            document.admin_comment = _clean(issue.get("message"))[:500] or None
+            document.admin_comment = "\n".join(messages)[:500] or None
         db_decision = StoreVerificationDecision.CORRECTIONS_REQUESTED
     elif normalized == "reject":
         onboarding.status = StoreOnboardingStatus.REJECTED
@@ -618,6 +642,7 @@ def _optional_uuid(value) -> uuid.UUID | None:
 
 def _normalize_issues(issues: list[dict] | None) -> list[dict]:
     normalized: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
     for raw in issues or []:
         if not isinstance(raw, dict):
             continue
@@ -636,6 +661,7 @@ def _normalize_issues(issues: list[dict] | None) -> list[dict]:
             if target_id is None:
                 continue
             item["target_id"] = str(target_id)
+            identity = (target_type, str(target_id), reason_code)
         else:
             field = _clean(raw.get("field"))[:80]
             try:
@@ -645,8 +671,12 @@ def _normalize_issues(issues: list[dict] | None) -> list[dict]:
             if not field or step not in STEPS:
                 continue
             item.update({"field": field, "step": step})
+            identity = (target_type, field, reason_code)
             if "previous_value" in raw:
                 item["previous_value"] = _clean(raw.get("previous_value"))
+        if identity in seen:
+            continue
+        seen.add(identity)
         normalized.append(item)
     return normalized
 
@@ -683,14 +713,32 @@ def _unresolved_document_issues(onboarding: StoreOnboarding) -> list[dict]:
     return unresolved
 
 
+def unresolved_correction_issues(onboarding: StoreOnboarding) -> list[dict]:
+    review = latest_correction_review(onboarding)
+    unresolved = list(_unresolved_document_issues(onboarding))
+    for issue in (review.issues_snapshot if review else None) or []:
+        if issue.get("target_type") != "FIELD" or "previous_value" not in issue:
+            continue
+        if _clean(getattr(onboarding, issue.get("field", ""), None)) == _clean(issue.get("previous_value")):
+            unresolved.append(issue)
+    return unresolved
+
+
 def _validate_requested_corrections_resolved(onboarding: StoreOnboarding) -> None:
     if onboarding.status != StoreOnboardingStatus.CORRECTIONS_REQUESTED:
         return
     unresolved = _unresolved_document_issues(onboarding)
     if unresolved:
+        count = len(unresolved)
         raise PartnerOnboardingValidationError(
-            "Reemplaza los documentos indicados antes de reenviar.",
-            {"documents": "Aún hay documentos que requieren reemplazo."},
+            f"Queda {count} corrección pendiente."
+            if count == 1
+            else f"Quedan {count} correcciones pendientes.",
+            {
+                "documents": "Aún hay un documento que requiere reemplazo."
+                if count == 1
+                else f"Aún hay {count} documentos que requieren reemplazo."
+            },
         )
     review = latest_correction_review(onboarding)
     unchanged: list[dict] = []

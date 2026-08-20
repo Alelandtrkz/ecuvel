@@ -25,6 +25,7 @@ from app.models.enums import (
 )
 from app.services.partner_onboarding import (
     ADMIN_APPROVAL_CHECKS,
+    CORRECTION_REASON_LABELS,
     DOCUMENT_TYPES,
     PartnerOnboardingValidationError,
     review_onboarding,
@@ -73,23 +74,23 @@ CORRECTION_REASONS = {
     "BANK_OWNER_MISMATCH": ("FIELD", "bank_account_owner", 5, "La información del titular de la cuenta no coincide."),
     "OTHER": ("FIELD", "store_name", 1, "Revisa la observación del equipo ECUVEL y corrige la información indicada."),
 }
-CORRECTION_REASON_LABELS = {
-    "DOCUMENT_UNREADABLE": "Documento ilegible",
-    "DOCUMENT_INCOMPLETE": "Documento incompleto",
-    "DOCUMENT_INCORRECT": "Documento incorrecto",
-    "LEGAL_ID_MISMATCH": "Identificación/RUC no coincide",
-    "ADDRESS_INCOMPLETE": "Dirección incompleta",
-    "CONTACT_INCORRECT": "Datos de contacto incorrectos",
-    "BANK_DATA_INCORRECT": "Datos bancarios incorrectos",
-    "BANK_OWNER_MISMATCH": "Información del titular no coincide",
-    "OTHER": "Otro",
-}
 APPROVAL_CHECK_LABELS = {
     "identity": "Datos de identificación revisados",
     "address_contact": "Dirección y contacto revisados",
     "banking": "Información bancaria revisada",
     "documents": "Documentación revisada",
     "no_pending_corrections": "Sin correcciones pendientes",
+}
+MAX_CORRECTION_ISSUES = 20
+DOCUMENT_CORRECTION_REASON_LABELS = {
+    code: CORRECTION_REASON_LABELS[code]
+    for code, spec in CORRECTION_REASONS.items()
+    if spec[0] == "DOCUMENT"
+}
+FIELD_CORRECTION_REASON_LABELS = {
+    code: CORRECTION_REASON_LABELS[code]
+    for code, spec in CORRECTION_REASONS.items()
+    if spec[0] == "FIELD"
 }
 
 
@@ -311,42 +312,136 @@ def get_admin_store_review(session: Session, onboarding_id: uuid.UUID) -> StoreO
 
 def build_correction_issues(onboarding: StoreOnboarding, form) -> list[dict]:
     issues: list[dict] = []
-    document_id = form.get("document_id")
-    document = None
-    if document_id:
-        try:
-            parsed_document_id = uuid.UUID(str(document_id))
-        except (TypeError, ValueError):
-            parsed_document_id = None
-        document = next((item for item in onboarding.documents if item.id == parsed_document_id), None)
-    custom_message = " ".join((form.get("comments") or "").strip().split())[:500]
-    for reason_code in dict.fromkeys(form.getlist("issue_code")):
+    seen: set[tuple[str, str, str]] = set()
+    current_documents = {
+        document.id: document
+        for document in onboarding.documents
+        if document.status != StoreOnboardingDocumentStatus.REJECTED
+    }
+    general_comment = _form_text(form.get("comments"), limit=1000, label="observación general")
+
+    document_targets = form.getlist("document_issue_target")
+    document_reasons = form.getlist("document_issue_reason")
+    document_messages = form.getlist("document_issue_message")
+    if len({len(document_targets), len(document_reasons), len(document_messages)}) > 1:
+        raise PartnerOnboardingValidationError(
+            "Las correcciones documentales están incompletas. Actualiza la página e inténtalo nuevamente."
+        )
+
+    document_rows = list(zip(document_targets, document_reasons, document_messages))
+    if len(document_rows) > MAX_CORRECTION_ISSUES:
+        raise PartnerOnboardingValidationError(
+            f"Puedes enviar un máximo de {MAX_CORRECTION_ISSUES} correcciones por revisión."
+        )
+    for raw_target, raw_reason, raw_message in document_rows:
+        target = str(raw_target or "").strip()
+        reason_code = str(raw_reason or "").strip().upper()
+        message_value = str(raw_message or "").strip()
+        if not target and not reason_code and not message_value:
+            continue
+        _append_document_issue(
+            issues,
+            seen,
+            current_documents=current_documents,
+            target=target,
+            reason_code=reason_code,
+            raw_message=message_value,
+        )
+
+    field_codes = list(form.getlist("field_issue_code"))
+    legacy_codes = list(form.getlist("issue_code"))
+    legacy_document_id = form.get("document_id")
+    for raw_code in legacy_codes:
+        reason_code = str(raw_code or "").strip().upper()
         spec = CORRECTION_REASONS.get(reason_code)
         if spec is None:
-            continue
-        target_type, field, step, default_message = spec
-        message = custom_message or default_message
-        if target_type == "DOCUMENT":
-            if document is None:
-                raise PartnerOnboardingValidationError(
-                    "Selecciona el documento que debe reemplazarse."
-                )
-            issues.append({
-                "target_type": "DOCUMENT",
-                "target_id": str(document.id),
-                "reason_code": reason_code,
-                "message": message,
-            })
+            raise PartnerOnboardingValidationError("Uno de los motivos de corrección no es válido.")
+        if spec[0] == "DOCUMENT":
+            _append_document_issue(
+                issues,
+                seen,
+                current_documents=current_documents,
+                target=str(legacy_document_id or "").strip(),
+                reason_code=reason_code,
+                raw_message=general_comment,
+            )
         else:
-            issues.append({
-                "target_type": "FIELD",
-                "field": field,
-                "step": step,
-                "reason_code": reason_code,
-                "message": message,
-                "previous_value": getattr(onboarding, field, None),
-            })
+            field_codes.append(reason_code)
+
+    for reason_code in dict.fromkeys(str(code or "").strip().upper() for code in field_codes):
+        if not reason_code:
+            continue
+        spec = CORRECTION_REASONS.get(reason_code)
+        if spec is None or spec[0] != "FIELD":
+            raise PartnerOnboardingValidationError("Uno de los motivos de corrección no es válido.")
+        _target_type, field, step, default_message = spec
+        identity = ("FIELD", str(field), reason_code)
+        if identity in seen:
+            raise PartnerOnboardingValidationError("No repitas la misma corrección.")
+        seen.add(identity)
+        issues.append({
+            "target_type": "FIELD",
+            "field": field,
+            "step": step,
+            "reason_code": reason_code,
+            "message": general_comment or default_message,
+            "previous_value": getattr(onboarding, field, None),
+        })
+
+    if len(issues) > MAX_CORRECTION_ISSUES:
+        raise PartnerOnboardingValidationError(
+            f"Puedes enviar un máximo de {MAX_CORRECTION_ISSUES} correcciones por revisión."
+        )
     return issues
+
+
+def _append_document_issue(
+    issues: list[dict],
+    seen: set[tuple[str, str, str]],
+    *,
+    current_documents: dict[uuid.UUID, StoreOnboardingDocument],
+    target: str,
+    reason_code: str,
+    raw_message: str,
+) -> None:
+    if not target or not reason_code:
+        raise PartnerOnboardingValidationError(
+            "Completa el documento y el motivo de cada corrección documental."
+        )
+    spec = CORRECTION_REASONS.get(reason_code)
+    if spec is None or spec[0] != "DOCUMENT":
+        raise PartnerOnboardingValidationError("Uno de los motivos documentales no es válido.")
+    try:
+        document_id = uuid.UUID(target)
+    except (TypeError, ValueError) as exc:
+        raise PartnerOnboardingValidationError("Uno de los documentos seleccionados no es válido.") from exc
+    document = current_documents.get(document_id)
+    if document is None:
+        raise PartnerOnboardingValidationError(
+            "Uno de los documentos seleccionados no pertenece a esta solicitud o ya no está vigente."
+        )
+    identity = ("DOCUMENT", str(document.id), reason_code)
+    if identity in seen:
+        raise PartnerOnboardingValidationError(
+            "No repitas el mismo motivo para un documento."
+        )
+    seen.add(identity)
+    message = _form_text(raw_message, limit=500, label="observación documental") or spec[3]
+    issues.append({
+        "target_type": "DOCUMENT",
+        "target_id": str(document.id),
+        "reason_code": reason_code,
+        "message": message,
+    })
+
+
+def _form_text(value, *, limit: int, label: str) -> str:
+    cleaned = " ".join(str(value or "").strip().split())
+    if len(cleaned) > limit:
+        raise PartnerOnboardingValidationError(
+            f"La {label} no puede superar {limit} caracteres."
+        )
+    return cleaned
 
 
 def approve_store_verification(
@@ -387,7 +482,7 @@ def request_store_corrections(
         onboarding_id=onboarding_id,
         reviewer_user_id=reviewer_user_id,
         decision="corrections",
-        comments=form.get("comments"),
+        comments=_form_text(form.get("comments"), limit=1000, label="observación general"),
         issues=issues,
         expected_updated_at=form.get("expected_updated_at"),
     )

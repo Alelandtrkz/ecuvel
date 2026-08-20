@@ -19,7 +19,7 @@
         <strong><i data-lucide="message-square-warning" aria-hidden="true"></i> Correcciones solicitadas</strong>
         <ul>
           {% for issue in step_issues %}<li>{{ issue.message }}</li>{% endfor %}
-          {% for issue in document_issues %}<li>{{ issue.message }}</li>{% endfor %}
+          {% for issue in document_issues %}{% set document = correction_documents.get(issue.target_id) %}<li><strong>{{ document_types.get(document.document_type, document.document_type) if document else 'Documento' }} · {{ correction_reason_labels.get(issue.reason_code, 'Requiere reemplazo') }}</strong><br>{{ issue.message or correction_review.comments or 'ECUVEL solicitó reemplazar este documento.' }}</li>{% endfor %}
         </ul>
       </aside>
     {% endif %}
