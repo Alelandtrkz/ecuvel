@@ -1,4 +1,165 @@
 (() => {
+  const userPages = Array.from(document.querySelectorAll(".admin-users-page"));
+  let openSelect = null;
+
+  const closeSelect = (control, restoreFocus = false) => {
+    if (!control) return;
+    control.classList.remove("is-open");
+    const trigger = control.querySelector(".admin-user-select__button");
+    trigger?.setAttribute("aria-expanded", "false");
+    if (restoreFocus) trigger?.focus({ preventScroll: true });
+    if (openSelect === control) openSelect = null;
+  };
+
+  const focusSelectOption = (options, index) => {
+    const option = options[index];
+    if (!option) return;
+    option.focus({ preventScroll: true });
+    option.scrollIntoView({ block: "nearest" });
+  };
+
+  const enhanceSelect = (nativeSelect, index) => {
+    if (nativeSelect.multiple || nativeSelect.closest(".admin-user-select")) return;
+
+    const control = document.createElement("div");
+    control.className = "admin-user-select is-enhanced";
+    nativeSelect.before(control);
+    control.append(nativeSelect);
+    nativeSelect.classList.add("admin-user-select__native");
+
+    const trigger = document.createElement("button");
+    trigger.className = "admin-user-select__button";
+    trigger.type = "button";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.disabled = nativeSelect.disabled;
+
+    const selectedLabel = document.createElement("span");
+    selectedLabel.className = "admin-user-select__label";
+    const chevron = document.createElement("span");
+    chevron.className = "admin-user-select__chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    trigger.append(selectedLabel, chevron);
+
+    const menu = document.createElement("div");
+    menu.className = "admin-user-select__menu";
+    menu.id = `admin-user-select-menu-${index}`;
+    menu.setAttribute("role", "listbox");
+    trigger.setAttribute("aria-controls", menu.id);
+    const accessibleName = nativeSelect.getAttribute("aria-label");
+    if (accessibleName) trigger.setAttribute("aria-label", accessibleName);
+
+    const optionButtons = Array.from(nativeSelect.options).map((nativeOption) => {
+      const option = document.createElement("button");
+      option.className = "admin-user-select__option";
+      option.type = "button";
+      option.setAttribute("role", "option");
+      option.dataset.value = nativeOption.value;
+      option.textContent = nativeOption.textContent.trim();
+      option.disabled = nativeOption.disabled;
+      menu.append(option);
+      return option;
+    });
+
+    control.append(trigger, menu);
+
+    const enabledOptions = () => optionButtons.filter((option) => !option.disabled);
+    const selectedEnabledIndex = (options) => {
+      const selected = options.findIndex((option) => option.getAttribute("aria-selected") === "true");
+      return selected >= 0 ? selected : 0;
+    };
+
+    const syncFromNative = () => {
+      const selected = nativeSelect.selectedOptions?.[0];
+      selectedLabel.textContent = selected?.textContent?.trim() || "Seleccione una opción";
+      optionButtons.forEach((option) => {
+        option.setAttribute("aria-selected", String(option.dataset.value === nativeSelect.value));
+      });
+      trigger.disabled = nativeSelect.disabled;
+    };
+
+    const open = (preferredIndex) => {
+      if (openSelect && openSelect !== control) closeSelect(openSelect);
+      control.classList.add("is-open");
+      trigger.setAttribute("aria-expanded", "true");
+      openSelect = control;
+      const options = enabledOptions();
+      window.requestAnimationFrame(() => {
+        focusSelectOption(options, preferredIndex ?? selectedEnabledIndex(options));
+      });
+    };
+
+    const choose = (option) => {
+      nativeSelect.value = option.dataset.value ?? "";
+      syncFromNative();
+      nativeSelect.dispatchEvent(new Event("input", { bubbles: true }));
+      nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      closeSelect(control, true);
+    };
+
+    trigger.addEventListener("click", (event) => {
+      event.preventDefault();
+      if (control.classList.contains("is-open")) closeSelect(control);
+      else open();
+    });
+
+    trigger.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const options = enabledOptions();
+        open(event.key === "ArrowUp" ? options.length - 1 : selectedEnabledIndex(options));
+      } else if (event.key === "Escape") {
+        closeSelect(control);
+      }
+    });
+
+    optionButtons.forEach((option) => {
+      option.addEventListener("click", (event) => {
+        event.preventDefault();
+        choose(option);
+      });
+      option.addEventListener("keydown", (event) => {
+        const options = enabledOptions();
+        const optionIndex = options.indexOf(option);
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          focusSelectOption(options, Math.min(options.length - 1, optionIndex + 1));
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          focusSelectOption(options, Math.max(0, optionIndex - 1));
+        } else if (event.key === "Home") {
+          event.preventDefault();
+          focusSelectOption(options, 0);
+        } else if (event.key === "End") {
+          event.preventDefault();
+          focusSelectOption(options, options.length - 1);
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          choose(option);
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          closeSelect(control, true);
+        }
+      });
+    });
+
+    control.addEventListener("focusout", () => {
+      window.setTimeout(() => {
+        if (!control.contains(document.activeElement)) closeSelect(control);
+      }, 0);
+    });
+    nativeSelect.addEventListener("change", syncFromNative);
+    syncFromNative();
+  };
+
+  userPages.forEach((page) => {
+    page.querySelectorAll("select").forEach((select, index) => enhanceSelect(select, index));
+  });
+
+  document.addEventListener("click", (event) => {
+    if (openSelect && !openSelect.contains(event.target)) closeSelect(openSelect);
+  });
+
   document.querySelectorAll("[data-confirm-open]").forEach((button) => {
     button.addEventListener("click", () => document.getElementById(button.dataset.confirmOpen)?.showModal());
   });

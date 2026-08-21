@@ -108,9 +108,17 @@ def test_legacy_staff_can_open_real_client_listing_and_detail(client, session):
     response = client.get("/admin/users?q=maria@example.com")
     assert response.status_code == 200
     assert b"Mar\xc3\xada Cliente" in response.data
+    assert b'data-lucide="search"' in response.data
+    assert b'class="admin-row-primary"' in response.data
+    assert b">Ver usuario</a>" in response.data
     response = client.get(f"/admin/users/{buyer.public_account_code}")
     assert response.status_code == 200
     assert buyer.public_account_code.encode() in response.data
+    assert b"admin-back--icon" in response.data
+    assert b'aria-label="Volver a clientes"' in response.data
+    assert b"marketing-preferences" in response.data
+    assert b"admin-profile-name" in response.data
+    assert f'title="{buyer.full_name}"'.encode() in response.data
 
 
 def test_staff_creation_reuses_user_identity_and_generates_stable_employee_code(session):
@@ -264,5 +272,19 @@ def test_staff_pages_render_and_employee_code_cannot_be_supplied(client, session
     assert response.status_code == 302
     profile = session.scalar(select(StaffProfile).join(User).where(User.email_normalized == "carlos@ecuvel.com"))
     assert profile and profile.employee_code != "EMP-999999"
-    assert client.get("/admin/users/staff").status_code == 200
-    assert client.get(f"/admin/users/staff/{profile.employee_code}").status_code == 200
+    staff_response = client.get("/admin/users/staff")
+    assert staff_response.status_code == 200
+    assert b'class="admin-row-primary"' in staff_response.data
+    assert b">Ver empleado</a>" in staff_response.data
+    detail_response = client.get(f"/admin/users/staff/{profile.employee_code}")
+    assert detail_response.status_code == 200
+    assert b"admin-back--icon" in detail_response.data
+    assert b'aria-label="Volver a Personal ECUVEL"' in detail_response.data
+    assert b"admin-status--headline" in detail_response.data
+    assert b"admin-staff-profile-card" in detail_response.data
+    assert detail_response.data.count(b"admin-staff-side-card") == 2
+    edit_response = client.get(f"/admin/users/staff/{profile.employee_code}/edit")
+    assert edit_response.status_code == 200
+    assert b"admin-back--icon" in edit_response.data
+    assert b'aria-label="Volver al empleado"' in edit_response.data
+    assert b"Permisos derivados del rol" in edit_response.data
