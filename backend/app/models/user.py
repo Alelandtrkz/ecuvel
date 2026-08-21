@@ -171,6 +171,14 @@ class User(
         foreign_keys="ProductReview.user_id",
     )
 
+    staff_profile: Mapped["StaffProfile | None"] = relationship(
+        "StaffProfile", back_populates="user", uselist=False,
+    )
+
+    marketing_consents: Mapped[list["UserMarketingConsent"]] = relationship(
+        "UserMarketingConsent", back_populates="user", cascade="all, delete-orphan",
+    )
+
     @property
     def is_authenticated(self) -> bool:
         return True

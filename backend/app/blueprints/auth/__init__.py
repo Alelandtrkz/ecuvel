@@ -42,6 +42,7 @@ from app.services.session_order_claims import (
     claim_session_orders,
     normalize_session_order_ids,
 )
+from app.services.admin_users import AdminUserError, accept_staff_invitation
 
 
 auth = Blueprint("auth", __name__)
@@ -118,6 +119,30 @@ def _send_password_reset_email(email: str, token: str) -> None:
             ),
         )
     )
+
+
+@auth.route("/personal/invitacion/<string:token>", methods=["GET", "POST"])
+@limiter.limit("8 per minute")
+def staff_invitation(token: str):
+    if request.method == "GET":
+        return render_template("auth/staff_invitation.html", token=token)
+    try:
+        db.session.remove()
+        database_session = db.session()
+        with database_session.begin():
+            user = accept_staff_invitation(
+                database_session,
+                token=token,
+                password=request.form.get("password", ""),
+                confirmation=request.form.get("password_confirmation", ""),
+                password_min_length=current_app.config["AUTH_PASSWORD_MIN_LENGTH"],
+            )
+        _login_user_preserving_session(user)
+        flash("Acceso de personal configurado correctamente.", "success")
+        return redirect(url_for("admin.operations"))
+    except AdminUserError as exc:
+        flash(str(exc), "error")
+        return render_template("auth/staff_invitation.html", token=token), 400
 
 
 def _store_phone_challenge(challenge_id, purpose: PhoneOtpPurpose, next_url: str) -> None:

@@ -122,6 +122,12 @@ class Config:
         1,
         1440,
     )
+    STAFF_INVITATION_TTL_MINUTES = _environment_int_range(
+        "STAFF_INVITATION_TTL_MINUTES",
+        1440,
+        15,
+        10080,
+    )
     AUTH_PASSWORD_MIN_LENGTH = _environment_int_range(
         "AUTH_PASSWORD_MIN_LENGTH",
         12,

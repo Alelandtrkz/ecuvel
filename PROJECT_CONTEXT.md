@@ -67,6 +67,17 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 
 `/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. `/admin/products` implementa la cola real de moderación: tabs por estado, búsqueda, paginación, panel de prevalidación determinística, checklist manual, preview privada que reutiliza el detalle público, correcciones, rechazo, aprobación y publicación transaccional. `/admin/stores` implementa la moderación real del onboarding: listado y KPI, búsqueda/filtros, documentos y contrato privados, historial append-only, correcciones por campo/documento y aprobación de verificación con checklist. Aprobar solo habilita el contrato; no activa ni verifica la tienda. `/admin/fulfillment` es el centro de control de paquetes de entrada que ya fueron recibidos por ECUVEL: lista ubicación, custodia, destino, último movimiento, tiempo en estado y desviaciones; el detalle permite asignar/reasignar traslado y crear una corrección de ruta mediante POST. `/admin/scanner` es la superficie de ejecución física: recepción vendedor → ECUVEL, pickup a transportista, llegada inter-puntos, entrega completa al comprador y consulta read-only. Reutiliza los servicios canónicos de dominio con CSRF, rate limit, locking, idempotencia y Post/Redirect/Get. Los GET son read-only. Los módulos no implementados se identifican como “Próximamente”.
 
+### Usuarios y personal ECUVEL
+
+- `User` continúa siendo la única identidad de login. Un empleado es un `User` con un `StaffProfile` opcional 1:1; `StoreMember` continúa siendo otra relación independiente sobre el mismo usuario.
+- `/admin/users` lista clientes reales con búsqueda, filtros, paginación, verificaciones, pedidos, tiendas asociadas y consentimientos de marketing. El consentimiento de email y SMS/WhatsApp es explícito, separado, auditable y de solo lectura para Admin.
+- `/admin/users/staff` gestiona personal ECUVEL, alta segura, detalle, rol, historial de asignación a puntos, estado laboral, acceso e invitaciones. El identificador público laboral `EMP-000001` se genera con una secuencia PostgreSQL y no puede ser suministrado por el navegador.
+- Estado laboral (`ACTIVE`, `SUSPENDED`, etc.), estado operativo derivado (`AVAILABLE`, `ASSIGNED`, `IN_ROUTE`, `OFF_DUTY`) y acceso/autenticación (`ENABLED`, `DISABLED`, invitación pendiente) son tres dimensiones diferentes.
+- Las asignaciones operativas solo admiten bodegas ECUVEL (`Warehouse.seller_store_id IS NULL`). La restricción parcial garantiza una sola asignación primaria activa por empleado, pero permite muchos empleados en un punto y conserva el historial.
+- Las invitaciones de personal almacenan únicamente el hash SHA-256 del token, expiran, son de un solo uso y revocan invitaciones anteriores al reenviar. El empleado define su contraseña mediante el flujo público seguro; Admin nunca conoce ni establece esa contraseña.
+- La matriz canónica `StaffRole → permisos` protege las nuevas vistas de usuarios/personal. Cuentas administrativas legacy sin `StaffProfile` conservan temporalmente el acceso anterior; no se inventan identidad, rol ni asignación para ellas.
+- Suspensión, reactivación, reset administrativo, alta, edición, acceso e invitaciones son POST con CSRF/rate limit y generan `AdminAuditEvent`. No existe todavía una infraestructura de revocación inmediata de sesiones ya emitidas.
+
 ## Flujos críticos
 
 ### Compra por transferencia
@@ -158,6 +169,9 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - Existe un contrato puro de conversión de borrador V4 (con migración diferida no destructiva de V2/V3) reutilizado por el servicio transaccional de publicación. La configuración pública `ProductMedia`/variantes conserva bindings por color y SKU.
 - Los archivos privados no deben ir bajo `static`.
 - El acceso de administrador ECUVEL no se deriva de ser `OWNER` o `ADMINISTRATOR` de una tienda; exige `User.is_ecuvel_staff`.
+- No se debe crear un modelo de login paralelo para empleados: toda autenticación pertenece a `User` y los datos laborales pertenecen a `StaffProfile`.
+- Estado laboral, disponibilidad operativa y acceso/autenticación no deben colapsarse en un único booleano. Suspender empleo puede deshabilitar acceso como regla de seguridad, pero reactivar empleo no debe habilitarlo implícitamente.
+- Un Punto ECUVEL asignable a personal es un `Warehouse` activo sin `seller_store_id`; una bodega comercial seller nunca es asignación laboral.
 - Los GET de `/admin` son de solo lectura y no deben aprobar pagos, mover inventario ni cambiar estados de dominio.
 - El punto operativo del Scanner se conserva como `admin_operating_warehouse_id` en la sesión firmada; nunca se confía en él sin revalidar Warehouse y WarehouseLocation en servidor.
 - `User.public_account_code` permite buscar al comprador en la entrega física, pero no sustituye documento, QR firmado, OTP ni otra autenticación; la confirmación humana es obligatoria.
@@ -193,13 +207,15 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 ## Límites actuales y pendientes conocidos
 
 - No hay pasarela de tarjeta real; tarjeta permanece deshabilitada.
-- Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes, la moderación/publicación de productos y la moderación del onboarding de tiendas están disponibles para ECUVEL staff; reseñas continúan por CLI donde no haya una interfaz administrativa explícita.
+- Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes, la moderación/publicación de productos, la moderación del onboarding de tiendas y la gestión de usuarios/personal están disponibles para ECUVEL staff; reseñas continúan por CLI donde no haya una interfaz administrativa explícita.
 - Pedidos ya tiene listado, detalle, revisión de pago y enlaces bidireccionales con Fulfillment, Scanner e Inventario. Fulfillment Admin ya tiene lista y detalle operativos. Escáner cubre las cinco operaciones físicas y la consulta rápida; Inventario cubre paquetes, esperados, existencias, movimientos y conteo físico por punto. Marketplace, finanzas, gestión completa de incidencias y auditoría completa todavía no tienen pantallas operativas propias.
 - No existe todavía un QR firmado, token de retiro de un solo uso ni OTP para entrega. El código público `U-...` solo identifica la cuenta y la entrega depende de verificación física explícita del operador.
 - No hay gestión completa de inventario para vendedores desde Partners.
 - Checkout ya copia a `OrderItem` el importe monetario de comisión y la tasa (cero para tarifa fija). Antes de construir liquidaciones históricas completas conviene añadir snapshots explícitos de `commission_type` y tarifa fija unitaria; el importe congelado actual sí permite calcular el neto de la venta sin consultar reglas vigentes.
 - No hay favoritos anónimos persistentes, listas múltiples, notificaciones, chat, social login, 2FA, passkeys ni panel de vendedor completo.
 - No hay SMTP/SMS productivo integrado; los backends de desarrollo/pruebas son controlados por configuración.
+- No existe un modelo formal de flota o vehículos asignables; `LogisticsTransfer.vehicle_code` sigue siendo un snapshot textual. No mostrar ni persistir una asignación laboral de vehículo hasta que exista ese dominio.
+- La autorización granular se aplica al nuevo módulo de Usuarios/Personal. Scanner, Fulfillment y módulos administrativos anteriores todavía usan el guard legacy `is_ecuvel_staff`; extender el mapa de permisos a esas rutas requiere una fase compatible y pruebas de regresión dedicadas.
 - Las imágenes reales de catálogo y logos persistentes aún son limitados; se usan placeholders cuando corresponde.
 
 ## Inventario operativo por punto ECUVEL

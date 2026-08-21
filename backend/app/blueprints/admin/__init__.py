@@ -137,6 +137,35 @@ from app.services.product_publication import (
     record_moderation_decision,
     remove_copied_publication_files,
 )
+from app.services.admin_permissions import (
+    ROLE_PERMISSIONS,
+    admin_permission_required,
+    user_has_permission,
+)
+from app.services.admin_users import (
+    AdminUserError,
+    EMPLOYMENT_LABELS,
+    OPERATIONAL_LABELS,
+    PERMISSION_LABELS,
+    STAFF_ROLE_LABELS,
+    create_staff_invitation,
+    create_staff_member,
+    find_staff_by_employee_code,
+    find_user_by_public_code,
+    get_admin_client_detail,
+    get_admin_clients_page,
+    get_admin_staff_detail,
+    get_admin_staff_page,
+    operational_warehouses,
+    record_admin_audit,
+    revoke_staff_invitations,
+    set_staff_access,
+    set_user_suspension,
+    update_staff_profile,
+)
+from app.services.authentication import request_password_reset
+from app.services.mail import OutgoingMail, mail_service
+from app.models.enums import StaffEmploymentStatus, StaffIdentificationType, StaffRole
 
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
@@ -1510,6 +1539,346 @@ def approve_product(draft_id: uuid.UUID):
         )
         return redirect(url_for("admin.products", status="approved", draft=draft_id))
     return _moderation_redirect(draft_id)
+
+
+def _admin_users_return(endpoint: str, **extra):
+    values = {
+        "q": request.form.get("return_q", "").strip(),
+        "filter": request.form.get("return_filter", "").strip(),
+        "page": request.form.get("return_page", type=int),
+        **extra,
+    }
+    return redirect(url_for(endpoint, **{key: value for key, value in values.items() if value}))
+
+
+def _admin_transaction_error(exc: Exception, fallback: str) -> None:
+    db.session.rollback()
+    if isinstance(exc, AdminUserError):
+        flash(str(exc), "error")
+        return
+    current_app.logger.exception(fallback)
+    flash("No pudimos completar la operación. Inténtalo nuevamente.", "error")
+
+
+@admin.get("/users")
+@admin_permission_required("admin.users.view")
+def users():
+    page = get_admin_clients_page(
+        db.session,
+        query=request.args.get("q", ""),
+        filter_key=request.args.get("filter", "all"),
+        page=request.args.get("page", 1, type=int) or 1,
+    )
+    return render_template(
+        "admin/users.html", page=page,
+        can_manage=user_has_permission(current_user, "admin.users.manage"),
+        **_shell_context("users"),
+    )
+
+
+@admin.get("/users/staff")
+@admin_permission_required("admin.staff.view")
+def staff():
+    page = get_admin_staff_page(
+        db.session,
+        query=request.args.get("q", ""),
+        role=request.args.get("role", ""),
+        status=request.args.get("status", ""),
+        operational=request.args.get("operational", ""),
+        warehouse_id=request.args.get("warehouse_id", ""),
+        page=request.args.get("page", 1, type=int) or 1,
+    )
+    return render_template(
+        "admin/staff.html", page=page, role_labels=STAFF_ROLE_LABELS,
+        employment_labels=EMPLOYMENT_LABELS, operational_labels=OPERATIONAL_LABELS,
+        warehouses=operational_warehouses(db.session),
+        **_shell_context("users"),
+    )
+
+
+@admin.route("/users/staff/new", methods=["GET", "POST"])
+@limiter.limit("20 per hour")
+@admin_permission_required("admin.staff.manage")
+def staff_new():
+    warehouses = operational_warehouses(db.session)
+    if request.method == "GET":
+        return render_template(
+            "admin/staff_form.html", profile=None, warehouses=warehouses,
+            role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+            identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
+            role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
+            form={}, **_shell_context("users"),
+        )
+    form = request.form.to_dict()
+    warehouse_id = None
+    if request.form.get("warehouse_id"):
+        try:
+            warehouse_id = uuid.UUID(request.form["warehouse_id"])
+        except ValueError:
+            flash("El Punto ECUVEL seleccionado no es válido.", "error")
+            return render_template(
+                "admin/staff_form.html", profile=None, warehouses=warehouses,
+                role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+                identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
+                role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
+                form=form, **_shell_context("users"),
+            ), 400
+    started_at = None
+    if request.form.get("employment_started_at"):
+        try:
+            started_at = datetime.strptime(request.form["employment_started_at"], "%Y-%m-%d").date()
+        except ValueError:
+            flash("La fecha de ingreso no es válida.", "error")
+            return render_template(
+                "admin/staff_form.html", profile=None, warehouses=warehouses,
+                role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+                identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
+                role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
+                form=form, **_shell_context("users"),
+            ), 400
+    actor_id = current_user.id
+    try:
+        db.session.remove()
+        database_session = db.session()
+        with database_session.begin():
+            created = create_staff_member(
+                database_session, actor_user_id=actor_id,
+                first_names=request.form.get("first_names", ""),
+                last_names=request.form.get("last_names", ""),
+                email=request.form.get("email", ""), phone=request.form.get("phone", ""),
+                identification_type=request.form.get("identification_type", ""),
+                identification_number=request.form.get("identification_number", ""),
+                nationality_code=request.form.get("nationality_code", "ECU"),
+                role=request.form.get("role", ""),
+                employment_status=request.form.get("employment_status", "PENDING"),
+                employment_started_at=started_at, warehouse_id=warehouse_id,
+                invitation_ttl_minutes=current_app.config["STAFF_INVITATION_TTL_MINUTES"],
+                link_existing_user=request.form.get("link_existing_user") == "1",
+            )
+        employee_code = created.profile.employee_code
+        if created.invitation_token:
+            link = url_for("auth.staff_invitation", token=created.invitation_token, _external=True)
+            mail_service.send(OutgoingMail(
+                to=created.profile.user.email,
+                subject="Invitación al personal de ECUVEL",
+                body=f"Configura tus credenciales de acceso de forma segura: {link}",
+            ))
+        message = f"Personal {employee_code} registrado."
+        if created.invitation_token:
+            message += " La invitación se envió por email."
+        else:
+            message += " Se vinculó la cuenta existente sin cambiar sus credenciales."
+        flash(message, "success")
+        return redirect(url_for("admin.staff_detail", employee_code=employee_code))
+    except Exception as exc:
+        _admin_transaction_error(exc, "Falló el registro de personal ECUVEL")
+        return render_template(
+            "admin/staff_form.html", profile=None, warehouses=warehouses,
+            role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+            identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
+            role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
+            form=form, **_shell_context("users"),
+        ), 400
+
+
+@admin.get("/users/staff/<string:employee_code>")
+@admin_permission_required("admin.staff.view")
+def staff_detail(employee_code: str):
+    detail = get_admin_staff_detail(db.session, employee_code)
+    if detail is None:
+        abort(404)
+    return render_template(
+        "admin/staff_detail.html", detail=detail,
+        role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+        operational_labels=OPERATIONAL_LABELS,
+        can_manage=user_has_permission(current_user, "admin.staff.manage"),
+        **_shell_context("users"),
+    )
+
+
+@admin.route("/users/staff/<string:employee_code>/edit", methods=["GET", "POST"])
+@limiter.limit("40 per hour")
+@admin_permission_required("admin.staff.manage")
+def staff_edit(employee_code: str):
+    profile = find_staff_by_employee_code(db.session, employee_code)
+    if profile is None:
+        abort(404)
+    warehouses = operational_warehouses(db.session)
+    if request.method == "GET":
+        return render_template(
+            "admin/staff_edit.html", profile=profile, warehouses=warehouses,
+            role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+            permissions=PERMISSION_LABELS,
+            role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
+            **_shell_context("users"),
+        )
+    warehouse_id = None
+    if request.form.get("warehouse_id"):
+        try:
+            warehouse_id = uuid.UUID(request.form["warehouse_id"])
+        except ValueError:
+            flash("El Punto ECUVEL seleccionado no es válido.", "error")
+            return redirect(url_for("admin.staff_edit", employee_code=employee_code))
+    actor_id = current_user.id
+    try:
+        db.session.remove()
+        database_session = db.session()
+        with database_session.begin():
+            locked = find_staff_by_employee_code(database_session, employee_code)
+            if locked is None:
+                abort(404)
+            update_staff_profile(
+                database_session, profile=locked, actor_user_id=actor_id,
+                role=request.form.get("role", ""),
+                employment_status=request.form.get("employment_status", ""),
+                phone=request.form.get("phone", ""), warehouse_id=warehouse_id,
+                reason=request.form.get("reason", ""),
+            )
+        flash("Perfil laboral actualizado.", "success")
+    except Exception as exc:
+        _admin_transaction_error(exc, "Falló la actualización de personal ECUVEL")
+    return redirect(url_for("admin.staff_detail", employee_code=employee_code))
+
+
+@admin.post("/users/staff/<string:employee_code>/access")
+@limiter.limit("30 per hour")
+@admin_permission_required("admin.staff.manage")
+def staff_access(employee_code: str):
+    actor_id = current_user.id
+    try:
+        db.session.remove(); database_session = db.session()
+        with database_session.begin():
+            profile = find_staff_by_employee_code(database_session, employee_code)
+            if profile is None:
+                abort(404)
+            set_staff_access(
+                database_session, profile=profile, actor_user_id=actor_id,
+                enable=request.form.get("action") == "enable",
+                reason=request.form.get("reason", ""),
+            )
+        flash("Estado de acceso actualizado.", "success")
+    except Exception as exc:
+        _admin_transaction_error(exc, "Falló el cambio de acceso del personal")
+    return redirect(url_for("admin.staff_detail", employee_code=employee_code))
+
+
+@admin.post("/users/staff/<string:employee_code>/invite")
+@limiter.limit("10 per hour")
+@admin_permission_required("admin.staff.manage")
+def staff_invite(employee_code: str):
+    actor_id = current_user.id
+    try:
+        db.session.remove(); database_session = db.session()
+        with database_session.begin():
+            profile = find_staff_by_employee_code(database_session, employee_code)
+            if profile is None:
+                abort(404)
+            token = create_staff_invitation(
+                database_session, profile=profile, actor_user_id=actor_id,
+                ttl_minutes=current_app.config["STAFF_INVITATION_TTL_MINUTES"],
+            )
+            destination = profile.user.email
+        link = url_for("auth.staff_invitation", token=token, _external=True)
+        mail_service.send(OutgoingMail(
+            to=destination, subject="Invitación al personal de ECUVEL",
+            body=f"Configura tus credenciales de acceso de forma segura: {link}",
+        ))
+        flash("Invitación enviada. La anterior quedó revocada.", "success")
+    except Exception as exc:
+        _admin_transaction_error(exc, "Falló el envío de invitación de personal")
+    return redirect(url_for("admin.staff_detail", employee_code=employee_code))
+
+
+@admin.post("/users/staff/<string:employee_code>/invite/revoke")
+@limiter.limit("20 per hour")
+@admin_permission_required("admin.staff.manage")
+def staff_invite_revoke(employee_code: str):
+    actor_id = current_user.id
+    try:
+        db.session.remove(); database_session = db.session()
+        with database_session.begin():
+            profile = find_staff_by_employee_code(database_session, employee_code)
+            if profile is None:
+                abort(404)
+            revoked = revoke_staff_invitations(
+                database_session,
+                profile=profile,
+                actor_user_id=actor_id,
+                reason=request.form.get("reason", ""),
+            )
+        flash(f"{revoked} invitación(es) pendiente(s) revocada(s).", "success")
+    except Exception as exc:
+        _admin_transaction_error(exc, "Falló la revocación de invitaciones de personal")
+    return redirect(url_for("admin.staff_detail", employee_code=employee_code))
+
+
+@admin.get("/users/<string:identifier>")
+@admin_permission_required("admin.users.view")
+def user_detail(identifier: str):
+    detail = get_admin_client_detail(db.session, identifier)
+    if detail is None:
+        abort(404)
+    return render_template(
+        "admin/user_detail.html", detail=detail,
+        can_manage=user_has_permission(current_user, "admin.users.manage"),
+        **_shell_context("users"),
+    )
+
+
+@admin.post("/users/<string:identifier>/password-reset")
+@limiter.limit("10 per hour")
+@admin_permission_required("admin.users.manage")
+def user_password_reset(identifier: str):
+    actor_id = current_user.id
+    destination = None; token = None
+    try:
+        db.session.remove(); database_session = db.session()
+        with database_session.begin():
+            user = find_user_by_public_code(database_session, identifier)
+            if user is None:
+                abort(404)
+            result = request_password_reset(
+                session=database_session, email=user.email or "",
+                ttl_minutes=current_app.config["PASSWORD_RESET_TOKEN_TTL_MINUTES"],
+            )
+            record_admin_audit(
+                database_session, actor_user_id=actor_id, target_user_id=user.id,
+                action="ADMIN_PASSWORD_RESET_REQUESTED",
+            )
+            if result:
+                destination, token = result[0].email, result[1]
+        if destination and token:
+            link = url_for("auth.reset_password_form", token=token, _external=True)
+            mail_service.send(OutgoingMail(
+                to=destination, subject="Restablece tu contraseña de ECUVEL",
+                body=f"Usa este enlace seguro para restablecer tu contraseña: {link}",
+            ))
+        flash("Si la cuenta permite recuperación, el enlace fue enviado.", "success")
+    except Exception as exc:
+        _admin_transaction_error(exc, "Falló el reset administrativo de contraseña")
+    return redirect(url_for("admin.user_detail", identifier=identifier))
+
+
+@admin.post("/users/<string:identifier>/status")
+@limiter.limit("30 per hour")
+@admin_permission_required("admin.users.manage")
+def user_status(identifier: str):
+    actor_id = current_user.id
+    try:
+        db.session.remove(); database_session = db.session()
+        with database_session.begin():
+            user = find_user_by_public_code(database_session, identifier)
+            if user is None:
+                abort(404)
+            set_user_suspension(
+                database_session, user=user, actor_user_id=actor_id,
+                suspend=request.form.get("action") == "suspend",
+                reason=request.form.get("reason", ""),
+            )
+        flash("Estado de la cuenta actualizado.", "success")
+    except Exception as exc:
+        _admin_transaction_error(exc, "Falló el cambio de estado del usuario")
+    return redirect(url_for("admin.user_detail", identifier=identifier))
 
 
 @admin.get("/modules/<string:module_key>")

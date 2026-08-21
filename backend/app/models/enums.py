@@ -14,6 +14,46 @@ class UserAccountTokenPurpose(StrEnum):
     CHANGE_EMAIL = "CHANGE_EMAIL"
 
 
+class MarketingConsentChannel(StrEnum):
+    EMAIL = "EMAIL"
+    SMS_WHATSAPP = "SMS_WHATSAPP"
+
+
+class MarketingConsentStatus(StrEnum):
+    GRANTED = "GRANTED"
+    REVOKED = "REVOKED"
+    UNKNOWN = "UNKNOWN"
+
+
+class StaffIdentificationType(StrEnum):
+    ECUADOR_CEDULA = "ECUADOR_CEDULA"
+    PASSPORT = "PASSPORT"
+    OTHER = "OTHER"
+
+
+class StaffRole(StrEnum):
+    SUPER_ADMIN = "SUPER_ADMIN"
+    OPERATIONS_SUPERVISOR = "OPERATIONS_SUPERVISOR"
+    POINT_OPERATOR = "POINT_OPERATOR"
+    DELIVERY = "DELIVERY"
+    TRANSPORT_OPERATOR = "TRANSPORT_OPERATOR"
+    SUPPORT = "SUPPORT"
+
+
+class StaffEmploymentStatus(StrEnum):
+    PENDING = "PENDING"
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    INACTIVE = "INACTIVE"
+
+
+class StaffOperationalStatus(StrEnum):
+    AVAILABLE = "AVAILABLE"
+    ASSIGNED = "ASSIGNED"
+    IN_ROUTE = "IN_ROUTE"
+    OFF_DUTY = "OFF_DUTY"
+
+
 class PhoneOtpPurpose(StrEnum):
     LOGIN_OR_REGISTER = "LOGIN_OR_REGISTER"
     LINK_PHONE = "LINK_PHONE"

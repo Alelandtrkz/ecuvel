@@ -47,6 +47,13 @@ from app.models.product_moderation import ProductDraftModerationEvent, ProductDr
 from app.models.marketplace_policy import MarketplaceCommissionRule, StoreInventoryLocation
 from app.models.store import Store, StoreMember, StoreProductCounter
 from app.models.user import PhoneOtpChallenge, User, UserAccountToken
+from app.models.admin_user import (
+    AdminAuditEvent,
+    StaffAccessInvitation,
+    StaffPointAssignment,
+    StaffProfile,
+    UserMarketingConsent,
+)
 from app.models.warehouse import Warehouse, WarehouseLocation
 
 
@@ -54,6 +61,11 @@ __all__ = [
     "User",
     "UserAccountToken",
     "PhoneOtpChallenge",
+    "StaffProfile",
+    "StaffPointAssignment",
+    "StaffAccessInvitation",
+    "UserMarketingConsent",
+    "AdminAuditEvent",
     "Store",
     "StoreMember",
     "StoreProductCounter",

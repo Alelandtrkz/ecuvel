@@ -1,0 +1,28 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Clientes | ECUVEL Admin{% endblock %}
+{% block styles %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/admin-users.css') }}">{% endblock %}
+{% block admin_content %}
+<main class="admin-page admin-users-page">
+  <nav class="admin-users-tabs" aria-label="Secciones de usuarios"><a class="is-active" href="{{ url_for('admin.users') }}" aria-current="page">Clientes</a><a href="{{ url_for('admin.staff') }}">Personal ECUVEL</a></nav>
+  <header class="admin-page-heading"><div><p class="admin-eyebrow">Gestión de identidades</p><h1>Clientes</h1><p>Consulta cuentas, verificaciones y actividad comercial con datos reales de la plataforma.</p></div></header>
+  <section class="admin-users-kpis" aria-label="Indicadores de clientes">
+    <article class="admin-card"><span>Usuarios registrados</span><strong>{{ page.total_registered }}</strong><i data-lucide="users"></i></article>
+    <article class="admin-card"><span>Nuevos hoy</span><strong>{{ page.new_today }}</strong><i data-lucide="user-plus"></i></article>
+    <article class="admin-card"><span>Email verificado</span><strong>{{ page.email_verified_percent ~ '%' if page.email_verified_percent is not none else 'No disponible' }}</strong><i data-lucide="mail-check"></i></article>
+    <article class="admin-card"><span>Teléfono verificado</span><strong>{{ page.phone_verified_percent ~ '%' if page.phone_verified_percent is not none else 'No disponible' }}</strong><i data-lucide="smartphone"></i></article>
+  </section>
+  <section class="admin-card admin-users-panel">
+    <form class="admin-users-toolbar" method="get" role="search">
+      <label><span class="sr-only">Buscar clientes</span><i data-lucide="search"></i><input name="q" value="{{ page.query }}" maxlength="120" placeholder="Buscar por nombre, U-code, email, teléfono o tienda..."></label>
+      <select name="filter" aria-label="Filtrar clientes">
+        {% for value,label in [('all','Todos'),('active','Activos'),('inactive','Suspendidos / inactivos'),('email_verified','Email verificado'),('unverified','Sin verificar'),('with_store','Con tienda'),('marketing_email','Marketing email autorizado'),('marketing_sms','Marketing SMS/WhatsApp autorizado'),('no_consent','Sin consentimiento')] %}<option value="{{ value }}" {{ 'selected' if page.filter == value }}>{{ label }}</option>{% endfor %}
+      </select><button class="admin-button" type="submit">Buscar</button>{% if page.query or page.filter != 'all' %}<a class="admin-clear-link" href="{{ url_for('admin.users') }}">Limpiar</a>{% endif %}
+    </form>
+    <div class="admin-table-wrap"><table class="admin-users-table"><thead><tr><th>Usuario</th><th>Contacto</th><th>Verificación</th><th>Pedidos</th><th>Registro</th><th>Estado</th><th>Acción</th></tr></thead><tbody>
+      {% for row in page.rows %}<tr><td><strong>{{ row.user.full_name }}</strong><code>{{ row.user.public_account_code }}</code></td><td><span>{{ row.user.email or 'Sin email' }}</span><small>{{ row.user.phone or 'Sin teléfono' }}</small></td><td><span class="verify-state {{ 'is-ok' if row.user.email_verified_at }}"><i data-lucide="{{ 'circle-check' if row.user.email_verified_at else 'circle-x' }}"></i>Email</span><span class="verify-state {{ 'is-ok' if row.user.phone_verified_at }}"><i data-lucide="{{ 'circle-check' if row.user.phone_verified_at else 'circle-x' }}"></i>Teléfono</span></td><td><strong>{{ row.order_count }}</strong></td><td>{{ row.user.created_at|ecuador_datetime }}</td><td><span class="admin-status {{ 'admin-status--success' if row.user.is_active and row.user.status.value == 'ACTIVE' else 'admin-status--danger' }}">{{ 'Activo' if row.user.is_active and row.user.status.value == 'ACTIVE' else 'Suspendido / inactivo' }}</span></td><td><a class="admin-table-action" href="{{ url_for('admin.user_detail', identifier=row.user.public_account_code) }}">Ver usuario</a></td></tr>
+      {% else %}<tr><td class="admin-empty-cell" colspan="7">No hay clientes que coincidan con los filtros.</td></tr>{% endfor %}
+    </tbody></table></div>
+    <footer class="admin-users-footer"><span>Mostrando {{ page.rows|length }} de {{ page.total }} resultados</span><nav class="admin-pagination" aria-label="Paginación">{% if page.page > 1 %}<a href="{{ url_for('admin.users', q=page.query, filter=page.filter, page=page.page-1) }}">Anterior</a>{% endif %}<span>Página {{ page.page }} de {{ page.pages }}</span>{% if page.page < page.pages %}<a href="{{ url_for('admin.users', q=page.query, filter=page.filter, page=page.page+1) }}">Siguiente</a>{% endif %}</nav></footer>
+  </section>
+</main>
+{% endblock %}
