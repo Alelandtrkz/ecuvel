@@ -17,6 +17,7 @@ from app.models.enums import (
     UserStatus,
 )
 from app.services.account_tokens import create_account_token, hash_account_token
+from app.services.mail import MailDeliveryError, mail_service
 from tests.factories import create_catalog_and_stock, create_order_items
 
 
@@ -85,6 +86,37 @@ def test_registers_customer_with_hashed_password_and_token(client, session):
     assert token is not None
     assert token.purpose == UserAccountTokenPurpose.VERIFY_EMAIL
     assert len(token.token_hash) == 64
+    assert len(mail_service.outbox) == 1
+    message = mail_service.outbox[0]
+    assert message.subject == "Verifica tu correo"
+    assert "/verificar-correo/" in message.text_body
+    assert "Verificar mi correo" in message.html_body
+
+
+def test_registration_mail_failure_keeps_pending_user(client, session, monkeypatch):
+    def fail(_message):
+        raise MailDeliveryError("provider unavailable")
+
+    monkeypatch.setattr(mail_service, "send", fail)
+    response = client.post(
+        "/registro",
+        data={
+            "email": "pending@example.com",
+            "full_name": "Cliente Pendiente",
+            "password": "correct horse battery staple",
+            "password_confirmation": "correct horse battery staple",
+        },
+        follow_redirects=True,
+    )
+
+    user = session.scalar(select(User).where(
+        User.email_normalized == "pending@example.com"
+    ))
+    assert response.status_code == 200
+    assert user is not None
+    assert user.status == UserStatus.PENDING_VERIFICATION
+    assert user.email_verified_at is None
+    assert "No pudimos enviar el correo de verificación" in response.get_data(as_text=True)
 
 
 def test_registration_rejects_duplicate_email_case_insensitive(client, session):
@@ -184,6 +216,28 @@ def test_password_recovery_uses_generic_response(client, session):
     assert known.status_code == 302
     assert unknown.status_code == 302
     assert session.scalar(select(func.count(UserAccountToken.id))) == 1
+    assert len(mail_service.outbox) == 1
+    assert mail_service.outbox[0].subject == "Restablece tu contraseña de ECUVEL"
+    assert "/restablecer-contrasena/" in mail_service.outbox[0].text_body
+
+
+def test_resend_verification_creates_a_new_transactional_email(client, session):
+    _user(
+        session,
+        email="pending@test.local",
+        verified=False,
+        status=UserStatus.PENDING_VERIFICATION,
+    )
+    session.commit()
+    assert _login(client, email="pending@test.local").status_code == 302
+    mail_service.outbox.clear()
+
+    response = client.post("/reenviar-verificacion")
+
+    assert response.status_code == 302
+    assert len(mail_service.outbox) == 1
+    assert mail_service.outbox[0].subject == "Verifica tu correo"
+    assert "/verificar-correo/" in mail_service.outbox[0].text_body
 
 
 def test_password_reset_updates_hash_and_is_one_time(client, session):

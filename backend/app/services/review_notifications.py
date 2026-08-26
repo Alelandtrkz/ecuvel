@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models import ProductReview, ReviewNotificationOutbox
 from app.models.enums import ReviewNotificationStatus
-from app.services.mail import OutgoingMail, mail_service
+from app.services.mail import mail_service
+from app.services.transactional_mail import (
+    build_mail_action_url,
+    review_rejected_mail,
+)
 
 
 def utcnow() -> datetime:
@@ -23,6 +27,7 @@ def dispatch_review_notifications(
         .options(
             joinedload(ReviewNotificationOutbox.user),
             joinedload(ReviewNotificationOutbox.review).joinedload(ProductReview.product),
+            joinedload(ReviewNotificationOutbox.review).joinedload(ProductReview.order),
         )
         .where(
             ReviewNotificationOutbox.status.in_((
@@ -49,14 +54,16 @@ def dispatch_review_notifications(
             failed += 1
             continue
         try:
-            mail_service.send(OutgoingMail(
+            action_url = build_mail_action_url(
+                "storefront.my_product_review",
+                order_number=event.review.order.order_number,
+                order_item_id=event.review.order_item_id,
+            )
+            mail_service.send(review_rejected_mail(
                 to=event.user.email,
-                subject="Tu reseña necesita cambios para publicarse en ECUVEL",
-                body=(
-                    f"Tu reseña de {event.review.product.title} no fue publicada.\n\n"
-                    f"Motivo: {event.review.public_rejection_reason}\n\n"
-                    "Ingresa a tus pedidos en ECUVEL para editarla y reenviarla."
-                ),
+                action_url=action_url,
+                product_title=event.review.product.title,
+                public_reason=event.review.public_rejection_reason,
             ))
         except Exception as exc:  # El correo nunca revierte la moderación.
             event.attempts += 1

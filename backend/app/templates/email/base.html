@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ subject|default('ECUVEL') }}</title>
+  </head>
+  <body style="margin:0;background:#f4f8f7;color:#11231f;font-family:'Plus Jakarta Sans',Arial,Helvetica,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f4f8f7;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border:1px solid #d8e3e0;border-radius:16px;overflow:hidden;">
+            <tr>
+              <td style="background:#006653;color:#ffffff;font-size:24px;font-weight:800;padding:24px 32px;">ECUVEL</td>
+            </tr>
+            <tr>
+              <td style="padding:32px;font-size:16px;line-height:1.6;">
+                {% block content %}{% endblock %}
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 32px;background:#f0f5f4;color:#5d726d;font-size:12px;line-height:1.5;">
+                Este es un correo transaccional de ECUVEL. Si no reconoces esta acción, puedes ignorarlo.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

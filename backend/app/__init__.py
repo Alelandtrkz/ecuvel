@@ -8,6 +8,10 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
 
+    from app.services.mail import validate_mail_configuration
+
+    validate_mail_configuration(app.config)
+
     db.init_app(app)
     migrate.init_app(app, db)
     csrf.init_app(app)

@@ -166,7 +166,12 @@ from app.services.admin_users import (
     update_staff_profile,
 )
 from app.services.authentication import request_password_reset
-from app.services.mail import OutgoingMail, mail_service
+from app.services.mail import MailError, mail_service
+from app.services.transactional_mail import (
+    build_mail_action_url,
+    password_reset_mail,
+    staff_invitation_mail,
+)
 from app.services.review_moderation import (
     REJECTION_REASON_LABELS,
     ReviewModerationConflictError,
@@ -1671,19 +1676,46 @@ def staff_new():
                 link_existing_user=request.form.get("link_existing_user") == "1",
             )
         employee_code = created.profile.employee_code
+        invitation_sent = False
         if created.invitation_token:
-            link = url_for("auth.staff_invitation", token=created.invitation_token, _external=True)
-            mail_service.send(OutgoingMail(
-                to=created.profile.user.email,
-                subject="Invitación al personal de ECUVEL",
-                body=f"Configura tus credenciales de acceso de forma segura: {link}",
-            ))
+            link = build_mail_action_url(
+                "auth.staff_invitation", token=created.invitation_token
+            )
+            try:
+                mail_service.send(staff_invitation_mail(
+                    to=created.profile.user.email,
+                    action_url=link,
+                    full_name=created.profile.user.full_name,
+                    employee_code=created.profile.employee_code,
+                    role=STAFF_ROLE_LABELS.get(
+                        created.profile.role, created.profile.role
+                    ),
+                    expiration_minutes=current_app.config[
+                        "STAFF_INVITATION_TTL_MINUTES"
+                    ],
+                ))
+                invitation_sent = True
+            except MailError as exc:
+                current_app.logger.warning(
+                    "event=mail_failed mail_type=STAFF_INVITATION error=%s",
+                    type(exc).__name__,
+                )
         message = f"Personal {employee_code} registrado."
-        if created.invitation_token:
+        if invitation_sent:
             message += " La invitación se envió por email."
+        elif created.invitation_token:
+            message += (
+                " No pudimos enviar la invitación; puedes reenviarla desde "
+                "el perfil del empleado."
+            )
         else:
             message += " Se vinculó la cuenta existente sin cambiar sus credenciales."
-        flash(message, "success")
+        category = (
+            "success"
+            if invitation_sent or not created.invitation_token
+            else "warning"
+        )
+        flash(message, category)
         return redirect(url_for("admin.staff_detail", employee_code=employee_code))
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el registro de personal ECUVEL")
@@ -1793,12 +1825,29 @@ def staff_invite(employee_code: str):
                 ttl_minutes=current_app.config["STAFF_INVITATION_TTL_MINUTES"],
             )
             destination = profile.user.email
-        link = url_for("auth.staff_invitation", token=token, _external=True)
-        mail_service.send(OutgoingMail(
-            to=destination, subject="Invitación al personal de ECUVEL",
-            body=f"Configura tus credenciales de acceso de forma segura: {link}",
-        ))
-        flash("Invitación enviada. La anterior quedó revocada.", "success")
+        link = build_mail_action_url("auth.staff_invitation", token=token)
+        try:
+            mail_service.send(staff_invitation_mail(
+                to=destination,
+                action_url=link,
+                full_name=profile.user.full_name,
+                employee_code=profile.employee_code,
+                role=STAFF_ROLE_LABELS.get(profile.role, profile.role),
+                expiration_minutes=current_app.config[
+                    "STAFF_INVITATION_TTL_MINUTES"
+                ],
+            ))
+        except MailError as exc:
+            current_app.logger.warning(
+                "event=mail_failed mail_type=STAFF_INVITATION error=%s",
+                type(exc).__name__,
+            )
+            flash(
+                "No pudimos enviar la invitación. Puedes intentarlo nuevamente.",
+                "warning",
+            )
+        else:
+            flash("Invitación enviada. La anterior quedó revocada.", "success")
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el envío de invitación de personal")
     return redirect(url_for("admin.staff_detail", employee_code=employee_code))
@@ -1863,10 +1912,13 @@ def user_password_reset(identifier: str):
             if result:
                 destination, token = result[0].email, result[1]
         if destination and token:
-            link = url_for("auth.reset_password_form", token=token, _external=True)
-            mail_service.send(OutgoingMail(
-                to=destination, subject="Restablece tu contraseña de ECUVEL",
-                body=f"Usa este enlace seguro para restablecer tu contraseña: {link}",
+            link = build_mail_action_url("auth.reset_password_form", token=token)
+            mail_service.send(password_reset_mail(
+                to=destination,
+                action_url=link,
+                expiration_minutes=current_app.config[
+                    "PASSWORD_RESET_TOKEN_TTL_MINUTES"
+                ],
             ))
         flash("Si la cuenta permite recuperación, el enlace fue enviado.", "success")
     except Exception as exc:

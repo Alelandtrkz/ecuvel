@@ -1,0 +1,8 @@
+Tu reseña necesita cambios para publicarse en ECUVEL
+
+Tu reseña no pudo publicarse porque no cumple una de nuestras normas de publicación.
+
+Producto: {{ product_title }}
+Motivo: {{ public_reason }}
+
+Editar y reenviar reseña: {{ action_url }}

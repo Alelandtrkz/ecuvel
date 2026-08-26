@@ -263,6 +263,7 @@ def test_admin_password_reset_is_post_only_and_audited(client, session, app):
 
 def test_staff_pages_render_and_employee_code_cannot_be_supplied(client, session):
     admin = _user(session, staff=True); point = _warehouse(session); session.commit(); _login(client, admin)
+    mail_service.outbox.clear()
     response = client.post("/admin/users/staff/new", data={
         "first_names":"Carlos", "last_names":"Punto", "email":"carlos@ecuvel.com",
         "identification_type":"ECUADOR_CEDULA", "identification_number":"0926687856",
@@ -272,6 +273,12 @@ def test_staff_pages_render_and_employee_code_cannot_be_supplied(client, session
     assert response.status_code == 302
     profile = session.scalar(select(StaffProfile).join(User).where(User.email_normalized == "carlos@ecuvel.com"))
     assert profile and profile.employee_code != "EMP-999999"
+    assert len(mail_service.outbox) == 1
+    invitation = mail_service.outbox[0]
+    assert invitation.subject == "Te invitaron a formar parte del equipo ECUVEL"
+    assert profile.employee_code in invitation.text_body
+    assert "/personal/invitacion/" in invitation.text_body
+    assert "Operador de Punto ECUVEL" in invitation.html_body
     staff_response = client.get("/admin/users/staff")
     assert staff_response.status_code == 200
     assert b'class="admin-row-primary"' in staff_response.data

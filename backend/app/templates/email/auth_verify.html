@@ -1,0 +1,7 @@
+{% extends "email/base.html" %}
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">Verifica tu correo</h1>
+<p style="margin:0 0 24px;">Confirma tu dirección para terminar de configurar tu cuenta ECUVEL.</p>
+<p style="margin:0 0 24px;"><a href="{{ action_url }}" style="display:inline-block;background:#006653;color:#ffffff;text-decoration:none;font-weight:700;padding:13px 22px;border-radius:10px;">Verificar mi correo</a></p>
+{% if expiration_minutes %}<p style="margin:0;color:#5d726d;font-size:14px;">Este enlace estará disponible durante {{ expiration_minutes }} minutos.</p>{% endif %}
+{% endblock %}

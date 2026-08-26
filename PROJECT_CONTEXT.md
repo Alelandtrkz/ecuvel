@@ -181,6 +181,10 @@ Las reseñas se crean por `OrderItem` entregado y conservan revisiones append-on
 - Los GET públicos o de cliente no deben mutar pagos, pedidos, reservas, inventario ni fulfillment.
 - La revisión web de comprobantes, productos, reseñas y onboarding de tiendas está limitada a ECUVEL staff activo y reutiliza reglas transaccionales del dominio. Reseñas separa `reviews.view` de `reviews.moderate`; la decisión manual siempre es POST con CSRF, rate limit, bloqueo y control de revisión vigente.
 - La moderación automática de reseñas es determinística y local: no usa LLM, sentimiento, puntuación, visión ni proveedores externos. El lexicón se versiona en `app/data/review_moderation_es_v1.json` y se provisiona de forma idempotente con `flask review-moderation bootstrap`; lexicón vacío o error del motor debe fallar cerrado y dejar la reseña pendiente.
+- El correo transaccional usa el servicio canónico `MailService`. `memory` es exclusivo de pruebas, `console` es para desarrollo y `resend` es el backend productivo; producción rechaza `console` al iniciar. Remitente, reply-to, URL pública, timeout y credencial se configuran por entorno y ningún secreto pertenece al repositorio.
+- Verificación de cuenta, restablecimiento de contraseña e invitaciones de personal usan plantillas HTML/texto y enlaces generados desde `PUBLIC_BASE_URL`. Los rechazos de reseñas se envían mediante outbox durable y el dispatcher periódico `review-notifications`; nunca se envía correo externo dentro de la transacción de moderación.
+- El dominio remitente productivo previsto es `ecuvel.com`, cuya verificación se realiza externamente en Resend. El repositorio solo conserva nombres de variables y configuración reproducible, no credenciales ni datos privados del proveedor.
+- El lexicón determinístico de reseñas incluye cobertura español/ES-EC versionada. Las coincidencias locales, variantes censuradas, mayúsculas, acentos y plurales generan señales `FLAG`; ninguna de estas reglas auto-rechaza una reseña.
 - `ProductReviewRevision`, assessments, señales y decisiones son append-only. Una nueva corrección crea otra revisión y las imágenes quedan vinculadas a esa revisión; nunca se reutiliza media rechazada como pública.
 - No se deben ejecutar comandos destructivos como reset de Git, limpieza masiva, downgrade de base o borrado de volúmenes sin autorización explícita.
 
@@ -207,6 +211,17 @@ Para pruebas aisladas:
 docker compose -p ecuvel-test -f compose.test.yaml run --rm test pytest -q tests/<archivo_o_filtro>
 docker compose -p ecuvel-test -f compose.test.yaml down -v --remove-orphans
 ```
+
+### Prueba manual de correo productivo
+
+La prueba real se realiza fuera de pytest y sin guardar credenciales en archivos
+rastreados. Configurar localmente `MAIL_BACKEND=resend`, `MAIL_FROM`,
+`PUBLIC_BASE_URL` y `RESEND_API_KEY`; luego levantar `web` y
+`review_notification_dispatcher`. Verificar con una cuenta de prueba: registro y
+confirmación de correo, recuperación de contraseña, invitación de personal y
+rechazo de reseña despachado desde el outbox. Confirmar texto/HTML, enlaces,
+acentos, llegada a Inbox y estado `SENT` del evento. Nunca usar una cuenta
+personal en fixtures ni ejecutar esta comprobación desde la suite automática.
 
 Si la suite completa tarda demasiado, reportar timeout con precisión y conservar los resultados de pruebas específicas; no presentar una suite incompleta como aprobada.
 

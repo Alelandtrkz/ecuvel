@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import Counter
 
 import pytest
 from sqlalchemy import select
@@ -16,6 +17,8 @@ from app.models import (
 from app.models.enums import ProductReviewStatus
 from app.services.product_reviews import StagedProductReviewImage, create_product_review
 from app.services.review_moderation import (
+    LEXICON_RESOURCE,
+    _lexicon_hash,
     bootstrap_review_moderation_terms,
     normalize_review_text,
 )
@@ -85,6 +88,85 @@ def test_versioned_bootstrap_is_idempotent_on_a_new_database(session, tmp_path):
     assert session.scalar(select(ReviewModerationTerm).where(
         ReviewModerationTerm.stable_key == "fixture.bootstrap"
     )).normalized_pattern == "termino fixture"
+
+
+def test_real_lexicon_has_active_coverage_for_every_required_category(session):
+    required = {
+        "PROFANITY",
+        "HARASSMENT",
+        "HATE_OR_DISCRIMINATION",
+        "THREAT",
+        "SEXUAL_CONTENT",
+        "VIOLENT_CONTENT",
+        "SPAM",
+    }
+
+    first = bootstrap_review_moderation_terms(session)
+    second = bootstrap_review_moderation_terms(session)
+    active_terms = list(session.scalars(
+        select(ReviewModerationTerm).where(ReviewModerationTerm.is_active.is_(True))
+    ))
+    counts = Counter(term.category_code for term in active_terms)
+    source = json.loads(LEXICON_RESOURCE.read_text(encoding="utf-8"))
+
+    assert first.version == second.version == source["version"] == "2026.08.2"
+    assert first.created == len(source["terms"]) == 44
+    assert (second.created, second.updated, second.unchanged) == (0, 0, 44)
+    assert required <= set(counts)
+    assert all(counts[category] >= 1 for category in required)
+    assert counts["HATE_OR_DISCRIMINATION"] == 6
+
+
+def test_lexicon_hash_changes_when_an_active_rule_changes(session):
+    bootstrap_review_moderation_terms(session)
+    terms = list(session.scalars(
+        select(ReviewModerationTerm).where(ReviewModerationTerm.is_active.is_(True))
+    ))
+    before = _lexicon_hash(terms)
+    terms[0].severity = "HIGH" if terms[0].severity != "HIGH" else "LOW"
+    session.flush()
+
+    assert _lexicon_hash(terms) != before
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        "ESTA HUEVADA no corresponde con la descripción del producto.",
+        "No deberían vender estas CHUCHAS en este estado.",
+        "Qué CARAJOS hicieron con el empaque de este producto.",
+        "El paquete llegó con unas VERGAS escritas en la caja.",
+        "ERES UN INUTIL atendiendo este pedido y debes revisarlo.",
+    ),
+)
+def test_real_es_ec_terms_casefold_plural_and_accents_only_flag(session, body):
+    bootstrap_review_moderation_terms(session)
+
+    _base, review = _delivered_review(session, rating=2, body=body)
+
+    assessment = session.scalar(select(ReviewModerationAssessment).where(
+        ReviewModerationAssessment.review_id == review.id
+    ))
+    assert assessment.outcome == "FLAG"
+    assert review.status == ProductReviewStatus.PENDING_REVIEW
+    assert session.scalar(select(ReviewModerationSignal).where(
+        ReviewModerationSignal.review_id == review.id
+    )) is not None
+    assert session.scalar(select(ReviewModerationDecision).where(
+        ReviewModerationDecision.review_id == review.id
+    )) is None
+
+
+def test_real_es_ec_token_boundary_avoids_embedded_false_positive(session):
+    bootstrap_review_moderation_terms(session)
+
+    _base, review = _delivered_review(
+        session,
+        rating=4,
+        body="El código supervergaextra es solo el identificador del fabricante.",
+    )
+
+    assert review.status == ProductReviewStatus.PUBLISHED
 
 
 def test_negative_clean_review_is_automatically_published(session):

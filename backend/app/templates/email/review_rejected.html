@@ -1,0 +1,7 @@
+{% extends "email/base.html" %}
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">Tu reseña necesita cambios</h1>
+<p style="margin:0 0 16px;">Tu reseña no pudo publicarse porque no cumple una de nuestras normas de publicación.</p>
+<div style="margin:0 0 24px;padding:16px;background:#f0f5f4;border-radius:10px;"><strong>Producto:</strong> {{ product_title }}<br><strong>Motivo:</strong> {{ public_reason }}</div>
+<p style="margin:0;"><a href="{{ action_url }}" style="display:inline-block;background:#006653;color:#ffffff;text-decoration:none;font-weight:700;padding:13px 22px;border-radius:10px;">Editar y reenviar reseña</a></p>
+{% endblock %}

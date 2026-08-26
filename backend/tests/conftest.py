@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app import create_app
 from app.extensions import db, limiter
+from app.services.mail import mail_service
 
 
 def _database_name() -> str:
@@ -119,10 +120,18 @@ def _truncate_application_tables(engine: Engine) -> None:
 
 
 @pytest.fixture(autouse=True)
-def clean_database(engine: Engine):
+def clean_database(engine: Engine, app):
+    previous_backend = app.config.get("MAIL_BACKEND")
+    previous_public_base = app.config.get("PUBLIC_BASE_URL")
+    app.config["MAIL_BACKEND"] = "memory"
+    app.config["PUBLIC_BASE_URL"] = "https://ecuvel.test"
+    mail_service.outbox.clear()
     db.session.remove()
     _truncate_application_tables(engine)
     yield
+    mail_service.outbox.clear()
+    app.config["MAIL_BACKEND"] = previous_backend
+    app.config["PUBLIC_BASE_URL"] = previous_public_base
     db.session.remove()
     _truncate_application_tables(engine)
 

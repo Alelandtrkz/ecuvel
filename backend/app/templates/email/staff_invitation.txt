@@ -1,0 +1,12 @@
+Te invitaron a formar parte del equipo ECUVEL
+{% if full_name %}
+Hola, {{ full_name }}.
+{% endif %}
+Configura tus credenciales para acceder de forma segura al panel de operaciones.
+{% if employee_code %}Código: {{ employee_code }}
+{% endif %}{% if role %}Rol: {{ role }}
+{% endif %}
+Configurar acceso: {{ action_url }}
+{% if expiration_minutes %}
+Esta invitación estará disponible durante {{ expiration_minutes }} minutos.
+{% endif %}

@@ -1,15 +1,56 @@
 {
-  "version": "2026.08.1",
+  "version": "2026.08.2",
   "language": "es",
   "terms": [
     {"stable_key": "es.profanity.idiota", "pattern": "idiota", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
     {"stable_key": "es.profanity.estupido", "pattern": "estúpido", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es.profanity.imbecil", "pattern": "imbécil", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es_ec.profanity.verga", "pattern": "verga", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "MEDIUM"},
+    {"stable_key": "es_ec.profanity.vergas", "pattern": "vergas", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "MEDIUM"},
+    {"stable_key": "es_ec.profanity.chucha", "pattern": "chucha", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "MEDIUM"},
+    {"stable_key": "es_ec.profanity.chuchas", "pattern": "chuchas", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "MEDIUM"},
+    {"stable_key": "es_ec.profanity.huevada", "pattern": "huevada", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es_ec.profanity.huevadas", "pattern": "huevadas", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es_ec.profanity.mierda", "pattern": "mierda", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "MEDIUM"},
+    {"stable_key": "es_ec.profanity.mierdas", "pattern": "mierdas", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "MEDIUM"},
+    {"stable_key": "es_ec.profanity.carajo", "pattern": "carajo", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es_ec.profanity.carajos", "pattern": "carajos", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es.profanity.mierda_censurada", "pattern": "m***da", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "MEDIUM"},
+
     {"stable_key": "es.harassment.inutil", "pattern": "eres un inútil", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "MEDIUM"},
     {"stable_key": "es.harassment.basura_humana", "pattern": "basura humana", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "HIGH"},
+    {"stable_key": "es.harassment.eres_basura", "pattern": "eres una basura", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "HIGH"},
+    {"stable_key": "es.harassment.eres_imbecil", "pattern": "eres un imbécil", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "HIGH"},
+    {"stable_key": "es.harassment.hijo_de_puta", "pattern": "hijo de puta", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "HIGH"},
+    {"stable_key": "es.harassment.ojala_mueras", "pattern": "ojalá te mueras", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "HIGH"},
+
+    {"stable_key": "es.hate.racial_negro_mierda", "pattern": "negro de mierda", "match_mode": "PHRASE", "category_code": "HATE_OR_DISCRIMINATION", "severity": "HIGH"},
+    {"stable_key": "es.hate.etnico_indio_mierda", "pattern": "indio de mierda", "match_mode": "PHRASE", "category_code": "HATE_OR_DISCRIMINATION", "severity": "HIGH"},
+    {"stable_key": "es.hate.xenofobia_veneco_mierda", "pattern": "veneco de mierda", "match_mode": "PHRASE", "category_code": "HATE_OR_DISCRIMINATION", "severity": "HIGH"},
+    {"stable_key": "es.hate.xenofobia_venezolanos", "pattern": "odio a los venezolanos", "match_mode": "PHRASE", "category_code": "HATE_OR_DISCRIMINATION", "severity": "HIGH"},
+    {"stable_key": "es.hate.xenofobia_colombianos", "pattern": "odio a los colombianos", "match_mode": "PHRASE", "category_code": "HATE_OR_DISCRIMINATION", "severity": "HIGH"},
+    {"stable_key": "es.hate.regresa_pais", "pattern": "regresa a tu país", "match_mode": "PHRASE", "category_code": "HATE_OR_DISCRIMINATION", "severity": "MEDIUM"},
+
     {"stable_key": "es.threat.te_voy_a_matar", "pattern": "te voy a matar", "match_mode": "PHRASE", "category_code": "THREAT", "severity": "HIGH"},
     {"stable_key": "es.threat.voy_a_hacerte_dano", "pattern": "voy a hacerte daño", "match_mode": "PHRASE", "category_code": "THREAT", "severity": "HIGH"},
+    {"stable_key": "es.threat.te_voy_a_golpear", "pattern": "te voy a golpear", "match_mode": "PHRASE", "category_code": "THREAT", "severity": "HIGH"},
+    {"stable_key": "es.threat.romper_cara", "pattern": "te voy a romper la cara", "match_mode": "PHRASE", "category_code": "THREAT", "severity": "HIGH"},
+    {"stable_key": "es.threat.encontrarte_matarte", "pattern": "voy a encontrarte y matarte", "match_mode": "PHRASE", "category_code": "THREAT", "severity": "HIGH"},
+
     {"stable_key": "es.sexual.pornografia", "pattern": "pornografía", "match_mode": "TOKEN", "category_code": "SEXUAL_CONTENT", "severity": "HIGH"},
+    {"stable_key": "es.sexual.sexo_explicito", "pattern": "sexo explícito", "match_mode": "PHRASE", "category_code": "SEXUAL_CONTENT", "severity": "HIGH"},
+    {"stable_key": "es.sexual.foto_desnuda", "pattern": "foto desnuda", "match_mode": "PHRASE", "category_code": "SEXUAL_CONTENT", "severity": "HIGH"},
+    {"stable_key": "es.sexual.contenido_explicito", "pattern": "contenido sexual explícito", "match_mode": "PHRASE", "category_code": "SEXUAL_CONTENT", "severity": "HIGH"},
+
     {"stable_key": "es.violent.desmembrar", "pattern": "desmembrar", "match_mode": "TOKEN", "category_code": "VIOLENT_CONTENT", "severity": "HIGH"},
-    {"stable_key": "es.spam.compra_en_mi_web", "pattern": "compra en mi web", "match_mode": "PHRASE", "category_code": "SPAM", "severity": "MEDIUM"}
+    {"stable_key": "es.violent.decapitar", "pattern": "decapitar", "match_mode": "TOKEN", "category_code": "VIOLENT_CONTENT", "severity": "HIGH"},
+    {"stable_key": "es.violent.matar_golpes", "pattern": "matar a golpes", "match_mode": "PHRASE", "category_code": "VIOLENT_CONTENT", "severity": "HIGH"},
+    {"stable_key": "es.violent.sangre_tripas", "pattern": "sangre y tripas", "match_mode": "PHRASE", "category_code": "VIOLENT_CONTENT", "severity": "HIGH"},
+
+    {"stable_key": "es.spam.compra_en_mi_web", "pattern": "compra en mi web", "match_mode": "PHRASE", "category_code": "SPAM", "severity": "MEDIUM"},
+    {"stable_key": "es.spam.visita_mi_pagina", "pattern": "visita mi página", "match_mode": "PHRASE", "category_code": "SPAM", "severity": "MEDIUM"},
+    {"stable_key": "es.spam.escribeme_whatsapp", "pattern": "escríbeme al whatsapp", "match_mode": "PHRASE", "category_code": "SPAM", "severity": "MEDIUM"},
+    {"stable_key": "es.spam.promocion_perfil", "pattern": "promoción en mi perfil", "match_mode": "PHRASE", "category_code": "SPAM", "severity": "MEDIUM"},
+    {"stable_key": "es.spam.sigueme_redes", "pattern": "sígueme en redes", "match_mode": "PHRASE", "category_code": "SPAM", "severity": "MEDIUM"}
   ]
 }

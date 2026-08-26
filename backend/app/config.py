@@ -134,8 +134,17 @@ class Config:
         8,
         128,
     )
-    MAIL_BACKEND = os.getenv("MAIL_BACKEND", "console")
+    MAIL_BACKEND = os.getenv("MAIL_BACKEND", "console").strip().lower()
     MAIL_FROM = os.getenv("MAIL_FROM", "")
+    MAIL_REPLY_TO = os.getenv("MAIL_REPLY_TO", "")
+    RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+    RESEND_API_BASE_URL = os.getenv(
+        "RESEND_API_BASE_URL", "https://api.resend.com"
+    )
+    RESEND_TIMEOUT_SECONDS = _environment_int_range(
+        "RESEND_TIMEOUT_SECONDS", 8, 1, 30
+    )
+    PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 
     PHONE_OTP_ENABLED = _environment_bool("PHONE_OTP_ENABLED", True)
     PHONE_OTP_BACKEND = _environment_choice(

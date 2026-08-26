@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import pytest
 from sqlalchemy import select
 
@@ -59,18 +57,18 @@ def test_rejection_creates_one_durable_outbox_event(session):
 
 def test_mail_failure_is_retryable_and_never_reverts_rejection(session, monkeypatch):
     review = _rejected_review(session)
-    now = datetime(2026, 8, 21, 12, 0, tzinfo=timezone.utc)
+    event = session.scalar(
+        select(ReviewNotificationOutbox).where(
+            ReviewNotificationOutbox.review_id == review.id
+        )
+    )
+    now = event.next_attempt_at
 
     def fail(_message):
         raise RuntimeError("provider unavailable with no secret payload")
 
     monkeypatch.setattr("app.services.review_notifications.mail_service.send", fail)
     first = dispatch_review_notifications(session, now=now)
-    event = session.scalar(
-        select(ReviewNotificationOutbox).where(
-            ReviewNotificationOutbox.review_id == review.id
-        )
-    )
     assert first == {"claimed": 1, "sent": 0, "failed": 1}
     assert event.status == "RETRY"
     assert event.attempts == 1
@@ -88,6 +86,11 @@ def test_mail_failure_is_retryable_and_never_reverts_rejection(session, monkeypa
     assert event.attempts == 2
     assert len(sent) == 1
     assert "necesita cambios" in sent[0].subject
+    assert review.product.title in sent[0].text_body
+    assert review.public_rejection_reason in sent[0].text_body
+    assert "https://ecuvel.test" in sent[0].text_body
+    assert "internal_notes" not in sent[0].text_body
+    assert "matched_term" not in sent[0].text_body
 
     replay = dispatch_review_notifications(session, now=event.sent_at)
     assert replay == {"claimed": 0, "sent": 0, "failed": 0}

@@ -26,7 +26,12 @@ from app.services.authentication import (
     reset_password,
     verify_customer_email,
 )
-from app.services.mail import OutgoingMail, mail_service
+from app.services.mail import MailError, mail_service
+from app.services.transactional_mail import (
+    build_mail_action_url,
+    password_reset_mail,
+    verification_mail,
+)
 from app.services.phone_otp import (
     InvalidPhoneOtpError,
     PhoneOtpCooldownError,
@@ -94,29 +99,27 @@ def _login_user_preserving_session(user, *, remember: bool = False) -> None:
 
 
 def _send_verification_email(email: str, token: str) -> None:
-    link = url_for("auth.verify_email", token=token, _external=True)
+    link = build_mail_action_url("auth.verify_email", token=token)
     mail_service.send(
-        OutgoingMail(
+        verification_mail(
             to=email,
-            subject="Verifica tu correo en Ecuvel",
-            body=(
-                "Confirma tu correo para activar tu cuenta de Ecuvel:\n"
-                f"{link}"
-            ),
+            action_url=link,
+            expiration_minutes=current_app.config[
+                "EMAIL_VERIFICATION_TOKEN_TTL_MINUTES"
+            ],
         )
     )
 
 
 def _send_password_reset_email(email: str, token: str) -> None:
-    link = url_for("auth.reset_password_form", token=token, _external=True)
+    link = build_mail_action_url("auth.reset_password_form", token=token)
     mail_service.send(
-        OutgoingMail(
+        password_reset_mail(
             to=email,
-            subject="Restablece tu contraseña de Ecuvel",
-            body=(
-                "Si solicitaste restablecer tu contraseña, usa este enlace:\n"
-                f"{link}"
-            ),
+            action_url=link,
+            expiration_minutes=current_app.config[
+                "PASSWORD_RESET_TOKEN_TTL_MINUTES"
+            ],
         )
     )
 
@@ -197,8 +200,20 @@ def register():
             )
             _claim_orders_for_user(result.user.id, database_session)
         _login_user_preserving_session(result.user)
-        _send_verification_email(result.user.email, result.verification_token)
-        flash("Cuenta creada. Revisa tu correo para verificarla.", "success")
+        try:
+            _send_verification_email(result.user.email, result.verification_token)
+        except MailError as exc:
+            current_app.logger.warning(
+                "event=mail_failed mail_type=VERIFY_EMAIL error=%s",
+                type(exc).__name__,
+            )
+            flash(
+                "Cuenta creada. No pudimos enviar el correo de verificación "
+                "en este momento. Puedes solicitar uno nuevo.",
+                "warning",
+            )
+        else:
+            flash("Cuenta creada. Revisa tu correo para verificarla.", "success")
         if current_app.config["AUTH_REQUIRE_EMAIL_VERIFICATION"]:
             return redirect(url_for("auth.verification_pending"))
         return redirect(next_url)
@@ -276,17 +291,36 @@ def resend_verification():
     if current_user.email_verified_at is not None:
         flash("Tu correo ya está verificado.", "success")
         return redirect(url_for("account.profile"))
-    with db.session.begin():
+    user_id = current_user.id
+    email = current_user.email
+    ttl_minutes = current_app.config[
+        "EMAIL_VERIFICATION_TOKEN_TTL_MINUTES"
+    ]
+    # Flask-Login ya pudo abrir una transacción al cargar current_user.
+    # Una sesión nueva mantiene este bloque atómico y evita begin() anidado.
+    db.session.remove()
+    database_session = db.session()
+    with database_session.begin():
         token = create_account_token(
-            session=db.session,
-            user_id=current_user.id,
+            session=database_session,
+            user_id=user_id,
             purpose=UserAccountTokenPurpose.VERIFY_EMAIL,
-            ttl_minutes=current_app.config[
-                "EMAIL_VERIFICATION_TOKEN_TTL_MINUTES"
-            ],
+            ttl_minutes=ttl_minutes,
         )
-    _send_verification_email(current_user.email, token.token)
-    flash("Enviamos un nuevo enlace de verificación.", "success")
+    try:
+        _send_verification_email(email, token.token)
+    except MailError as exc:
+        current_app.logger.warning(
+            "event=mail_failed mail_type=VERIFY_EMAIL error=%s",
+            type(exc).__name__,
+        )
+        flash(
+            "No pudimos enviar el correo de verificación en este momento. "
+            "Inténtalo nuevamente más tarde.",
+            "warning",
+        )
+    else:
+        flash("Enviamos un nuevo enlace de verificación.", "success")
     return redirect(url_for("auth.verification_pending"))
 
 
@@ -324,7 +358,13 @@ def forgot_password():
         )
     if result is not None:
         user, token = result
-        _send_password_reset_email(user.email, token)
+        try:
+            _send_password_reset_email(user.email, token)
+        except MailError as exc:
+            current_app.logger.warning(
+                "event=mail_failed mail_type=PASSWORD_RESET error=%s",
+                type(exc).__name__,
+            )
     flash(
         "Si existe una cuenta asociada, enviaremos instrucciones.",
         "success",
@@ -536,8 +576,25 @@ def complete_phone_registration_post():
         flask_session.pop(PHONE_REGISTRATION_CHALLENGE_SESSION_KEY, None)
         _login_user_preserving_session(result.user)
         if result.verification_token and result.user.email:
-            _send_verification_email(result.user.email, result.verification_token)
-            flash("Cuenta creada. TambiÃ©n enviamos verificaciÃ³n a tu correo.", "success")
+            try:
+                _send_verification_email(
+                    result.user.email, result.verification_token
+                )
+            except MailError as exc:
+                current_app.logger.warning(
+                    "event=mail_failed mail_type=VERIFY_EMAIL error=%s",
+                    type(exc).__name__,
+                )
+                flash(
+                    "Cuenta creada. No pudimos enviar la verificación por "
+                    "correo; puedes solicitarla nuevamente.",
+                    "warning",
+                )
+            else:
+                flash(
+                    "Cuenta creada. También enviamos verificación a tu correo.",
+                    "success",
+                )
         else:
             flash("Cuenta creada con tu telÃ©fono verificado.", "success")
         return redirect(url_for("account.profile"))

@@ -1,0 +1,8 @@
+Verifica tu correo
+
+Confirma tu dirección para terminar de configurar tu cuenta ECUVEL.
+
+Verificar mi correo: {{ action_url }}
+{% if expiration_minutes %}
+Este enlace estará disponible durante {{ expiration_minutes }} minutos.
+{% endif %}
