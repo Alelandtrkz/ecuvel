@@ -20,6 +20,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db, limiter
@@ -80,6 +81,7 @@ from app.services.admin_products import (
     get_admin_product_draft,
     get_admin_products_page,
 )
+from app.services.admin_reviews import get_admin_review_detail, get_admin_reviews_page
 from app.services.admin_stores import (
     APPROVAL_CHECK_LABELS,
     CORRECTION_REASON_LABELS,
@@ -165,7 +167,20 @@ from app.services.admin_users import (
 )
 from app.services.authentication import request_password_reset
 from app.services.mail import OutgoingMail, mail_service
-from app.models.enums import StaffEmploymentStatus, StaffIdentificationType, StaffRole
+from app.services.review_moderation import (
+    REJECTION_REASON_LABELS,
+    ReviewModerationConflictError,
+    ReviewModerationError,
+    apply_review_moderation_decision,
+)
+from app.models import ProductReview, ProductReviewImage
+from app.models.enums import (
+    ReviewModerationDecisionAction,
+    ReviewModerationDecisionSource,
+    StaffEmploymentStatus,
+    StaffIdentificationType,
+    StaffRole,
+)
 
 
 admin = Blueprint("admin", __name__, url_prefix="/admin")
@@ -1879,6 +1894,130 @@ def user_status(identifier: str):
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el cambio de estado del usuario")
     return redirect(url_for("admin.user_detail", identifier=identifier))
+
+
+@admin.get("/reviews")
+@admin_permission_required("reviews.view")
+def reviews():
+    page = get_admin_reviews_page(
+        db.session,
+        tab=request.args.get("tab", "manual"),
+        q=request.args.get("q", ""),
+        rating=request.args.get("rating", ""),
+        risk=request.args.get("risk", ""),
+        category=request.args.get("category", ""),
+        page=request.args.get("page", 1),
+    )
+    detail = None
+    if request.args.get("detail"):
+        try:
+            detail_id = uuid.UUID(request.args["detail"])
+        except (TypeError, ValueError):
+            abort(404)
+        detail = get_admin_review_detail(db.session, detail_id)
+        if detail is None:
+            abort(404)
+    return render_template(
+        "admin/reviews.html",
+        page=page,
+        detail=detail,
+        rejection_reasons=REJECTION_REASON_LABELS,
+        can_moderate=user_has_permission(current_user, "reviews.moderate"),
+        **_shell_context("reviews"),
+    )
+
+
+@admin.get("/reviews/images/<string:public_id>")
+@admin_permission_required("reviews.view")
+def review_image(public_id: str):
+    image = db.session.scalar(
+        select(ProductReviewImage).where(ProductReviewImage.public_id == public_id)
+    )
+    if image is None or image.revision_id != image.review.current_revision_id:
+        abort(404)
+    try:
+        path = private_file_path(
+            current_app.config["PRODUCT_REVIEW_UPLOAD_DIR"], image.storage_key
+        )
+    except PrivateStorageError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
+    response = send_file(path, mimetype=image.media_type, as_attachment=False, max_age=0)
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@admin.post("/reviews/<uuid:review_id>/decision")
+@limiter.limit("30 per hour")
+@admin_permission_required("reviews.moderate")
+def review_decision(review_id: uuid.UUID):
+    return_params = {
+        "tab": request.form.get("return_tab", "manual").strip(),
+        "q": request.form.get("return_q", "").strip(),
+        "rating": request.form.get("return_rating", type=int),
+        "risk": request.form.get("return_risk", "").strip(),
+        "category": request.form.get("return_category", "").strip(),
+        "page": request.form.get("return_page", type=int),
+    }
+    if return_params["tab"] not in {"manual", "approved", "not-published"}:
+        return_params["tab"] = "manual"
+    if return_params["rating"] not in {1, 2, 3, 4, 5}:
+        return_params["rating"] = None
+    if return_params["page"] is None or return_params["page"] < 1:
+        return_params["page"] = 1
+    try:
+        actor_id = current_user.id
+        revision_id = uuid.UUID(request.form.get("expected_revision_id", ""))
+        action = request.form.get("action", "").strip().upper()
+        if action not in {
+            ReviewModerationDecisionAction.APPROVE.value,
+            ReviewModerationDecisionAction.REJECT.value,
+        }:
+            raise ReviewModerationError("Decisión inválida.")
+        db.session.remove()
+        database_session = db.session()
+        with database_session.begin():
+            decision = apply_review_moderation_decision(
+                database_session,
+                review_id=review_id,
+                revision_id=revision_id,
+                action=action,
+                source=ReviewModerationDecisionSource.MANUAL.value,
+                actor_user_id=actor_id,
+                idempotency_key=(request.form.get("idempotency_key") or uuid.uuid4().hex),
+                reason_code=request.form.get("reason_code"),
+                public_reason=request.form.get("public_reason"),
+                internal_notes=request.form.get("internal_notes"),
+            )
+            record_admin_audit(
+                database_session,
+                actor_user_id=actor_id,
+                action=f"REVIEW_{action}",
+                reason=decision.reason_code,
+                metadata={
+                    "review_id": str(review_id),
+                    "revision_id": str(revision_id),
+                    "decision_id": str(decision.id),
+                },
+            )
+        flash(
+            "Reseña publicada." if action == "APPROVE" else "Reseña no publicada.",
+            "success",
+        )
+    except ReviewModerationConflictError as exc:
+        db.session.rollback()
+        return str(exc), 409
+    except (ReviewModerationError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    return redirect(
+        url_for(
+            "admin.reviews",
+            **{key: value for key, value in return_params.items() if value},
+        )
+    )
 
 
 @admin.get("/modules/<string:module_key>")

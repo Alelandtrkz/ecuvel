@@ -19,6 +19,7 @@ ALL_PERMISSIONS = frozenset({
     "inventory.view_assigned_point", "fulfillment.view_assigned",
     "fulfillment.operate_assigned", "orders.view_related", "products.moderate",
     "stores.moderate", "operations.supervise",
+    "reviews.view", "reviews.moderate",
 })
 
 ROLE_PERMISSIONS: dict[StaffRole, frozenset[str]] = {
@@ -42,7 +43,7 @@ ROLE_PERMISSIONS: dict[StaffRole, frozenset[str]] = {
         "scanner.use", "fulfillment.view_assigned", "fulfillment.operate_assigned",
     }),
     StaffRole.SUPPORT: frozenset({
-        "admin.users.view", "orders.view_related",
+        "admin.users.view", "orders.view_related", "reviews.view", "reviews.moderate",
     }),
 }
 

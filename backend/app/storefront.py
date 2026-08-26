@@ -120,6 +120,7 @@ from app.services.product_reviews import (
     review_stats_for_product_ids,
     review_stats_for_store_ids,
     review_target_for_order_item,
+    resubmit_product_review,
     stage_product_review_images,
 )
 from app.services.payment_precheck import (
@@ -1988,12 +1989,22 @@ def submit_product_review(order_number: str, order_item_id: uuid.UUID):
     finally:
         db.session.remove()
     if wants_json:
+        message = (
+            "Reseña publicada correctamente."
+            if result.status == ProductReviewStatus.PUBLISHED
+            else "Reseña enviada a revisión manual."
+        )
         return jsonify(
             ok=True,
             review_status=result.status.value,
-            message="Reseña enviada. Está pendiente de revisión.",
+            message=message,
         )
-    flash("Recibimos tu reseña. Se publicará después de revisión.", "success")
+    flash(
+        "Tu reseña ya está publicada."
+        if result.status == ProductReviewStatus.PUBLISHED
+        else "Recibimos tu reseña para revisión manual.",
+        "success",
+    )
     return redirect(
         url_for(
             "storefront.my_product_review",
@@ -2025,6 +2036,66 @@ def my_product_review(order_number: str, order_item_id: uuid.UUID) -> str:
     )
 
 
+@storefront.post("/pedidos/<string:order_number>/productos/<uuid:order_item_id>/mi-resena/reenviar")
+@login_required
+@limiter.limit("5 per minute")
+def resubmit_own_product_review(order_number: str, order_item_id: uuid.UUID):
+    config = _product_review_image_config()
+    staged_images = ()
+    promoted = False
+    try:
+        own_review = own_review_for_order_item(
+            session=db.session,
+            order_number=order_number,
+            order_item_id=order_item_id,
+            user_id=current_user.id,
+        )
+        staged_images = stage_product_review_images(
+            request.files.getlist("images"), config=config
+        )
+        db.session.remove()
+        database_session = db.session()
+        with database_session.begin():
+            result = resubmit_product_review(
+                session=database_session,
+                review_id=own_review.review_id,
+                user_id=current_user.id,
+                rating=request.form.get("rating"),
+                body=request.form.get("body", ""),
+                staged_images=staged_images,
+                min_body_length=current_app.config["PRODUCT_REVIEW_MIN_BODY_LENGTH"],
+                max_body_length=current_app.config["PRODUCT_REVIEW_MAX_BODY_LENGTH"],
+            )
+            promote_product_review_images(staged_images, storage_root=config.root)
+            promoted = True
+    except (ProductReviewServiceError, PrivateStorageError) as exc:
+        cleanup_staged_product_review_images(
+            staged_images, storage_root=config.root, include_final=promoted
+        )
+        db.session.remove()
+        flash(str(exc), "error")
+    except Exception:
+        cleanup_staged_product_review_images(
+            staged_images, storage_root=config.root, include_final=promoted
+        )
+        db.session.remove()
+        raise
+    else:
+        flash(
+            "Tu reseña corregida ya está publicada."
+            if result.status == ProductReviewStatus.PUBLISHED
+            else "Tu reseña corregida fue enviada a revisión manual.",
+            "success",
+        )
+    finally:
+        db.session.remove()
+    return redirect(url_for(
+        "storefront.my_product_review",
+        order_number=order_number,
+        order_item_id=order_item_id,
+    ))
+
+
 @storefront.get("/resenas/imagenes/<string:public_id>")
 def product_review_image(public_id: str):
     image = db.session.scalar(
@@ -2033,9 +2104,10 @@ def product_review_image(public_id: str):
     if image is None:
         abort(404)
     review = image.review
-    is_published = review.status == ProductReviewStatus.PUBLISHED
+    is_current = image.revision_id == review.current_revision_id
+    is_published = review.status == ProductReviewStatus.PUBLISHED and is_current
     is_owner = current_user.is_authenticated and review.user_id == current_user.id
-    if not is_published and not is_owner:
+    if not is_current or (not is_published and not is_owner):
         abort(404)
     try:
         path = private_file_path(

@@ -1,0 +1,160 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Moderación de reseñas | ECUVEL Admin{% endblock %}
+{% block styles %}{{ super() }}<link rel="stylesheet" href="{{ url_for('static', filename='css/admin-reviews.css') }}">{% endblock %}
+{% block admin_content %}
+{% set category_labels = {
+  'PROFANITY':'Lenguaje potencialmente ofensivo',
+  'HARASSMENT':'Posible acoso',
+  'HATE_OR_DISCRIMINATION':'Posible discriminación u odio',
+  'THREAT':'Posible amenaza',
+  'SEXUAL_CONTENT':'Posible contenido sexual',
+  'VIOLENT_CONTENT':'Posible contenido violento',
+  'PERSONAL_DATA':'Posibles datos personales',
+  'SPAM':'Posible spam',
+  'IMAGE_REQUIRES_REVIEW':'Imagen adjunta',
+  'OTHER_POLICY_SIGNAL':'Otra señal de política'
+} %}
+<main class="admin-page admin-reviews-page">
+  <header class="admin-reviews-heading">
+    <div>
+      <p class="admin-eyebrow">Marketplace</p>
+      <h1>Moderación de reseñas</h1>
+      <p>Revisión y validación de feedback mediante reglas determinísticas de ECUVEL.</p>
+    </div>
+  </header>
+
+  <nav class="admin-review-tabs" aria-label="Estados de moderación">
+    {% for key, label in [('manual','Revisión manual'),('approved','Aprobadas'),('not-published','No publicadas')] %}
+      <a class="{{ 'is-active' if page.tab == key }}"
+         href="{{ url_for('admin.reviews', tab=key, q=page.q, rating=page.rating or '', risk=page.risk, category=page.category) }}"
+         {% if page.tab == key %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  <section class="admin-review-kpis" aria-label="Indicadores de reseñas">
+    <article class="admin-card admin-review-kpi">
+      <span class="admin-review-kpi__icon"><i data-lucide="messages-square" aria-hidden="true"></i></span>
+      <small>Últimos 30 días</small>
+      <p>Total de reseñas</p>
+      <strong>{{ page.kpis.total_30 }}</strong>
+    </article>
+    <article class="admin-card admin-review-kpi admin-review-kpi--priority">
+      <span class="admin-review-kpi__icon"><i data-lucide="clipboard-clock" aria-hidden="true"></i></span>
+      <small>Cola actual</small>
+      <p>Pendientes de moderación</p>
+      <strong>{{ page.kpis.pending }}</strong>
+    </article>
+    <article class="admin-card admin-review-kpi admin-review-kpi--alert">
+      <span class="admin-review-kpi__icon"><i data-lucide="shield-alert" aria-hidden="true"></i></span>
+      <small>Atención requerida</small>
+      <p>Marcadas por reglas</p>
+      <strong>{{ page.kpis.flagged }}</strong>
+    </article>
+  </section>
+
+  <section class="admin-card admin-review-list">
+    <form class="admin-review-filters" method="get">
+      <input type="hidden" name="tab" value="{{ page.tab }}">
+      <label class="admin-review-search">
+        <span class="sr-only">Buscar reseñas</span>
+        <i data-lucide="search" aria-hidden="true"></i>
+        <input name="q" type="search" maxlength="120" value="{{ page.q }}" placeholder="Buscar reseña, cliente, pedido, producto o SKU...">
+      </label>
+      <label><span class="sr-only">Calificación</span><select name="rating">
+        <option value="">Todas las calificaciones</option>
+        {% for value in range(5, 0, -1) %}<option value="{{ value }}" {{ 'selected' if page.rating == value }}>{{ value }} estrellas</option>{% endfor %}
+      </select></label>
+      <label><span class="sr-only">Riesgo</span><select name="risk">
+        <option value="">Todos los riesgos</option>
+        {% for value, label in [('HIGH','Alto'),('MEDIUM','Medio'),('LOW','Bajo'),('NONE','Sin riesgo')] %}<option value="{{ value }}" {{ 'selected' if page.risk == value }}>{{ label }}</option>{% endfor %}
+      </select></label>
+      <label><span class="sr-only">Categoría de señal</span><select name="category">
+        <option value="">Todas las señales</option>
+        {% for value in page.category_options %}<option value="{{ value }}" {{ 'selected' if page.category == value }}>{{ category_labels.get(value, value|replace('_',' ')|title) }}</option>{% endfor %}
+      </select></label>
+      <button class="admin-button" type="submit"><i data-lucide="list-filter" aria-hidden="true"></i>Aplicar</button>
+      {% if page.q or page.rating or page.risk or page.category %}<a class="admin-review-clear" href="{{ url_for('admin.reviews', tab=page.tab) }}">Limpiar</a>{% endif %}
+    </form>
+
+    {% if page.rows %}
+      <div class="admin-review-table-wrap">
+        <table class="admin-review-table">
+          <thead><tr><th>Producto</th><th>Cliente y calificación</th><th>Reseña</th><th>Prevalidación automática</th><th>Fecha</th><th>Acciones</th></tr></thead>
+          <tbody>
+          {% for row in page.rows %}
+            {% set review = row.review %}{% set assessment = row.assessment %}
+            <tr class="{{ 'is-alert' if assessment and assessment.outcome == 'FLAG' }}">
+              <td><div class="admin-review-product">
+                <span class="admin-review-product__thumb">{% if row.product_image_url %}<img src="{{ row.product_image_url }}" alt="">{% else %}<i data-lucide="package" aria-hidden="true"></i>{% endif %}</span>
+                <span><strong>{{ row.product_name }}</strong><small>SKU: {{ row.sku }}{% if row.variant_label %} · {{ row.variant_label }}{% endif %}</small></span>
+              </div></td>
+              <td><strong>{{ row.buyer_label }}</strong><div class="admin-review-stars" aria-label="{{ review.rating }} de 5 estrellas">{% for number in range(1, 6) %}<span class="{{ 'is-filled' if number <= review.rating }}">★</span>{% endfor %}</div></td>
+              <td><p class="admin-review-excerpt">{{ review.body }}</p>{% if review.current_revision and review.current_revision.images %}<small class="admin-review-photo-count"><i data-lucide="image" aria-hidden="true"></i>{{ review.current_revision.images|length }} foto{{ 's' if review.current_revision.images|length != 1 }}</small>{% endif %}</td>
+              <td>
+                {% if not assessment %}<span class="admin-review-badge is-neutral">Sin evaluación</span>
+                {% elif assessment.processing_status == 'FAILED' %}<span class="admin-review-badge is-danger"><i data-lucide="triangle-alert"></i>Error controlado</span>
+                {% elif assessment.outcome == 'PASS' %}<span class="admin-review-badge is-clean"><i data-lucide="circle-check"></i>Limpio</span>
+                {% else %}<span class="admin-review-badge is-warning"><i data-lucide="shield-alert"></i>Revisión manual requerida</span>{% endif %}
+              </td>
+              <td>{{ review.created_at|ecuador_datetime }}</td>
+              <td><div class="admin-review-actions">
+                <a class="admin-review-detail-button" href="{{ url_for('admin.reviews', tab=page.tab, q=page.q, rating=page.rating or '', risk=page.risk, category=page.category, page=page.page, detail=review.id) }}" data-review-detail-trigger>Ver detalle</a>
+              </div></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <footer class="admin-review-pagination"><span>Mostrando {{ page.rows|length }} de {{ page.total }} reseñas</span><nav aria-label="Paginación">
+        {% if page.page > 1 %}<a href="{{ url_for('admin.reviews', tab=page.tab, q=page.q, rating=page.rating or '', risk=page.risk, category=page.category, page=page.page-1) }}" aria-label="Página anterior"><i data-lucide="chevron-left"></i></a>{% endif %}
+        <span>Página {{ page.page }} de {{ page.total_pages }}</span>
+        {% if page.page < page.total_pages %}<a href="{{ url_for('admin.reviews', tab=page.tab, q=page.q, rating=page.rating or '', risk=page.risk, category=page.category, page=page.page+1) }}" aria-label="Página siguiente"><i data-lucide="chevron-right"></i></a>{% endif %}
+      </nav></footer>
+    {% else %}
+      <div class="admin-review-empty"><i data-lucide="message-square-dashed" aria-hidden="true"></i><h2>No hay reseñas en esta vista</h2><p>{% if page.q or page.rating or page.risk or page.category %}Prueba limpiando los filtros.{% else %}Las reseñas aparecerán aquí cuando exista información real para moderar.{% endif %}</p></div>
+    {% endif %}
+  </section>
+</main>
+
+{% if detail %}
+{% set review = detail.review %}{% set assessment = detail.assessment %}
+<div class="admin-review-drawer-layer" data-review-drawer-layer>
+  <a class="admin-review-drawer-backdrop" href="{{ url_for('admin.reviews', tab=page.tab, q=page.q, rating=page.rating or '', risk=page.risk, category=page.category, page=page.page) }}" aria-label="Cerrar detalle" data-review-drawer-close></a>
+  <aside class="admin-review-drawer" role="dialog" aria-modal="true" aria-labelledby="review-drawer-title" tabindex="-1" data-review-drawer>
+    <header><div><p class="admin-eyebrow">Moderación manual</p><h2 id="review-drawer-title">Detalle de reseña</h2></div><a href="{{ url_for('admin.reviews', tab=page.tab, q=page.q, rating=page.rating or '', risk=page.risk, category=page.category, page=page.page) }}" aria-label="Cerrar detalle" data-review-drawer-close><i data-lucide="x"></i></a></header>
+    <div class="admin-review-drawer__body">
+      <section class="admin-review-buyer"><span>{{ detail.buyer_label[:1] }}</span><div><strong>{{ detail.buyer_label }}</strong><small>Pedido {{ review.order.order_number }} · Compra verificada</small><div class="admin-review-stars" aria-label="{{ review.rating }} de 5 estrellas">{% for number in range(1, 6) %}<span class="{{ 'is-filled' if number <= review.rating }}">★</span>{% endfor %}</div></div></section>
+      <section class="admin-review-drawer__product"><span class="admin-review-product__thumb">{% if review.order_item.image_url_snapshot %}<img src="{{ review.order_item.image_url_snapshot }}" alt="">{% else %}<i data-lucide="package"></i>{% endif %}</span><div><small>Sobre el producto</small><strong>{{ detail.product_name }}</strong><span>{{ detail.sku }}{% if detail.variant_label %} · {{ detail.variant_label }}{% endif %}</span></div></section>
+      <section><h3>Comentario del cliente</h3><p class="admin-review-full-body">{{ detail.revision.body }}</p></section>
+      {% if detail.images %}<section><h3>Fotos adjuntas ({{ detail.images|length }})</h3><p class="admin-review-manual-note"><i data-lucide="eye"></i>Imagen adjunta — requiere revisión manual.</p><div class="admin-review-photos">{% for image in detail.images %}<a href="{{ url_for('admin.review_image', public_id=image.public_id) }}" target="_blank" rel="noopener"><img src="{{ url_for('admin.review_image', public_id=image.public_id) }}" alt="Foto adjunta {{ loop.index }}"></a>{% endfor %}</div></section>{% endif %}
+      <section class="admin-review-assessment {{ 'is-failed' if assessment and assessment.processing_status == 'FAILED' }}">
+        <h3><i data-lucide="shield-check"></i>Prevalidación automática</h3>
+        {% if assessment %}<dl><div><dt>Motor</dt><dd>Reglas ECUVEL {{ assessment.engine_version }}</dd></div><div><dt>Resultado</dt><dd>{{ {'PASS':'Limpio','FLAG':'Revisión manual requerida','MANUAL_REQUIRED':'Revisión manual requerida'}.get(assessment.outcome, 'Error controlado') }}</dd></div><div><dt>Riesgo</dt><dd>{{ {'NONE':'Sin riesgo','LOW':'Bajo','MEDIUM':'Medio','HIGH':'Alto'}.get(assessment.risk, assessment.risk) }}</dd></div></dl>
+        {% if assessment.processing_status == 'FAILED' %}<p>La evaluación no pudo completarse de forma segura. La reseña no se publicó automáticamente.</p>{% endif %}
+        {% if detail.signals %}<ul>{% for signal in detail.signals %}<li><strong>{{ category_labels.get(signal.category_code, signal.category_code|replace('_',' ')|title) }}</strong><span>{{ signal.severity|title }}{% if signal.surface == 'IMAGE' %} · Imagen{% endif %}</span></li>{% endfor %}</ul>{% else %}<p>No se detectaron señales de política.</p>{% endif %}
+        {% else %}<p>Esta reseña aún no tiene una evaluación automática asociada.</p>{% endif %}
+      </section>
+      {% if review.status.value == 'REJECTED' and review.public_rejection_reason %}<section class="admin-review-rejection"><h3>Motivo de no publicación</h3><p>{{ review.public_rejection_reason }}</p></section>{% endif %}
+    </div>
+    <footer class="admin-review-drawer__footer">
+      {% if can_moderate and review.status.value == 'PENDING_REVIEW' %}
+      <details class="admin-review-reject-panel"><summary>No publicar reseña</summary><form method="post" action="{{ url_for('admin.review_decision', review_id=review.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_revision_id" value="{{ detail.revision.id }}"><input type="hidden" name="action" value="REJECT">
+        <input type="hidden" name="return_tab" value="{{ page.tab }}"><input type="hidden" name="return_q" value="{{ page.q }}"><input type="hidden" name="return_rating" value="{{ page.rating or '' }}"><input type="hidden" name="return_risk" value="{{ page.risk }}"><input type="hidden" name="return_category" value="{{ page.category }}"><input type="hidden" name="return_page" value="{{ page.page }}">
+        <label>Motivo público<select name="reason_code" required><option value="">Selecciona un motivo</option>{% for code, label in rejection_reasons.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></label>
+        <label>Detalle público (obligatorio para “Otro”)<textarea name="public_reason" maxlength="500" rows="2"></textarea></label>
+        <label>Nota interna opcional<textarea name="internal_notes" maxlength="1000" rows="2"></textarea></label>
+        <button class="admin-review-reject" type="submit"><i data-lucide="circle-x"></i>Confirmar no publicación</button>
+      </form></details>
+      <form method="post" action="{{ url_for('admin.review_decision', review_id=review.id) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_revision_id" value="{{ detail.revision.id }}"><input type="hidden" name="action" value="APPROVE">
+        <input type="hidden" name="return_tab" value="{{ page.tab }}"><input type="hidden" name="return_q" value="{{ page.q }}"><input type="hidden" name="return_rating" value="{{ page.rating or '' }}"><input type="hidden" name="return_risk" value="{{ page.risk }}"><input type="hidden" name="return_category" value="{{ page.category }}"><input type="hidden" name="return_page" value="{{ page.page }}">
+        <button class="admin-review-approve" type="submit"><i data-lucide="circle-check"></i>Aprobar reseña</button>
+      </form>
+      {% else %}<p>Esta reseña ya tiene una decisión vigente.</p>{% endif %}
+    </footer>
+  </aside>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}{{ super() }}<script src="{{ url_for('static', filename='js/admin-reviews.js') }}" defer></script>{% endblock %}

@@ -271,6 +271,45 @@
   gap: var(--space-3);
 }
 
+.own-review__resubmit {
+  display: grid;
+  max-width: 720px;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border);
+}
+
+.own-review__resubmit h2 {
+  margin: 0;
+}
+
+.own-review__resubmit label {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--color-text);
+  font-weight: 800;
+}
+
+.own-review__resubmit select,
+.own-review__resubmit textarea,
+.own-review__resubmit input[type="file"] {
+  width: 100%;
+  min-height: 52px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-medium);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 500;
+  padding: var(--space-3) var(--space-4);
+}
+
+.own-review__resubmit textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
 .review-summary {
   display: grid;
   grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);

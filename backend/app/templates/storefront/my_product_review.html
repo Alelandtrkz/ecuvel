@@ -50,6 +50,35 @@
         {% endfor %}
       </div>
     {% endif %}
+
+    {% if review.status.value == "REJECTED" %}
+      <form
+        class="own-review__resubmit"
+        method="post"
+        enctype="multipart/form-data"
+        action="{{ url_for('storefront.resubmit_own_product_review', order_number=review.order_number, order_item_id=review.order_item_id) }}"
+      >
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <h2>Editar y reenviar reseña</h2>
+        <label>
+          Calificación
+          <select name="rating" required>
+            {% for value in range(1, 6) %}
+              <option value="{{ value }}" {{ 'selected' if value == review.rating }}>{{ value }} estrellas</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          Comentario
+          <textarea name="body" minlength="10" maxlength="2000" required>{{ review.body }}</textarea>
+        </label>
+        <label>
+          Fotos de esta nueva versión (opcional)
+          <input type="file" name="images" accept="image/jpeg,image/png,image/webp" multiple>
+        </label>
+        <button class="button button--primary" type="submit">Reenviar reseña</button>
+      </form>
+    {% endif %}
   </article>
 </div>
 {% endblock %}

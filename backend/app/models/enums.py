@@ -213,6 +213,55 @@ class ProductReviewStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class ReviewModerationOutcome(StrEnum):
+    PASS = "PASS"
+    FLAG = "FLAG"
+    MANUAL_REQUIRED = "MANUAL_REQUIRED"
+
+
+class ReviewModerationProcessingStatus(StrEnum):
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class ReviewModerationRisk(StrEnum):
+    NONE = "NONE"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class ReviewModerationSeverity(StrEnum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+class ReviewModerationMatchMode(StrEnum):
+    TOKEN = "TOKEN"
+    PHRASE = "PHRASE"
+
+
+class ReviewModerationDecisionAction(StrEnum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"
+
+
+class ReviewModerationDecisionSource(StrEnum):
+    AUTOMATIC = "AUTOMATIC"
+    MANUAL = "MANUAL"
+    LEGACY_IMPORT = "LEGACY_IMPORT"
+
+
+class ReviewNotificationStatus(StrEnum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    RETRY = "RETRY"
+
+
 class ProductDraftStatus(StrEnum):
     DRAFT = "DRAFT"
     INCOMPLETE = "INCOMPLETE"

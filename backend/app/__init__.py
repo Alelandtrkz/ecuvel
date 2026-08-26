@@ -56,6 +56,10 @@ def create_app() -> Flask:
     )
     from app.commands.seller_payouts import seller_payouts_command
     from app.commands.marketplace_policy import marketplace_policy_command
+    from app.commands.review_moderation import (
+        review_moderation_command,
+        review_notifications_command,
+    )
     from app.blueprints.auth import auth
     from app.blueprints.account import account
     from app.blueprints.partners import partners
@@ -106,6 +110,8 @@ def create_app() -> Flask:
     app.cli.add_command(list_unverified_users_command)
     app.cli.add_command(seller_payouts_command)
     app.cli.add_command(marketplace_policy_command)
+    app.cli.add_command(review_moderation_command)
+    app.cli.add_command(review_notifications_command)
 
     app.register_blueprint(auth)
     app.register_blueprint(account)

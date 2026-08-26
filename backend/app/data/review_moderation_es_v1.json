@@ -1,0 +1,15 @@
+{
+  "version": "2026.08.1",
+  "language": "es",
+  "terms": [
+    {"stable_key": "es.profanity.idiota", "pattern": "idiota", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es.profanity.estupido", "pattern": "estúpido", "match_mode": "TOKEN", "category_code": "PROFANITY", "severity": "LOW"},
+    {"stable_key": "es.harassment.inutil", "pattern": "eres un inútil", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "MEDIUM"},
+    {"stable_key": "es.harassment.basura_humana", "pattern": "basura humana", "match_mode": "PHRASE", "category_code": "HARASSMENT", "severity": "HIGH"},
+    {"stable_key": "es.threat.te_voy_a_matar", "pattern": "te voy a matar", "match_mode": "PHRASE", "category_code": "THREAT", "severity": "HIGH"},
+    {"stable_key": "es.threat.voy_a_hacerte_dano", "pattern": "voy a hacerte daño", "match_mode": "PHRASE", "category_code": "THREAT", "severity": "HIGH"},
+    {"stable_key": "es.sexual.pornografia", "pattern": "pornografía", "match_mode": "TOKEN", "category_code": "SEXUAL_CONTENT", "severity": "HIGH"},
+    {"stable_key": "es.violent.desmembrar", "pattern": "desmembrar", "match_mode": "TOKEN", "category_code": "VIOLENT_CONTENT", "severity": "HIGH"},
+    {"stable_key": "es.spam.compra_en_mi_web", "pattern": "compra en mi web", "match_mode": "PHRASE", "category_code": "SPAM", "severity": "MEDIUM"}
+  ]
+}

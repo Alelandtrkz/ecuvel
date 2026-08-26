@@ -41,7 +41,17 @@ from app.models.partner_onboarding import (
     StoreOnboardingDocument,
     StoreVerificationReview,
 )
-from app.models.product_review import ProductReview, ProductReviewImage, ProductReviewReply
+from app.models.product_review import (
+    ProductReview,
+    ProductReviewImage,
+    ProductReviewReply,
+    ProductReviewRevision,
+    ReviewModerationAssessment,
+    ReviewModerationDecision,
+    ReviewModerationSignal,
+    ReviewModerationTerm,
+    ReviewNotificationOutbox,
+)
 from app.models.product_draft import ProductDraft, ProductDraftFile
 from app.models.product_moderation import ProductDraftModerationEvent, ProductDraftPublication
 from app.models.marketplace_policy import MarketplaceCommissionRule, StoreInventoryLocation
@@ -92,6 +102,12 @@ __all__ = [
     "ProductReview",
     "ProductReviewImage",
     "ProductReviewReply",
+    "ProductReviewRevision",
+    "ReviewModerationAssessment",
+    "ReviewModerationSignal",
+    "ReviewModerationDecision",
+    "ReviewModerationTerm",
+    "ReviewNotificationOutbox",
     "ProductDraft",
     "ProductDraftFile",
     "ProductDraftModerationEvent",

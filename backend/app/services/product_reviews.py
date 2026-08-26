@@ -23,6 +23,7 @@ from app.models import (
     Product,
     ProductReview,
     ProductReviewImage,
+    ProductReviewRevision,
     ProductReviewReply,
     ProductVariant,
     SellerOffer,
@@ -35,6 +36,12 @@ from app.services.private_storage import (
     delete_private_file,
     private_file_path,
 )
+from app.services.review_moderation import (
+    apply_review_moderation_decision,
+    assess_review_revision,
+    review_content_hash,
+)
+from app.models.enums import ReviewModerationDecisionAction, ReviewModerationDecisionSource
 
 
 class ProductReviewServiceError(Exception):
@@ -265,6 +272,8 @@ def public_review_variant_label(snapshot: dict | None) -> str | None:
 
 def _public_review_images(
     images: Iterable[ProductReviewImage],
+    *,
+    revision_id: uuid.UUID | None = None,
 ) -> tuple[PublicReviewImageView, ...]:
     return tuple(
         PublicReviewImageView(
@@ -274,20 +283,21 @@ def _public_review_images(
             height=image.height,
         )
         for image in images
+        if revision_id is None or image.revision_id == revision_id
     )
 
 
 def _clean_body(body: str, *, min_length: int, max_length: int) -> str:
-    normalized = " ".join((body or "").split())
-    if len(normalized) < min_length:
+    original = (body or "").strip()
+    if len(original) < min_length:
         raise ProductReviewServiceError(
             f"La reseña debe tener al menos {min_length} caracteres."
         )
-    if len(normalized) > max_length:
+    if len(original) > max_length:
         raise ProductReviewServiceError(
             f"La reseña no puede superar {max_length} caracteres."
         )
-    return normalized
+    return original
 
 
 def _clean_rating(value: object) -> int:
@@ -308,10 +318,11 @@ def _non_empty_uploads(files: Iterable[FileStorage]) -> list[FileStorage]:
     ]
 
 
-def stage_product_review_images(
+def _stage_product_review_images(
     files: Iterable[FileStorage],
     *,
     config: ProductReviewImageConfig,
+    staged_sink: list[StagedProductReviewImage],
 ) -> tuple[StagedProductReviewImage, ...]:
     uploads = _non_empty_uploads(files)
     if len(uploads) > config.max_images:
@@ -326,7 +337,7 @@ def stage_product_review_images(
     except OSError:
         pass
 
-    staged: list[StagedProductReviewImage] = []
+    staged = staged_sink
     total_size = 0
     for index, uploaded_file in enumerate(uploads):
         filename = secure_filename(uploaded_file.filename or "")[:255]
@@ -402,6 +413,21 @@ def stage_product_review_images(
     return tuple(staged)
 
 
+def stage_product_review_images(
+    files: Iterable[FileStorage],
+    *,
+    config: ProductReviewImageConfig,
+) -> tuple[StagedProductReviewImage, ...]:
+    staged: list[StagedProductReviewImage] = []
+    try:
+        return _stage_product_review_images(files, config=config, staged_sink=staged)
+    except Exception:
+        cleanup_staged_product_review_images(
+            staged, storage_root=config.root, include_final=False
+        )
+        raise
+
+
 def cleanup_staged_product_review_images(
     staged_images: Iterable[StagedProductReviewImage],
     *,
@@ -422,16 +448,23 @@ def promote_product_review_images(
     *,
     storage_root: str,
 ) -> None:
-    for staged in staged_images:
-        destination = private_file_path(storage_root, staged.storage_key)
-        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if destination.exists():
-            raise ProductReviewImageError("La clave privada de imagen ya existe.")
-        os.replace(staged.temporary_path, destination)
-        try:
-            os.chmod(destination, 0o600)
-        except OSError:
-            pass
+    promoted: list[Path] = []
+    try:
+        for staged in staged_images:
+            destination = private_file_path(storage_root, staged.storage_key)
+            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if destination.exists():
+                raise ProductReviewImageError("La clave privada de imagen ya existe.")
+            os.replace(staged.temporary_path, destination)
+            promoted.append(destination)
+            try:
+                os.chmod(destination, 0o600)
+            except OSError:
+                pass
+    except Exception:
+        for destination in promoted:
+            delete_private_file(destination)
+        raise
 
 
 def _eligible_order_item_row(
@@ -512,10 +545,22 @@ def create_product_review(
     )
     session.add(review)
     session.flush()
+    revision = ProductReviewRevision(
+        review_id=review.id,
+        revision_number=1,
+        rating=clean_rating,
+        body=clean_body,
+        content_hash=review_content_hash(clean_rating, clean_body),
+        created_by_user_id=user_id,
+    )
+    session.add(revision)
+    session.flush()
+    review.current_revision_id = revision.id
     for staged in staged_images:
         session.add(
             ProductReviewImage(
                 review_id=review.id,
+                revision_id=revision.id,
                 public_id=staged.public_id,
                 storage_key=staged.storage_key,
                 original_filename=staged.original_filename,
@@ -530,10 +575,86 @@ def create_product_review(
         session.flush()
     except IntegrityError as exc:
         raise ProductReviewDuplicateError("Este producto del pedido ya tiene reseña.") from exc
+    assess_review_revision(
+        session,
+        review_id=review.id,
+        revision_id=revision.id,
+    )
     return ProductReviewCreateResult(
         review_id=review.id,
         product_id=product.id,
         order_item_id=item.id,
+        status=review.status,
+    )
+
+
+def resubmit_product_review(
+    *,
+    session: Session,
+    review_id: uuid.UUID,
+    user_id: uuid.UUID,
+    rating: object,
+    body: str,
+    staged_images: tuple[StagedProductReviewImage, ...],
+    min_body_length: int,
+    max_body_length: int,
+) -> ProductReviewCreateResult:
+    clean_rating = _clean_rating(rating)
+    clean_body = _clean_body(body, min_length=min_body_length, max_length=max_body_length)
+    review = session.scalar(
+        select(ProductReview)
+        .where(ProductReview.id == review_id, ProductReview.user_id == user_id)
+        .with_for_update()
+    )
+    if review is None:
+        raise ProductReviewNotFoundError("No encontramos la reseña solicitada.")
+    if review.status != ProductReviewStatus.REJECTED:
+        raise ProductReviewModerationError("Solo puedes reenviar una reseña no publicada.")
+    next_number = (session.scalar(
+        select(func.max(ProductReviewRevision.revision_number)).where(
+            ProductReviewRevision.review_id == review.id
+        )
+    ) or 0) + 1
+    revision = ProductReviewRevision(
+        review_id=review.id,
+        revision_number=next_number,
+        rating=clean_rating,
+        body=clean_body,
+        content_hash=review_content_hash(clean_rating, clean_body),
+        created_by_user_id=user_id,
+    )
+    session.add(revision)
+    session.flush()
+    review.rating = clean_rating
+    review.body = clean_body
+    review.current_revision_id = revision.id
+    review.status = ProductReviewStatus.PENDING_REVIEW
+    review.public_rejection_reason = None
+    review.rejection_reason_code = None
+    review.moderation_source = None
+    review.moderated_by_user_id = None
+    review.moderated_at = None
+    review.moderation_notes = None
+    review.published_at = None
+    for staged in staged_images:
+        session.add(ProductReviewImage(
+            review_id=review.id,
+            revision_id=revision.id,
+            public_id=staged.public_id,
+            storage_key=staged.storage_key,
+            original_filename=staged.original_filename,
+            media_type=staged.media_type,
+            size_bytes=staged.size_bytes,
+            width=staged.width,
+            height=staged.height,
+            sort_order=staged.sort_order,
+        ))
+    session.flush()
+    assess_review_revision(session, review_id=review.id, revision_id=revision.id)
+    return ProductReviewCreateResult(
+        review_id=review.id,
+        product_id=review.product_id,
+        order_item_id=review.order_item_id,
         status=review.status,
     )
 
@@ -570,7 +691,10 @@ def own_review_for_order_item(
         status=review.status,
         public_rejection_reason=review.public_rejection_reason,
         created_at=review.created_at,
-        images=tuple(review.images),
+        images=tuple(
+            image for image in review.images
+            if image.revision_id == review.current_revision_id
+        ),
     )
 
 
@@ -762,7 +886,9 @@ def published_reviews_for_product(
                 ),
                 verified_purchase=True,
                 variant_label=_public_variant_label(item.variant_snapshot),
-                images=_public_review_images(review.images),
+                images=_public_review_images(
+                    review.images, revision_id=review.current_revision_id
+                ),
                 reply=(
                     PublicProductReviewReplyView(
                         store_name=review.reply.store.name,
@@ -811,29 +937,29 @@ def moderate_product_review(
     review = session.get(ProductReview, review_id, with_for_update=True)
     if review is None:
         raise ProductReviewNotFoundError("No existe la reseña indicada.")
-    target_status = (
-        ProductReviewStatus.PUBLISHED
-        if normalized_decision == "approve"
-        else ProductReviewStatus.REJECTED
-    )
+    target_status = ProductReviewStatus.PUBLISHED if normalized_decision == "approve" else ProductReviewStatus.REJECTED
     if review.status == target_status:
         return ProductReviewModerationResult(review.id, review.status, True)
     if review.status != ProductReviewStatus.PENDING_REVIEW:
         raise ProductReviewModerationError(
             "La reseña ya tiene una decisión distinta."
         )
-    effective_now = now or _utcnow()
-    if target_status == ProductReviewStatus.REJECTED:
-        public_reason = " ".join((reason or "").split())
-        if not public_reason:
-            raise ProductReviewModerationError("Indica un motivo público de rechazo.")
-        review.public_rejection_reason = public_reason[:500]
-    else:
-        review.published_at = effective_now
-        review.public_rejection_reason = None
-    review.status = target_status
-    review.moderated_by_user_id = moderator.id
-    review.moderated_at = effective_now
-    review.moderation_notes = " ".join((notes or "").split())[:1000] or None
-    session.flush()
+    if review.current_revision_id is None:
+        raise ProductReviewModerationError("La reseña no tiene una revisión vigente.")
+    try:
+        apply_review_moderation_decision(
+            session,
+            review_id=review.id,
+            revision_id=review.current_revision_id,
+            action=(ReviewModerationDecisionAction.APPROVE.value if normalized_decision == "approve" else ReviewModerationDecisionAction.REJECT.value),
+            source=ReviewModerationDecisionSource.MANUAL.value,
+            actor_user_id=moderator.id,
+            idempotency_key=f"legacy-manual:{review.id}:{review.current_revision_id}:{normalized_decision}",
+            reason_code=("OTHER" if normalized_decision == "reject" else None),
+            public_reason=reason,
+            internal_notes=notes,
+            now=now or _utcnow(),
+        )
+    except Exception as exc:
+        raise ProductReviewModerationError(str(exc)) from exc
     return ProductReviewModerationResult(review.id, review.status, False)

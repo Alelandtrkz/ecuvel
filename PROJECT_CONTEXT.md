@@ -1,6 +1,6 @@
 # Contexto permanente de ECUVEL
 
-Última actualización: 2026-08-17.
+Última actualización: 2026-08-21.
 
 Este archivo resume el estado funcional y técnico de ECUVEL para que una persona o agente pueda orientarse rápido antes de trabajar. No reemplaza las migraciones, pruebas ni el código fuente. Debe mantenerse como una memoria viva del proyecto.
 
@@ -53,7 +53,7 @@ Los favoritos son persistentes por usuario y producto. Se muestran en página pr
 
 ### Reseñas verificadas
 
-Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderación y solo se publican vía CLI. Las imágenes de reseña se guardan privadas hasta publicación. El detalle de producto muestra agregados, distribución, lista pública segura y fotos publicadas. La calificación de tienda se deriva de reseñas publicadas de productos vendidos por esa tienda.
+Las reseñas se crean por `OrderItem` entregado y conservan revisiones append-only. Un motor local, determinístico y versionado normaliza el texto y aplica reglas explícitas de términos, datos personales y spam: una revisión limpia sin imágenes se publica automáticamente, mientras cualquier señal, imagen o fallo del motor exige revisión manual. La calificación y el tono negativo nunca son señales de moderación. Admin dispone de `/admin/reviews` para revisar datos reales, aprobar o rechazar con motivo; el cliente puede corregir una reseña rechazada creando una nueva revisión sin borrar el historial. Las imágenes permanecen privadas hasta que la revisión vigente sea publicada y una imagen de una revisión antigua nunca vuelve a ser pública. Los rechazos generan una notificación durable mediante outbox, independiente de la transacción de moderación.
 
 ### Tiendas públicas
 
@@ -65,7 +65,7 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 
 ### ECUVEL Admin
 
-`/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. `/admin/products` implementa la cola real de moderación: tabs por estado, búsqueda, paginación, panel de prevalidación determinística, checklist manual, preview privada que reutiliza el detalle público, correcciones, rechazo, aprobación y publicación transaccional. `/admin/stores` implementa la moderación real del onboarding: listado y KPI, búsqueda/filtros, documentos y contrato privados, historial append-only, correcciones por campo/documento y aprobación de verificación con checklist. Aprobar solo habilita el contrato; no activa ni verifica la tienda. `/admin/fulfillment` es el centro de control de paquetes de entrada que ya fueron recibidos por ECUVEL: lista ubicación, custodia, destino, último movimiento, tiempo en estado y desviaciones; el detalle permite asignar/reasignar traslado y crear una corrección de ruta mediante POST. `/admin/scanner` es la superficie de ejecución física: recepción vendedor → ECUVEL, pickup a transportista, llegada inter-puntos, entrega completa al comprador y consulta read-only. Reutiliza los servicios canónicos de dominio con CSRF, rate limit, locking, idempotencia y Post/Redirect/Get. Los GET son read-only. Los módulos no implementados se identifican como “Próximamente”.
+`/admin` es una superficie administrativa separada de storefront y Partners. Solo admite usuarios autenticados, activos, con estado `ACTIVE` e `is_ecuvel_staff=True`. El Centro de Operaciones calcula KPIs, flujo, alertas, colas de atención, actividad reciente y búsqueda limitada a partir de tablas reales. `/admin/orders` ofrece listado paginado y filtrable por `Order`, detalle histórico por número público y revisión privada de comprobantes. `/admin/products` implementa la cola real de moderación: tabs por estado, búsqueda, paginación, panel de prevalidación determinística, checklist manual, preview privada que reutiliza el detalle público, correcciones, rechazo, aprobación y publicación transaccional. `/admin/reviews` implementa la cola real de reseñas: KPIs, tabs, filtros, búsqueda, paginación, drawer accesible, medios privados y decisiones manuales protegidas por `reviews.view`/`reviews.moderate`. `/admin/stores` implementa la moderación real del onboarding: listado y KPI, búsqueda/filtros, documentos y contrato privados, historial append-only, correcciones por campo/documento y aprobación de verificación con checklist. Aprobar solo habilita el contrato; no activa ni verifica la tienda. `/admin/fulfillment` es el centro de control de paquetes de entrada que ya fueron recibidos por ECUVEL: lista ubicación, custodia, destino, último movimiento, tiempo en estado y desviaciones; el detalle permite asignar/reasignar traslado y crear una corrección de ruta mediante POST. `/admin/scanner` es la superficie de ejecución física: recepción vendedor → ECUVEL, pickup a transportista, llegada inter-puntos, entrega completa al comprador y consulta read-only. Reutiliza los servicios canónicos de dominio con CSRF, rate limit, locking, idempotencia y Post/Redirect/Get. Los GET son read-only. Los módulos no implementados se identifican como “Próximamente”.
 
 ### Usuarios y personal ECUVEL
 
@@ -113,9 +113,11 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 ### Reseñas verificadas
 
 1. Solo un artículo con paquete entregado puede reseñarse.
-2. La reseña queda pendiente.
-3. Moderación CLI aprueba o rechaza.
-4. Solo reseñas publicadas afectan producto y tienda.
+2. El envío crea `ProductReviewRevision` y ejecuta el motor determinístico con su versión y hash de lexicón congelados en un assessment append-only.
+3. Texto limpio sin imágenes se publica automáticamente, incluso con una estrella o comentario negativo; señales, imágenes o fallo técnico conservan la reseña pendiente.
+4. ECUVEL staff con `reviews.moderate` decide manualmente desde `/admin/reviews`. Aprobar o rechazar añade una decisión; nunca edita assessments ni señales existentes.
+5. Un rechazo exige código de motivo, se notifica mediante outbox y permite al cliente enviar una nueva revisión. La revisión rechazada y su media permanecen en el historial privado.
+6. Solo la revisión vigente en estado `PUBLISHED` afecta producto y tienda y puede exponer sus imágenes.
 
 ### Onboarding vendedor
 
@@ -177,7 +179,9 @@ Las reseñas se crean por `OrderItem` entregado, quedan pendientes de moderació
 - `User.public_account_code` permite buscar al comprador en la entrega física, pero no sustituye documento, QR firmado, OTP ni otra autenticación; la confirmación humana es obligatoria.
 - Las transiciones de Fulfillment Admin son exclusivamente POST y actualizan atómicamente estado actual, traslado, custodia y evento; los eventos logísticos no se editan ni eliminan.
 - Los GET públicos o de cliente no deben mutar pagos, pedidos, reservas, inventario ni fulfillment.
-- La revisión web de comprobantes, productos y onboarding de tiendas está limitada a ECUVEL staff activo y reutiliza reglas transaccionales del dominio; otras moderaciones sensibles continúan por CLI cuando no existe una interfaz web explícita.
+- La revisión web de comprobantes, productos, reseñas y onboarding de tiendas está limitada a ECUVEL staff activo y reutiliza reglas transaccionales del dominio. Reseñas separa `reviews.view` de `reviews.moderate`; la decisión manual siempre es POST con CSRF, rate limit, bloqueo y control de revisión vigente.
+- La moderación automática de reseñas es determinística y local: no usa LLM, sentimiento, puntuación, visión ni proveedores externos. El lexicón se versiona en `app/data/review_moderation_es_v1.json` y se provisiona de forma idempotente con `flask review-moderation bootstrap`; lexicón vacío o error del motor debe fallar cerrado y dejar la reseña pendiente.
+- `ProductReviewRevision`, assessments, señales y decisiones son append-only. Una nueva corrección crea otra revisión y las imágenes quedan vinculadas a esa revisión; nunca se reutiliza media rechazada como pública.
 - No se deben ejecutar comandos destructivos como reset de Git, limpieza masiva, downgrade de base o borrado de volúmenes sin autorización explícita.
 
 ## Comandos y validaciones habituales
@@ -188,6 +192,8 @@ Desde `E:\ecuvel`:
 docker compose ps
 docker compose exec web flask --app wsgi:app db current
 docker compose exec web flask --app wsgi:app db heads
+docker compose exec web flask --app wsgi:app review-moderation bootstrap
+docker compose exec web flask --app wsgi:app review-notifications dispatch --limit 50
 docker compose exec web python -m compileall app
 docker compose exec web pytest -q tests/<archivo_o_filtro>
 git diff --check
@@ -207,7 +213,7 @@ Si la suite completa tarda demasiado, reportar timeout con precisión y conserva
 ## Límites actuales y pendientes conocidos
 
 - No hay pasarela de tarjeta real; tarjeta permanece deshabilitada.
-- Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes, la moderación/publicación de productos, la moderación del onboarding de tiendas y la gestión de usuarios/personal están disponibles para ECUVEL staff; reseñas continúan por CLI donde no haya una interfaz administrativa explícita.
+- Existe un Centro de Operaciones administrativo conectado con el listado y detalle real de pedidos. La revisión de comprobantes, la moderación/publicación de productos, la moderación de reseñas, la moderación del onboarding de tiendas y la gestión de usuarios/personal están disponibles para ECUVEL staff.
 - Pedidos ya tiene listado, detalle, revisión de pago y enlaces bidireccionales con Fulfillment, Scanner e Inventario. Fulfillment Admin ya tiene lista y detalle operativos. Escáner cubre las cinco operaciones físicas y la consulta rápida; Inventario cubre paquetes, esperados, existencias, movimientos y conteo físico por punto. Marketplace, finanzas, gestión completa de incidencias y auditoría completa todavía no tienen pantallas operativas propias.
 - No existe todavía un QR firmado, token de retiro de un solo uso ni OTP para entrega. El código público `U-...` solo identifica la cuenta y la entrega depende de verificación física explícita del operador.
 - No hay gestión completa de inventario para vendedores desde Partners.

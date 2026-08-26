@@ -44,7 +44,7 @@ ADMIN_NAVIGATION = (
             AdminNavigationItem("products", "Productos", "shapes", "admin.products", True),
             AdminNavigationItem("stores", "Tiendas", "store", "admin.stores", True),
             AdminNavigationItem("users", "Usuarios", "users", "admin.users", True),
-            AdminNavigationItem("reviews", "Reseñas", "message-square-text", "admin.module_placeholder"),
+            AdminNavigationItem("reviews", "Reseñas", "message-square-text", "admin.reviews", True),
         ),
     ),
     AdminNavigationGroup(
