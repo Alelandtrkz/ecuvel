@@ -132,6 +132,7 @@ from app.services.private_storage import (
     delete_private_file,
     private_file_path,
     stage_payment_proof,
+    verify_private_file,
 )
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -1714,6 +1715,12 @@ def upload_payment_proof(order_number: str):
             uploaded_file,
             root=current_app.config["PAYMENT_PROOF_UPLOAD_DIR"],
             max_bytes=current_app.config["PAYMENT_PROOF_MAX_BYTES"],
+            allowed_extensions=current_app.config[
+                "PAYMENT_PROOF_ALLOWED_EXTENSIONS"
+            ],
+            allowed_media_types=current_app.config[
+                "PAYMENT_PROOF_ALLOWED_MEDIA_TYPES"
+            ],
         )
         db.session.remove()
         database_session = db.session()
@@ -1783,12 +1790,13 @@ def private_payment_proof(proof_id: uuid.UUID):
         abort(404)
     proof, _ = row
     try:
-        path = private_file_path(
-            current_app.config["PAYMENT_PROOF_UPLOAD_DIR"], proof.storage_key
+        path = verify_private_file(
+            root=current_app.config["PAYMENT_PROOF_UPLOAD_DIR"],
+            storage_key=proof.storage_key,
+            size_bytes=proof.size_bytes,
+            sha256=proof.sha256,
         )
     except PrivateStorageError:
-        abort(404)
-    if not path.is_file():
         abort(404)
     response = send_file(
         path,

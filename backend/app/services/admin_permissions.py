@@ -20,6 +20,7 @@ ALL_PERMISSIONS = frozenset({
     "fulfillment.operate_assigned", "orders.view_related", "products.moderate",
     "stores.moderate", "operations.supervise",
     "reviews.view", "reviews.moderate",
+    "payments.view", "payments.review",
 })
 
 ROLE_PERMISSIONS: dict[StaffRole, frozenset[str]] = {

@@ -80,6 +80,8 @@ def stage_payment_proof(
     *,
     root: str | Path,
     max_bytes: int,
+    allowed_extensions: set[str] | frozenset[str] | tuple[str, ...],
+    allowed_media_types: set[str] | frozenset[str] | tuple[str, ...],
 ) -> StagedPrivateFile:
     filename = secure_filename(uploaded_file.filename or "")[:255]
     if not filename or "." not in filename:
@@ -87,14 +89,20 @@ def stage_payment_proof(
             "Selecciona un archivo JPEG, PNG o PDF válido."
         )
     extension = filename.rsplit(".", 1)[1].lower()
+    normalized_extensions = {
+        str(item).strip().lower().lstrip(".") for item in allowed_extensions
+    }
+    normalized_media_types = {
+        str(item).strip().lower() for item in allowed_media_types
+    }
     expected = _FORMATS.get(extension)
-    if expected is None:
+    if expected is None or extension not in normalized_extensions:
         raise InvalidPaymentProofFileError(
-            "Solo se aceptan archivos JPEG, PNG y PDF."
+            "El tipo de comprobante no está permitido."
         )
     declared_type = (uploaded_file.mimetype or "").lower()
     expected_type, final_extension = expected
-    if declared_type != expected_type:
+    if declared_type != expected_type or expected_type not in normalized_media_types:
         raise InvalidPaymentProofFileError(
             "La extensión y el tipo del archivo no coinciden."
         )
@@ -134,6 +142,16 @@ def stage_payment_proof(
             raise InvalidPaymentProofFileError(
                 "El contenido del archivo no coincide con un JPEG, PNG o PDF válido."
             )
+        if expected_type.startswith("image/"):
+            try:
+                with Image.open(temporary_path) as image:
+                    image.verify()
+                with Image.open(temporary_path) as image:
+                    image.load()
+            except (SyntaxError, UnidentifiedImageError, OSError) as exc:
+                raise InvalidPaymentProofFileError(
+                    "La imagen del comprobante no se puede procesar."
+                ) from exc
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise

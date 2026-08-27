@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 from sqlalchemy.orm import Session
 from werkzeug.datastructures import FileStorage
 
-from app.models import PaymentAttempt
+from app.models import PaymentAttempt, User
 from app.models.enums import PaymentMethod, PaymentStatus
 from app.services.payment_precheck.types import PaymentPrecheckConfig
 from app.services.payment_proofs import submit_bank_transfer_proof
@@ -95,6 +95,7 @@ def create_proof(
         expires_at=expires,
     )
     session.add(attempt)
+    session.get(User, base.operator_id).is_ecuvel_staff = True
     session.flush()
     content = data if data is not None else synthetic_receipt_png()
     staged = stage_payment_proof(
@@ -105,6 +106,8 @@ def create_proof(
         ),
         root=root,
         max_bytes=10 * 1024 * 1024,
+        allowed_extensions={"jpg", "jpeg", "png", "pdf"},
+        allowed_media_types={"image/jpeg", "image/png", "application/pdf"},
     )
     result = submit_bank_transfer_proof(
         session=session,

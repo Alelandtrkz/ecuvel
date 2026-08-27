@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+import re
 
 import pytest
+from PIL import Image
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from werkzeug.datastructures import FileStorage
 
 from app.extensions import db
 from app.models import (
+    AdminAuditEvent,
     InventoryBalance,
     InventoryMovement,
     InventoryReservation,
@@ -19,6 +23,7 @@ from app.models import (
     PaymentAttempt,
     PaymentProof,
     SellerOrder,
+    StaffProfile,
     User,
 )
 from app.models.enums import (
@@ -29,8 +34,12 @@ from app.models.enums import (
     ReservationStatus,
     SellerOrderStatus,
     SellerOrderDecisionStatus,
+    StaffEmploymentStatus,
+    StaffIdentificationType,
+    StaffRole,
     UserStatus,
 )
+from app.services.admin_permissions import user_has_permission
 from app.services.payment_proofs import (
     InvalidPaymentProofTransitionError,
     PaymentProofExpiredError,
@@ -56,9 +65,21 @@ from tests.factories import (
 
 
 pytestmark = pytest.mark.integration
-PNG = b"\x89PNG\r\n\x1a\n" + b"valid-private-proof"
-JPEG = b"\xff\xd8\xff\xe0" + b"valid-private-proof"
+
+
+def _image_bytes(image_format: str) -> bytes:
+    output = io.BytesIO()
+    Image.new("RGB", (2, 2), "white").save(output, format=image_format)
+    return output.getvalue()
+
+
+PNG = _image_bytes("PNG")
+JPEG = _image_bytes("JPEG")
 PDF = b"%PDF-1.7\nvalid-private-proof"
+PROOF_FORMAT_POLICY = {
+    "allowed_extensions": {"jpg", "jpeg", "png", "pdf"},
+    "allowed_media_types": {"image/jpeg", "image/png", "application/pdf"},
+}
 
 
 @pytest.fixture
@@ -95,6 +116,7 @@ def _graph(session: Session, *, expired: bool = False):
         password_hash="test",
         full_name="Admin Test",
         status=UserStatus.ACTIVE,
+        is_ecuvel_staff=True,
     )
     session.add_all([attempt, admin]); session.flush()
     if expired:
@@ -107,7 +129,12 @@ def _graph(session: Session, *, expired: bool = False):
 
 
 def _submit(session, tmp_path, attempt, buyer_id, *, key="upload-key"):
-    staged = stage_payment_proof(_upload(), root=tmp_path, max_bytes=10 * 1024 * 1024)
+    staged = stage_payment_proof(
+        _upload(),
+        root=tmp_path,
+        max_bytes=10 * 1024 * 1024,
+        **PROOF_FORMAT_POLICY,
+    )
     return submit_bank_transfer_proof(
         session=session,
         payment_attempt_id=attempt.id,
@@ -118,12 +145,38 @@ def _submit(session, tmp_path, attempt, buyer_id, *, key="upload-key"):
     )
 
 
+def _assign_staff_profile(
+    session: Session,
+    user: User,
+    *,
+    role: StaffRole,
+    employment_status: StaffEmploymentStatus = StaffEmploymentStatus.ACTIVE,
+) -> StaffProfile:
+    profile = StaffProfile(
+        user_id=user.id,
+        identification_type=StaffIdentificationType.OTHER,
+        identification_number_normalized=f"ID-{uuid.uuid4().hex[:12]}",
+        nationality_code="ECU",
+        role=role,
+        employment_status=employment_status,
+        employment_started_at=date.today(),
+    )
+    session.add(profile)
+    session.flush()
+    return profile
+
+
 @pytest.mark.parametrize(
     ("data", "filename", "media", "expected"),
     [(PNG, "a.png", "image/png", "image/png"), (JPEG, "a.jpeg", "image/jpeg", "image/jpeg"), (PDF, "a.pdf", "application/pdf", "application/pdf")],
 )
 def test_stage_accepts_supported_formats(tmp_path, data, filename, media, expected):
-    staged = stage_payment_proof(_upload(data, filename, media), root=tmp_path, max_bytes=1000)
+    staged = stage_payment_proof(
+        _upload(data, filename, media),
+        root=tmp_path,
+        max_bytes=1000,
+        **PROOF_FORMAT_POLICY,
+    )
     assert staged.media_type == expected
     assert staged.size_bytes == len(data)
     assert staged.temporary_path.stat().st_size == len(data)
@@ -135,14 +188,56 @@ def test_stage_accepts_supported_formats(tmp_path, data, filename, media, expect
 )
 def test_stage_rejects_invalid_files(tmp_path, data, filename, media):
     with pytest.raises(InvalidPaymentProofFileError):
-        stage_payment_proof(_upload(data, filename, media), root=tmp_path, max_bytes=1000)
+        stage_payment_proof(
+            _upload(data, filename, media),
+            root=tmp_path,
+            max_bytes=1000,
+            **PROOF_FORMAT_POLICY,
+        )
     assert not list((tmp_path / ".staging").glob("*.tmp")) if (tmp_path / ".staging").exists() else True
 
 
 def test_stage_rejects_oversize_and_cleans(tmp_path):
     with pytest.raises(PaymentProofFileTooLargeError):
-        stage_payment_proof(_upload(PNG + b"x" * 100), root=tmp_path, max_bytes=20)
+        stage_payment_proof(
+            _upload(PNG + b"x" * 100),
+            root=tmp_path,
+            max_bytes=20,
+            **PROOF_FORMAT_POLICY,
+        )
     assert not list((tmp_path / ".staging").glob("*.tmp"))
+
+
+def test_stage_rejects_format_excluded_by_canonical_policy(tmp_path):
+    with pytest.raises(InvalidPaymentProofFileError):
+        stage_payment_proof(
+            _upload(PNG, "proof.png", "image/png"),
+            root=tmp_path,
+            max_bytes=1000,
+            allowed_extensions={"jpg", "jpeg", "pdf"},
+            allowed_media_types={"image/jpeg", "application/pdf"},
+        )
+
+
+def test_stage_rejects_truncated_image_after_valid_signature(tmp_path):
+    with pytest.raises(InvalidPaymentProofFileError):
+        stage_payment_proof(
+            _upload(PNG[:20], "truncated.png", "image/png"),
+            root=tmp_path,
+            max_bytes=1000,
+            **PROOF_FORMAT_POLICY,
+        )
+    assert not list((tmp_path / ".staging").glob("*.tmp"))
+
+
+def test_webp_is_not_accepted_when_business_config_excludes_it(tmp_path):
+    with pytest.raises(InvalidPaymentProofFileError):
+        stage_payment_proof(
+            _upload(PNG, "proof.webp", "image/webp"),
+            root=tmp_path,
+            max_bytes=1000,
+            **PROOF_FORMAT_POLICY,
+        )
 
 
 def test_private_path_rejects_traversal(tmp_path):
@@ -179,7 +274,9 @@ def test_different_upload_key_conflicts(session: Session, tmp_path):
 
 def test_upload_rejects_expired_reservations(session: Session, tmp_path):
     base, _, _, _, attempt, _ = _graph(session, expired=True)
-    staged = stage_payment_proof(_upload(), root=tmp_path, max_bytes=1000)
+    staged = stage_payment_proof(
+        _upload(), root=tmp_path, max_bytes=1000, **PROOF_FORMAT_POLICY
+    )
     with pytest.raises(PaymentProofExpiredError):
         submit_bank_transfer_proof(session=session, payment_attempt_id=attempt.id, staged_file=staged, upload_idempotency_key="expired", storage_root=tmp_path, uploaded_by_user_id=base.buyer_id)
     delete_private_file(staged.temporary_path)
@@ -187,7 +284,9 @@ def test_upload_rejects_expired_reservations(session: Session, tmp_path):
 
 def test_upload_rejects_wrong_buyer(session: Session, tmp_path):
     base, _, _, _, attempt, admin = _graph(session)
-    staged = stage_payment_proof(_upload(), root=tmp_path, max_bytes=1000)
+    staged = stage_payment_proof(
+        _upload(), root=tmp_path, max_bytes=1000, **PROOF_FORMAT_POLICY
+    )
     with pytest.raises(PaymentProofServiceError):
         submit_bank_transfer_proof(session=session, payment_attempt_id=attempt.id, staged_file=staged, upload_idempotency_key="wrong", storage_root=tmp_path, uploaded_by_user_id=admin.id)
     delete_private_file(staged.temporary_path)
@@ -215,7 +314,7 @@ def test_reject_releases_and_creates_movement(session: Session, tmp_path):
     base, order_id, _, reservation_ids, attempt, admin = _graph(session)
     proof = _submit(session, tmp_path, attempt, base.buyer_id)
     on_hand = session.get(InventoryBalance, base.balance_id).on_hand_quantity
-    result = review_payment_proof(session=session, proof_id=proof.proof_id, decision="reject", reviewer_user_id=admin.id, storage_root=tmp_path, reason="No corresponde")
+    result = review_payment_proof(session=session, proof_id=proof.proof_id, decision="reject", reviewer_user_id=admin.id, storage_root=tmp_path, reason_code="OTHER", reason="No corresponde")
     assert result.proof_status == PaymentProofStatus.REJECTED
     assert session.get(Order, order_id).status == OrderStatus.CANCELLED
     assert session.get(InventoryReservation, reservation_ids[0]).status == ReservationStatus.RELEASED
@@ -230,11 +329,81 @@ def test_reject_requires_reason(session: Session, tmp_path):
         review_payment_proof(session=session, proof_id=proof.proof_id, decision="reject", reviewer_user_id=admin.id, storage_root=tmp_path)
 
 
+@pytest.mark.parametrize(
+    "reason_code",
+    [
+        "AMOUNT_MISMATCH",
+        "DESTINATION_ACCOUNT_MISMATCH",
+        "DUPLICATE_PROOF",
+        "UNREADABLE_PROOF",
+        "INVALID_DATE",
+        "UNVERIFIABLE_TRANSACTION",
+        "INVALID_DOCUMENT",
+        "OTHER",
+    ],
+)
+def test_reject_accepts_every_canonical_reason_code(
+    session: Session, tmp_path, reason_code
+):
+    base, _, _, _, attempt, admin = _graph(session)
+    proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
+    review_payment_proof(
+        session=session,
+        proof_id=proof_result.proof_id,
+        decision="reject",
+        reviewer_user_id=admin.id,
+        storage_root=tmp_path,
+        reason_code=reason_code,
+        reason="Motivo público para el comprador",
+        notes="Nota interna opcional",
+    )
+    proof = session.get(PaymentProof, proof_result.proof_id)
+    assert proof.rejection_reason_code == reason_code
+    assert proof.rejection_reason == "Motivo público para el comprador"
+    assert proof.review_notes == "Nota interna opcional"
+
+
+def test_reject_rejects_unknown_reason_code(session: Session, tmp_path):
+    base, _, _, _, attempt, admin = _graph(session)
+    proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
+    with pytest.raises(PaymentProofServiceError, match="motivo de rechazo"):
+        review_payment_proof(
+            session=session,
+            proof_id=proof_result.proof_id,
+            decision="reject",
+            reviewer_user_id=admin.id,
+            storage_root=tmp_path,
+            reason_code="UNKNOWN_CODE",
+            reason="Motivo público",
+        )
+    proof = session.get(PaymentProof, proof_result.proof_id)
+    assert proof.status == PaymentProofStatus.PENDING_REVIEW
+    assert proof.rejection_reason_code is None
+
+
+def test_approval_keeps_rejection_fields_null(session: Session, tmp_path):
+    base, _, _, _, attempt, admin = _graph(session)
+    proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
+    review_payment_proof(
+        session=session,
+        proof_id=proof_result.proof_id,
+        decision="approve",
+        reviewer_user_id=admin.id,
+        storage_root=tmp_path,
+        reason_code="OTHER",
+        reason="Este texto no corresponde a una aprobación",
+    )
+    proof = session.get(PaymentProof, proof_result.proof_id)
+    assert proof.status == PaymentProofStatus.APPROVED
+    assert proof.rejection_reason_code is None
+    assert proof.rejection_reason is None
+
+
 @pytest.mark.parametrize("decision", ["approve", "reject"])
 def test_review_replay_preserves_timestamp(session: Session, tmp_path, decision):
     base, _, _, _, attempt, admin = _graph(session)
     proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
-    kwargs = {"reason": "rechazo"} if decision == "reject" else {}
+    kwargs = {"reason_code": "OTHER", "reason": "rechazo"} if decision == "reject" else {}
     review_payment_proof(session=session, proof_id=proof_result.proof_id, decision=decision, reviewer_user_id=admin.id, storage_root=tmp_path, **kwargs)
     proof = session.get(PaymentProof, proof_result.proof_id); timestamp = proof.reviewed_at
     replay = review_payment_proof(session=session, proof_id=proof.id, decision=decision, reviewer_user_id=admin.id, storage_root=tmp_path, **kwargs)
@@ -246,7 +415,7 @@ def test_opposite_decision_is_rejected(session: Session, tmp_path):
     proof = _submit(session, tmp_path, attempt, base.buyer_id)
     review_payment_proof(session=session, proof_id=proof.proof_id, decision="approve", reviewer_user_id=admin.id, storage_root=tmp_path)
     with pytest.raises(InvalidPaymentProofTransitionError):
-        review_payment_proof(session=session, proof_id=proof.proof_id, decision="reject", reviewer_user_id=admin.id, storage_root=tmp_path, reason="x")
+        review_payment_proof(session=session, proof_id=proof.proof_id, decision="reject", reviewer_user_id=admin.id, storage_root=tmp_path, reason_code="OTHER", reason="x")
 
 
 def test_approve_rejects_expired_after_upload(session: Session, tmp_path):
@@ -270,6 +439,220 @@ def test_review_detects_modified_file(session: Session, tmp_path):
         review_payment_proof(session=session, proof_id=result.proof_id, decision="approve", reviewer_user_id=admin.id, storage_root=tmp_path)
 
 
+@pytest.mark.parametrize(
+    "role",
+    [
+        StaffRole.OPERATIONS_SUPERVISOR,
+        StaffRole.POINT_OPERATOR,
+        StaffRole.DELIVERY,
+        StaffRole.TRANSPORT_OPERATOR,
+        StaffRole.SUPPORT,
+    ],
+)
+def test_service_denies_staff_without_payment_review_and_preserves_graph(
+    session: Session, tmp_path, role
+):
+    base, order_id, _, reservation_ids, attempt, reviewer = _graph(session)
+    _assign_staff_profile(session, reviewer, role=role)
+    proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
+    seller_order = session.scalar(
+        select(SellerOrder).where(SellerOrder.order_id == order_id)
+    )
+
+    with pytest.raises(PaymentProofServiceError, match="permiso"):
+        review_payment_proof(
+            session=session,
+            proof_id=proof_result.proof_id,
+            decision="approve",
+            reviewer_user_id=reviewer.id,
+            storage_root=tmp_path,
+        )
+
+    assert not user_has_permission(reviewer, "payments.review")
+    assert session.get(PaymentProof, proof_result.proof_id).status == PaymentProofStatus.PENDING_REVIEW
+    assert session.get(PaymentAttempt, attempt.id).status == PaymentStatus.PROCESSING
+    assert session.get(Order, order_id).status == OrderStatus.PENDING_PAYMENT
+    assert seller_order.status == SellerOrderStatus.PENDING_PAYMENT
+    assert session.get(InventoryReservation, reservation_ids[0]).status == ReservationStatus.ACTIVE
+    assert session.scalar(select(func.count(AdminAuditEvent.id))) == 0
+
+
+def test_approval_audit_is_atomic_minimal_and_not_duplicated(
+    session: Session, tmp_path
+):
+    base, _, order_number, _, attempt, admin = _graph(session)
+    proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
+    review_payment_proof(
+        session=session,
+        proof_id=proof_result.proof_id,
+        decision="approve",
+        reviewer_user_id=admin.id,
+        storage_root=tmp_path,
+        notes="nota confidencial que no debe auditarse",
+    )
+    event = session.scalar(
+        select(AdminAuditEvent).where(AdminAuditEvent.action == "PAYMENT_APPROVED")
+    )
+    assert event is not None
+    assert event.actor_user_id == admin.id
+    assert event.metadata_json["payment_public_code"] == attempt.public_code
+    assert event.metadata_json["order_number"] == order_number
+    assert event.metadata_json["old_status"] == PaymentStatus.PROCESSING.value
+    assert event.metadata_json["new_status"] == PaymentStatus.APPROVED.value
+    serialized = str(event.metadata_json).lower()
+    assert "confidencial" not in serialized
+    assert "sha256" not in serialized
+    assert "ocr" not in serialized
+    assert "account" not in serialized
+
+    review_payment_proof(
+        session=session,
+        proof_id=proof_result.proof_id,
+        decision="approve",
+        reviewer_user_id=admin.id,
+        storage_root=tmp_path,
+    )
+    assert session.scalar(
+        select(func.count(AdminAuditEvent.id)).where(
+            AdminAuditEvent.action == "PAYMENT_APPROVED"
+        )
+    ) == 1
+
+
+def test_rejection_audit_contains_code_but_not_public_or_internal_text(
+    session: Session, tmp_path
+):
+    base, _, order_number, _, attempt, admin = _graph(session)
+    proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
+    review_payment_proof(
+        session=session,
+        proof_id=proof_result.proof_id,
+        decision="reject",
+        reviewer_user_id=admin.id,
+        storage_root=tmp_path,
+        reason_code="AMOUNT_MISMATCH",
+        reason="Texto público sensible",
+        notes="Texto interno sensible",
+    )
+    event = session.scalar(
+        select(AdminAuditEvent).where(AdminAuditEvent.action == "PAYMENT_REJECTED")
+    )
+    assert event is not None
+    assert event.actor_user_id == admin.id
+    assert event.metadata_json["payment_public_code"] == attempt.public_code
+    assert event.metadata_json["order_number"] == order_number
+    assert event.metadata_json["reason_code"] == "AMOUNT_MISMATCH"
+    serialized = str(event.metadata_json)
+    assert "Texto público" not in serialized
+    assert "Texto interno" not in serialized
+
+
+def test_rolled_back_decision_does_not_persist_audit(session: Session, tmp_path):
+    base, order_id, _, _, attempt, admin = _graph(session)
+    proof_result = _submit(session, tmp_path, attempt, base.buyer_id)
+    proof_id = proof_result.proof_id
+    session.commit()
+
+    review_payment_proof(
+        session=session,
+        proof_id=proof_id,
+        decision="approve",
+        reviewer_user_id=admin.id,
+        storage_root=tmp_path,
+    )
+    assert session.scalar(select(func.count(AdminAuditEvent.id))) == 1
+    session.rollback()
+    session.expire_all()
+
+    assert session.scalar(select(func.count(AdminAuditEvent.id))) == 0
+    assert session.get(PaymentProof, proof_id).status == PaymentProofStatus.PENDING_REVIEW
+    assert session.get(PaymentAttempt, attempt.id).status == PaymentStatus.PROCESSING
+    assert session.get(Order, order_id).status == OrderStatus.PENDING_PAYMENT
+
+
+def test_new_payment_attempt_gets_stable_pmt_code(session: Session):
+    _, _, _, _, attempt, _ = _graph(session)
+    original = attempt.public_code
+    assert re.fullmatch(r"PMT-\d{8}", original)
+    assert not original.startswith("PAY-")
+    assert original != f"PMT-{str(attempt.id)[:8]}"
+    attempt.status = PaymentStatus.PROCESSING
+    session.flush()
+    assert attempt.public_code == original
+
+
+@pytest.mark.concurrency
+def test_payment_attempt_public_code_sequence_is_concurrent_safe(
+    session: Session, session_factory, concurrent_runner
+):
+    _, order_id, _, _, _, _ = _graph(session)
+    session.commit()
+
+    def worker(barrier):
+        database_session = session_factory()
+        try:
+            barrier.wait()
+            with database_session.begin():
+                candidate = PaymentAttempt(
+                    order_id=order_id,
+                    method=PaymentMethod.BANK_TRANSFER,
+                    status=PaymentStatus.AWAITING_PROOF,
+                    amount=Decimal("20.00"),
+                    currency="USD",
+                    idempotency_key=f"concurrent-{uuid.uuid4().hex}",
+                    request_fingerprint=uuid.uuid4().hex.ljust(64, "0"),
+                    expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+                )
+                database_session.add(candidate)
+                database_session.flush()
+                return candidate.public_code
+        finally:
+            database_session.close()
+
+    codes, errors = concurrent_runner([worker, worker])
+    assert not errors
+    assert len(codes) == len(set(codes)) == 2
+    assert all(re.fullmatch(r"PMT-\d{8}", code) for code in codes)
+
+
+def test_database_allows_multiple_pending_but_only_one_approved_attempt_per_order(
+    session: Session,
+):
+    _, order_id, _, _, first, _ = _graph(session)
+    second = PaymentAttempt(
+        order_id=order_id,
+        method=PaymentMethod.BANK_TRANSFER,
+        status=PaymentStatus.AWAITING_PROOF,
+        amount=Decimal("20.00"),
+        currency="USD",
+        idempotency_key=f"pending-{uuid.uuid4().hex}",
+        request_fingerprint=uuid.uuid4().hex.ljust(64, "0"),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+    )
+    session.add(second)
+    session.flush()
+    assert first.id != second.id
+
+    first.status = PaymentStatus.APPROVED
+    first.approved_at = datetime.now(timezone.utc)
+    session.flush()
+    duplicate = PaymentAttempt(
+        order_id=order_id,
+        method=PaymentMethod.BANK_TRANSFER,
+        status=PaymentStatus.APPROVED,
+        amount=Decimal("20.00"),
+        currency="USD",
+        idempotency_key=f"approved-{uuid.uuid4().hex}",
+        request_fingerprint=uuid.uuid4().hex.ljust(64, "0"),
+        expires_at=datetime.now(timezone.utc) + timedelta(minutes=30),
+        approved_at=datetime.now(timezone.utc),
+    )
+    with pytest.raises(IntegrityError):
+        with session.begin_nested():
+            session.add(duplicate)
+            session.flush()
+
+
 def test_seller_order_transitions_with_approval(session: Session, tmp_path):
     base, _, _, _, attempt, admin = _graph(session)
     proof = _submit(session, tmp_path, attempt, base.buyer_id)
@@ -280,7 +663,7 @@ def test_seller_order_transitions_with_approval(session: Session, tmp_path):
 def test_seller_order_transitions_with_rejection(session: Session, tmp_path):
     base, _, _, _, attempt, admin = _graph(session)
     proof = _submit(session, tmp_path, attempt, base.buyer_id)
-    review_payment_proof(session=session, proof_id=proof.proof_id, decision="reject", reviewer_user_id=admin.id, storage_root=tmp_path, reason="inválido")
+    review_payment_proof(session=session, proof_id=proof.proof_id, decision="reject", reviewer_user_id=admin.id, storage_root=tmp_path, reason_code="INVALID_DOCUMENT", reason="inválido")
     assert session.scalar(select(SellerOrder.status)) == SellerOrderStatus.CANCELLED
 
 
@@ -328,6 +711,30 @@ def test_private_file_has_security_headers(client, app, session: Session, tmp_pa
     assert response.status_code == 200 and response.data == PNG
     assert response.headers["Cache-Control"] == "private, no-store"
     assert response.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_buyer_download_rejects_file_tampered_after_persistence(
+    client, app, session: Session, tmp_path
+):
+    _, _, order_number, attempt = _authorized_client(
+        client, app, session, tmp_path
+    )
+    client.get(f"/checkout/transferencia/{order_number}")
+    with client.session_transaction() as browser_session:
+        token = browser_session["payment_proof_uploads"][str(attempt.id)]
+    client.post(
+        f"/checkout/transferencia/{order_number}/comprobante",
+        data={
+            "upload_token": token,
+            "proof_file": (io.BytesIO(PNG), "proof.png", "image/png"),
+        },
+        content_type="multipart/form-data",
+    )
+    session.expire_all()
+    proof = session.scalar(select(PaymentProof))
+    private_file_path(tmp_path, proof.storage_key).write_bytes(PNG + b"tampered")
+
+    assert client.get(f"/pagos/comprobantes/{proof.id}/archivo").status_code == 404
 
 
 def test_route_rejects_fake_signature(client, app, session: Session, tmp_path):
@@ -418,6 +825,7 @@ def test_concurrent_opposite_decisions_are_atomic(
                         decision=decision,
                         reviewer_user_id=admin.id,
                         storage_root=tmp_path,
+                        reason_code="OTHER" if decision == "reject" else None,
                         reason="rechazo concurrente" if decision == "reject" else None,
                     )
             finally:

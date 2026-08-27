@@ -10,8 +10,10 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    Index,
     Numeric,
     String,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -24,6 +26,15 @@ from app.models.enums import PaymentMethod, PaymentProofStatus, PaymentStatus
 class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     __tablename__ = "payment_attempts"
 
+    public_code: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        unique=True,
+        index=True,
+        server_default=text(
+            "('PMT-' || lpad(nextval('payment_attempt_public_code_seq'::regclass)::text, 8, '0'))"
+        ),
+    )
     order_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="RESTRICT"),
@@ -88,6 +99,13 @@ class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         CheckConstraint(
             "amount > 0", name="payment_attempt_amount_positive"
         ),
+        Index(
+            "uq_payment_attempts_one_approved_per_order",
+            "order_id",
+            unique=True,
+            postgresql_where=text("status = 'APPROVED'"),
+            sqlite_where=text("status = 'APPROVED'"),
+        ),
     )
 
 
@@ -145,6 +163,9 @@ class PaymentProof(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     rejection_reason: Mapped[str | None] = mapped_column(
         String(500), nullable=True
     )
+    rejection_reason_code: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )
     review_notes: Mapped[str | None] = mapped_column(
         String(1000), nullable=True
     )
@@ -167,5 +188,12 @@ class PaymentProof(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     __table_args__ = (
         CheckConstraint(
             "size_bytes > 0", name="payment_proof_size_positive"
+        ),
+        CheckConstraint(
+            "rejection_reason_code IS NULL OR rejection_reason_code IN ("
+            "'AMOUNT_MISMATCH', 'DESTINATION_ACCOUNT_MISMATCH', "
+            "'DUPLICATE_PROOF', 'UNREADABLE_PROOF', 'INVALID_DATE', "
+            "'UNVERIFIABLE_TRANSACTION', 'INVALID_DOCUMENT', 'OTHER')",
+            name="payment_proof_rejection_reason_code_valid",
         ),
     )

@@ -46,7 +46,7 @@ from app.services.private_storage import (
     delete_private_file,
     private_file_path,
     promote_private_file,
-    stage_payment_proof,
+    stage_private_upload,
 )
 
 
@@ -412,7 +412,13 @@ def review_onboarding(
 
 def stage_partner_document(uploaded_file: FileStorage, *, root: str | Path, max_bytes: int) -> StagedPrivateFile:
     try:
-        return stage_payment_proof(uploaded_file, root=root, max_bytes=max_bytes)
+        return stage_private_upload(
+            uploaded_file,
+            root=root,
+            max_bytes=max_bytes,
+            allowed_extensions={"jpg", "jpeg", "png", "pdf"},
+            storage_prefix="onboarding-documents",
+        )
     except PrivateStorageError as exc:
         raise PartnerOnboardingValidationError("El documento no cumple el formato permitido.", {"documents": str(exc)}) from exc
 

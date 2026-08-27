@@ -270,8 +270,19 @@ def login():
 @auth.post("/cerrar-sesion")
 @login_required
 def logout():
+    from_admin = (
+        request.form.get("source") == "admin"
+        and bool(getattr(current_user, "is_ecuvel_staff", False))
+    )
     logout_user()
     flash("Sesión cerrada.", "success")
+    if from_admin:
+        return redirect(
+            url_for(
+                "auth.login_form",
+                next=url_for("admin.operations"),
+            )
+        )
     return redirect(url_for("storefront.home"))
 
 
@@ -432,12 +443,12 @@ def phone_login_request():
             PhoneOtpPurpose.LOGIN_OR_REGISTER,
             next_url,
         )
-        flash("Enviamos un cÃ³digo al nÃºmero indicado.", "success")
+        flash("Enviamos un código al número indicado.", "success")
         return redirect(url_for("auth.phone_verify_form"))
     except PhoneOtpCooldownError as exc:
         flash(str(exc), "error")
     except PhoneOtpError:
-        flash("Ingresa un nÃºmero telefÃ³nico vÃ¡lido.", "error")
+        flash("Ingresa un número telefónico válido.", "error")
     return render_template(
         "auth/phone_request.html",
         next_url=next_url,
@@ -488,14 +499,14 @@ def phone_verify_post():
             next_url = _safe_next(flask_session.get(PHONE_NEXT_SESSION_KEY))
             _clear_phone_challenge()
             _login_user_preserving_session(user)
-            flash("SesiÃ³n iniciada.", "success")
+            flash("Sesión iniciada.", "success")
             return redirect(next_url)
         if purpose == PhoneOtpPurpose.LOGIN_OR_REGISTER:
             flask_session[PHONE_REGISTRATION_CHALLENGE_SESSION_KEY] = str(challenge_id)
             _clear_phone_challenge()
             return redirect(url_for("auth.complete_phone_registration_form"))
         _clear_phone_challenge()
-        flash("TelÃ©fono verificado y vinculado.", "success")
+        flash("Teléfono verificado y vinculado.", "success")
         return redirect(url_for("account.profile"))
     except InvalidPhoneOtpError as exc:
         if database_session is not None:
@@ -537,7 +548,7 @@ def phone_resend_code():
             purpose,
             _safe_next(flask_session.get(PHONE_NEXT_SESSION_KEY)),
         )
-        flash("Enviamos un cÃ³digo al nÃºmero indicado.", "success")
+        flash("Enviamos un código al número indicado.", "success")
     except PhoneOtpCooldownError as exc:
         flash(str(exc), "error")
     return redirect(url_for("auth.phone_verify_form"))
@@ -596,7 +607,7 @@ def complete_phone_registration_post():
                     "success",
                 )
         else:
-            flash("Cuenta creada con tu telÃ©fono verificado.", "success")
+            flash("Cuenta creada con tu teléfono verificado.", "success")
         return redirect(url_for("account.profile"))
     except PhoneRegistrationError as exc:
         flash(str(exc), "error")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -17,6 +17,7 @@ from app.models import (
     PaymentAttempt,
     PaymentProof,
     SellerOrder,
+    StaffProfile,
     StoreMember,
     User,
 )
@@ -29,10 +30,14 @@ from app.models.enums import (
     ReservationStatus,
     SellerOrderDecisionStatus,
     SellerOrderStatus,
+    StaffEmploymentStatus,
+    StaffIdentificationType,
+    StaffRole,
     StoreMemberRole,
     UserStatus,
 )
 from app.services.admin_orders import get_admin_orders_page
+from app.services.admin_permissions import user_has_permission
 from app.services.private_storage import private_file_path
 from tests.factories import create_catalog_and_stock, create_order_items, reserve_item
 
@@ -59,6 +64,21 @@ def _staff(session, *, staff=True):
         is_ecuvel_staff=staff,
     )
     session.add(user)
+    session.flush()
+    return user
+
+
+def _staff_with_role(session, role: StaffRole):
+    user = _staff(session)
+    session.add(StaffProfile(
+        user=user,
+        identification_type=StaffIdentificationType.OTHER,
+        identification_number_normalized=f"ID-{uuid.uuid4().hex[:12]}",
+        nationality_code="ECU",
+        role=role,
+        employment_status=StaffEmploymentStatus.ACTIVE,
+        employment_started_at=date.today(),
+    ))
     session.flush()
     return user
 
@@ -252,6 +272,51 @@ def test_all_admin_order_routes_require_internal_staff(session, client, app, tmp
         _login(client, disabled)
         for url in urls:
             assert client.get(url).status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role",
+    [
+        StaffRole.OPERATIONS_SUPERVISOR,
+        StaffRole.POINT_OPERATOR,
+        StaffRole.DELIVERY,
+        StaffRole.TRANSPORT_OPERATOR,
+        StaffRole.SUPPORT,
+    ],
+)
+def test_payment_review_routes_deny_non_financial_staff_without_mutating_state(
+    session, client, app, tmp_path, role
+):
+    _, order, _, attempt, proof = _pending_proof_graph(session, app, tmp_path)
+    reviewer = _staff_with_role(session, role)
+    session.commit()
+    _login(client, reviewer)
+
+    assert not user_has_permission(reviewer, "payments.view")
+    assert not user_has_permission(reviewer, "payments.review")
+    assert client.get(f"/admin/orders/{order.order_number}/payment").status_code == 403
+    assert client.get(f"/admin/orders/{order.order_number}/payment-proof").status_code == 403
+    assert client.post(
+        f"/admin/orders/{order.order_number}/payment/approve"
+    ).status_code == 403
+    assert client.post(
+        f"/admin/orders/{order.order_number}/payment/reject",
+        data={"reason_code": "OTHER", "reason": "No autorizado"},
+    ).status_code == 403
+
+    session.expire_all()
+    assert session.get(PaymentProof, proof.id).status == PaymentProofStatus.PENDING_REVIEW
+    assert session.get(PaymentAttempt, attempt.id).status == PaymentStatus.PROCESSING
+    assert session.get(Order, order.id).status == OrderStatus.PENDING_PAYMENT
+
+
+def test_payment_permission_matrix_allows_only_super_admin_and_legacy_staff(session):
+    super_admin = _staff_with_role(session, StaffRole.SUPER_ADMIN)
+    legacy_admin = _staff(session)
+    assert user_has_permission(super_admin, "payments.view")
+    assert user_has_permission(super_admin, "payments.review")
+    assert user_has_permission(legacy_admin, "payments.view")
+    assert user_has_permission(legacy_admin, "payments.review")
 
 
 def test_orders_list_is_one_row_per_order_and_supports_filters(session, client, app, tmp_path):
@@ -491,7 +556,7 @@ def test_approve_web_uses_domain_service_and_is_not_available_by_get(session, cl
     assert client.post(endpoint).status_code == 302
     assert client.post(
         f"/admin/orders/{order.order_number}/payment/reject",
-        data={"reason": "Decisión opuesta"},
+        data={"reason_code": "OTHER", "reason": "Decisión opuesta"},
     ).status_code == 302
     session.expire_all()
     assert session.get(PaymentProof, proof.id).status == PaymentProofStatus.APPROVED
@@ -509,7 +574,13 @@ def test_reject_requires_reason_and_releases_reservations(session, client, app, 
     session.expire_all()
     assert session.get(PaymentProof, proof.id).status == PaymentProofStatus.PENDING_REVIEW
 
-    client.post(endpoint, data={"reason": "El monto no coincide"})
+    client.post(
+        endpoint,
+        data={
+            "reason_code": "AMOUNT_MISMATCH",
+            "reason": "El monto no coincide",
+        },
+    )
     session.expire_all()
     assert session.get(PaymentProof, proof.id).status == PaymentProofStatus.REJECTED
     assert session.get(PaymentAttempt, attempt.id).status == PaymentStatus.REJECTED

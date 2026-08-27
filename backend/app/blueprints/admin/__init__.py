@@ -101,6 +101,7 @@ from app.services.partner_onboarding import (
     PartnerOnboardingValidationError,
 )
 from app.services.payment_proofs import (
+    PAYMENT_REJECTION_REASON_LABELS,
     PaymentProofServiceError,
     review_payment_proof,
 )
@@ -142,6 +143,7 @@ from app.services.product_publication import (
 from app.services.admin_permissions import (
     ROLE_PERMISSIONS,
     admin_permission_required,
+    permissions_for_user,
     user_has_permission,
 )
 from app.services.admin_users import (
@@ -198,10 +200,43 @@ def ecuador_datetime(value) -> str:
 
 
 def _shell_context(section: str) -> dict:
+    profile = getattr(current_user, "staff_profile", None)
+    permissions = permissions_for_user(current_user)
+    visible_sections = {"operations"}
+    section_permissions = {
+        "orders": "orders.view_related",
+        "fulfillment": "fulfillment.view_assigned",
+        "scanner": "scanner.use",
+        "inventory": "inventory.view_assigned_point",
+        "products": "products.moderate",
+        "stores": "stores.moderate",
+        "reviews": "reviews.view",
+    }
+    visible_sections.update(
+        key for key, permission in section_permissions.items()
+        if permission in permissions
+    )
+    if "admin.users.view" in permissions or "admin.staff.view" in permissions:
+        visible_sections.add("users")
+    if profile is None or profile.role == StaffRole.SUPER_ADMIN:
+        visible_sections.update(
+            item.key
+            for group in ADMIN_NAVIGATION
+            for item in group.items
+            if not item.implemented
+        )
+        visible_sections.update(item.key for item in ADMIN_SECONDARY_NAVIGATION)
+
     return {
         "admin_navigation": ADMIN_NAVIGATION,
         "admin_secondary_navigation": ADMIN_SECONDARY_NAVIGATION,
         "current_admin_section": section,
+        "admin_permissions": permissions,
+        "admin_visible_sections": visible_sections,
+        "admin_session_profile": profile,
+        "admin_session_role_label": (
+            STAFF_ROLE_LABELS.get(profile.role) if profile is not None else None
+        ),
     }
 
 
@@ -1071,18 +1106,19 @@ def _payment_review_or_404(order_number: str):
 
 
 @admin.get("/orders/<string:order_number>/payment")
-@ecuvel_staff_required
+@admin_permission_required("payments.view")
 def payment_review(order_number: str):
     review = _payment_review_or_404(order_number)
     return render_template(
         "admin/payment_review.html",
         review=review,
+        payment_rejection_reason_labels=PAYMENT_REJECTION_REASON_LABELS,
         **_shell_context("orders"),
     )
 
 
 @admin.get("/orders/<string:order_number>/payment-proof")
-@ecuvel_staff_required
+@admin_permission_required("payments.view")
 def payment_proof(order_number: str):
     review = _payment_review_or_404(order_number)
     proof_id = review.payment.proof_id
@@ -1124,6 +1160,7 @@ def _review_payment(order_number: str, decision: str):
         flash("Este comprobante ya no admite decisiones.", "error")
         return redirect(url_for("admin.payment_review", order_number=order_number))
     reason = request.form.get("reason")
+    reason_code = request.form.get("reason_code")
     notes = request.form.get("notes")
     try:
         result = review_payment_proof(
@@ -1132,6 +1169,7 @@ def _review_payment(order_number: str, decision: str):
             decision=decision,
             reviewer_user_id=current_user.id,
             storage_root=current_app.config["PAYMENT_PROOF_UPLOAD_DIR"],
+            reason_code=reason_code,
             reason=reason,
             notes=notes,
         )
@@ -1157,14 +1195,14 @@ def _review_payment(order_number: str, decision: str):
 
 @admin.post("/orders/<string:order_number>/payment/approve")
 @limiter.limit("20 per hour")
-@ecuvel_staff_required
+@admin_permission_required("payments.review")
 def approve_payment(order_number: str):
     return _review_payment(order_number, "approve")
 
 
 @admin.post("/orders/<string:order_number>/payment/reject")
 @limiter.limit("20 per hour")
-@ecuvel_staff_required
+@admin_permission_required("payments.review")
 def reject_payment(order_number: str):
     return _review_payment(order_number, "reject")
 

@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    AdminAuditEvent,
     InventoryReservation,
     Order,
     OrderItem,
@@ -39,6 +40,7 @@ from app.services.private_storage import (
     promote_private_file,
     verify_private_file,
 )
+from app.services.admin_permissions import user_has_permission
 from app.services.seller_order_logistics import build_seller_order_delivery_window
 
 
@@ -64,6 +66,19 @@ class PaymentProofIntegrityError(PaymentProofServiceError):
 
 class PaymentProofExpiredError(PaymentProofServiceError):
     pass
+
+
+PAYMENT_REJECTION_REASON_LABELS = {
+    "AMOUNT_MISMATCH": "El monto no coincide",
+    "DESTINATION_ACCOUNT_MISMATCH": "La cuenta de destino no coincide",
+    "DUPLICATE_PROOF": "Comprobante duplicado",
+    "UNREADABLE_PROOF": "Comprobante ilegible",
+    "INVALID_DATE": "La fecha no es válida",
+    "UNVERIFIABLE_TRANSACTION": "La transacción no se puede verificar",
+    "INVALID_DOCUMENT": "Documento inválido",
+    "OTHER": "Otro",
+}
+PAYMENT_REJECTION_REASON_CODES = frozenset(PAYMENT_REJECTION_REASON_LABELS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +257,7 @@ def review_payment_proof(
     decision: str,
     reviewer_user_id: uuid.UUID,
     storage_root: str | Path,
+    reason_code: str | None = None,
     reason: str | None = None,
     notes: str | None = None,
     now: datetime | None = None,
@@ -251,8 +267,16 @@ def review_payment_proof(
         raise PaymentProofServiceError("La decisión debe ser approve o reject.")
     normalized_reason = " ".join((reason or "").split()) or None
     normalized_notes = " ".join((notes or "").split()) or None
+    normalized_reason_code = (reason_code or "").strip().upper() or None
     if normalized_decision == "reject" and not normalized_reason:
         raise PaymentProofServiceError("El rechazo requiere una razón.")
+    if (
+        normalized_decision == "reject"
+        and normalized_reason_code not in PAYMENT_REJECTION_REASON_CODES
+    ):
+        raise PaymentProofServiceError("Selecciona un motivo de rechazo válido.")
+    if normalized_decision == "approve":
+        normalized_reason_code = None
     if normalized_reason and len(normalized_reason) > 500:
         raise PaymentProofServiceError("La razón no puede superar 500 caracteres.")
     if normalized_notes and len(normalized_notes) > 1000:
@@ -263,6 +287,17 @@ def review_payment_proof(
     )
     if proof is None:
         raise PaymentProofNotFoundError("No existe el comprobante indicado.")
+    reviewer = session.scalar(
+        select(User).where(User.id == reviewer_user_id).with_for_update()
+    )
+    if (
+        reviewer is None
+        or reviewer.status != UserStatus.ACTIVE
+        or not user_has_permission(reviewer, "payments.review")
+    ):
+        raise PaymentProofServiceError(
+            "El revisor no está activo o no tiene permiso para revisar pagos."
+        )
     target = (
         PaymentProofStatus.APPROVED
         if normalized_decision == "approve"
@@ -281,11 +316,6 @@ def review_payment_proof(
         raise InvalidPaymentProofTransitionError(
             "El comprobante ya tiene una decisión opuesta."
         )
-    reviewer = session.scalar(
-        select(User).where(User.id == reviewer_user_id).with_for_update()
-    )
-    if reviewer is None or reviewer.status != UserStatus.ACTIVE:
-        raise PaymentProofServiceError("El revisor no existe o no está activo.")
     attempt = session.scalar(
         select(PaymentAttempt)
         .where(PaymentAttempt.id == proof.payment_attempt_id)
@@ -293,6 +323,7 @@ def review_payment_proof(
     )
     if attempt is None or attempt.status != PaymentStatus.PROCESSING:
         raise PaymentProofIntegrityError("El pago no está en revisión.")
+    old_payment_status = attempt.status.value
     order, seller_orders, _, reservations = _order_graph(
         session, attempt.order_id, lock=True
     )
@@ -375,7 +406,32 @@ def review_payment_proof(
     proof.reviewed_by_user_id = reviewer.id
     proof.reviewed_at = effective_now
     proof.rejection_reason = normalized_reason if target == PaymentProofStatus.REJECTED else None
+    proof.rejection_reason_code = (
+        normalized_reason_code if target == PaymentProofStatus.REJECTED else None
+    )
     proof.review_notes = normalized_notes
+    audit_metadata = {
+        "payment_attempt_id": str(attempt.id),
+        "payment_public_code": attempt.public_code,
+        "proof_id": str(proof.id),
+        "order_id": str(order.id),
+        "order_number": order.order_number,
+        "old_status": old_payment_status,
+        "new_status": attempt.status.value,
+    }
+    if target == PaymentProofStatus.REJECTED:
+        audit_metadata["reason_code"] = normalized_reason_code
+    session.add(
+        AdminAuditEvent(
+            actor_user_id=reviewer.id,
+            action=(
+                "PAYMENT_APPROVED"
+                if target == PaymentProofStatus.APPROVED
+                else "PAYMENT_REJECTED"
+            ),
+            metadata_json=audit_metadata,
+        )
+    )
     session.flush()
     return ReviewPaymentProofResult(
         proof.id, order.order_number, proof.status, attempt.status,

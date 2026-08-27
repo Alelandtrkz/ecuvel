@@ -140,7 +140,7 @@ def test_manual_rejection_still_works_after_failed_precheck(session, session_fac
     base, order_id, _, reservations, _, proof_id = create_proof(session, tmp_path); session.commit()
     _analyze(session_factory, tmp_path, proof_id, monkeypatch, PaymentProofPrecheckOutcome.FAILED)
     with session.begin():
-        review_payment_proof(session=session, proof_id=proof_id, decision="reject", reviewer_user_id=base.operator_id, storage_root=tmp_path, reason="No corresponde")
+        review_payment_proof(session=session, proof_id=proof_id, decision="reject", reviewer_user_id=base.operator_id, storage_root=tmp_path, reason_code="OTHER", reason="No corresponde")
     assert session.get(Order, order_id).status == OrderStatus.CANCELLED
     assert session.get(InventoryReservation, reservations[0]).status == ReservationStatus.RELEASED
 

@@ -309,12 +309,14 @@ def expire_pending_bank_transfer_payments_command(limit: int, dry_run: bool) -> 
     required=True,
 )
 @click.option("--reason", type=str)
+@click.option("--reason-code", type=str)
 @click.option("--notes", type=str)
 @with_appcontext
 def review_payment_proof_command(
     proof_id: uuid.UUID,
     decision: str,
     reason: str | None,
+    reason_code: str | None,
     notes: str | None,
 ) -> None:
     _print_analysis_summary(proof_id)
@@ -337,6 +339,7 @@ def review_payment_proof_command(
                 decision=decision,
                 reviewer_user_id=reviewer.id,
                 storage_root=current_app.config["PAYMENT_PROOF_UPLOAD_DIR"],
+                reason_code=reason_code,
                 reason=reason,
                 notes=notes,
             )

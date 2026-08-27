@@ -10,6 +10,7 @@
 {% endblock %}
 
 {% block header %}
+  {% set admin_identity_name = current_user.full_name or 'Operador ECUVEL' %}
   <aside class="admin-sidebar" id="admin-sidebar" aria-label="Navegación administrativa">
     <div class="admin-sidebar__brand">
       <a href="{{ url_for('admin.operations') }}" aria-label="ECUVEL Admin Panel">
@@ -28,18 +29,23 @@
         <i data-lucide="chevron-down" aria-hidden="true"></i>
       </button>
       <div class="admin-quick__menu" id="admin-quick-menu" data-admin-menu-panel hidden>
-        <a href="{{ url_for('admin.search', scope='orders') }}"><i data-lucide="search" aria-hidden="true"></i>Buscar pedido</a>
-        <a href="{{ url_for('admin.search', scope='users') }}"><i data-lucide="user-search" aria-hidden="true"></i>Buscar usuario</a>
-        <a href="{{ url_for('admin.scanner') }}"><i data-lucide="scan-line" aria-hidden="true"></i>Escanear paquete</a>
+        {% if 'orders.view_related' in admin_permissions %}<a href="{{ url_for('admin.search', scope='orders') }}"><i data-lucide="search" aria-hidden="true"></i>Buscar pedido</a>{% endif %}
+        {% if 'admin.users.view' in admin_permissions %}<a href="{{ url_for('admin.search', scope='users') }}"><i data-lucide="user-search" aria-hidden="true"></i>Buscar usuario</a>{% endif %}
+        {% if 'scanner.use' in admin_permissions %}<a href="{{ url_for('admin.scanner') }}"><i data-lucide="scan-line" aria-hidden="true"></i>Escanear paquete</a>{% endif %}
       </div>
     </div>
 
     <nav class="admin-sidebar__nav">
       {% for group in admin_navigation %}
-        <section>
-          <h2>{{ group.label }}</h2>
-          <ul>
-            {% for item in group.items %}
+        {% set visible = namespace(items=[]) %}
+        {% for item in group.items %}
+          {% if item.key in admin_visible_sections %}{% set visible.items = visible.items + [item] %}{% endif %}
+        {% endfor %}
+        {% if visible.items %}
+          <section>
+            <h2>{{ group.label }}</h2>
+            <ul>
+              {% for item in visible.items %}
               <li>
                 <a class="{{ 'is-active' if current_admin_section == item.key else '' }}"
                    href="{{ url_for(item.endpoint) if item.implemented else url_for(item.endpoint, module_key=item.key) }}"
@@ -50,23 +56,38 @@
                   {% if not item.implemented %}<small>Próx.</small>{% endif %}
                 </a>
               </li>
-            {% endfor %}
-          </ul>
-        </section>
+              {% endfor %}
+            </ul>
+          </section>
+        {% endif %}
       {% endfor %}
     </nav>
 
     <nav class="admin-sidebar__secondary" aria-label="Navegación secundaria">
       {% for item in admin_secondary_navigation %}
-        <a class="{{ 'is-active' if current_admin_section == item.key else '' }}"
-           href="{{ url_for(item.endpoint, module_key=item.key) }}"
-           {% if current_admin_section == item.key %}aria-current="page"{% endif %}>
-          <i data-lucide="{{ item.icon }}" aria-hidden="true"></i>
-          <span>{{ item.label }}</span>
-          <small>Próx.</small>
-        </a>
+        {% if item.key in admin_visible_sections %}
+          <a class="{{ 'is-active' if current_admin_section == item.key else '' }}"
+             href="{{ url_for(item.endpoint, module_key=item.key) }}"
+             {% if current_admin_section == item.key %}aria-current="page"{% endif %}>
+            <i data-lucide="{{ item.icon }}" aria-hidden="true"></i>
+            <span>{{ item.label }}</span>
+            <small>Próx.</small>
+          </a>
+        {% endif %}
       {% endfor %}
     </nav>
+
+    <div class="admin-sidebar__session">
+      <div>
+        <strong>{{ admin_identity_name }}</strong>
+        {% if admin_session_profile %}<span>{{ admin_session_profile.employee_code }} · {{ admin_session_role_label }}</span>{% endif %}
+      </div>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="source" value="admin">
+        <button type="submit"><i data-lucide="log-out" aria-hidden="true"></i>Cerrar sesión</button>
+      </form>
+    </div>
   </aside>
   <button class="admin-sidebar-backdrop" type="button" data-admin-sidebar-close aria-label="Cerrar navegación" hidden></button>
 
@@ -82,18 +103,46 @@
              placeholder="Buscar pedido, usuario, paquete o tienda..." autocomplete="off">
     </form>
     <div class="admin-topbar__actions">
-      <a class="admin-topbar__scan" href="{{ url_for('admin.scanner') }}">
-        <i data-lucide="scan-line" aria-hidden="true"></i><span>Escanear</span>
-      </a>
+      {% if 'scanner.use' in admin_permissions %}
+        <a class="admin-topbar__scan" href="{{ url_for('admin.scanner') }}">
+          <i data-lucide="scan-line" aria-hidden="true"></i><span>Escanear</span>
+        </a>
+      {% endif %}
       <button type="button" aria-label="Notificaciones · Próximamente" title="Notificaciones · Próximamente" disabled>
         <i data-lucide="bell" aria-hidden="true"></i>
       </button>
-      <a href="{{ url_for('admin.module_placeholder', module_key='support') }}" aria-label="Ayuda">
-        <i data-lucide="circle-help" aria-hidden="true"></i>
-      </a>
-      <div class="admin-profile" title="{{ current_user.full_name }}">
-        <span>{{ (current_user.full_name or 'EC')[:2] | upper }}</span>
-        <span class="admin-profile__name">{{ (current_user.full_name or 'Operador ECUVEL').split()[0] }}</span>
+      {% if 'support' in admin_visible_sections %}
+        <a href="{{ url_for('admin.module_placeholder', module_key='support') }}" aria-label="Ayuda">
+          <i data-lucide="circle-help" aria-hidden="true"></i>
+        </a>
+      {% endif %}
+      <div class="admin-profile" data-admin-profile-menu>
+        <button class="admin-profile__trigger" type="button" data-admin-profile-trigger
+                aria-expanded="false" aria-haspopup="menu" aria-controls="admin-profile-menu"
+                title="{{ admin_identity_name }}">
+          <span class="admin-profile__avatar" aria-hidden="true">{{ admin_identity_name[:2] | upper }}</span>
+          <span class="admin-profile__summary">
+            <strong>{{ admin_identity_name.split()[0] }}</strong>
+            {% if admin_session_profile %}<small>{{ admin_session_profile.employee_code }}</small>{% endif %}
+          </span>
+          <i class="admin-profile__chevron" data-lucide="chevron-down" aria-hidden="true"></i>
+        </button>
+        <div class="admin-profile__menu" id="admin-profile-menu" data-admin-profile-panel role="menu" hidden>
+          <div class="admin-profile__identity">
+            <strong>{{ admin_identity_name }}</strong>
+            {% if admin_session_profile %}
+              <span>{{ admin_session_profile.employee_code }}</span>
+              <span>{{ admin_session_role_label }}</span>
+            {% else %}
+              <span>Administrador ECUVEL</span>
+            {% endif %}
+          </div>
+          <form method="post" action="{{ url_for('auth.logout') }}" role="none">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="source" value="admin">
+            <button type="submit" role="menuitem"><i data-lucide="log-out" aria-hidden="true"></i>Cerrar sesión</button>
+          </form>
+        </div>
       </div>
     </div>
   </header>

@@ -99,6 +99,7 @@
     <div class="admin-dialog__icon admin-dialog__icon--danger"><i data-lucide="triangle-alert" aria-hidden="true"></i></div>
     <h2 id="reject-payment-title">Rechazar pago</h2>
     <p>El rechazo cancela el pedido y libera las reservas activas. Indica un motivo verificable.</p>
+    <label>Categoría del rechazo<select name="reason_code" required><option value="">Selecciona un motivo</option>{% for code, label in payment_rejection_reason_labels.items() %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</select></label>
     <label>Motivo del rechazo<textarea name="reason" maxlength="500" rows="4" required placeholder="Describe por qué el comprobante no puede aprobarse…"></textarea></label>
     <div class="admin-dialog__actions"><button type="button" data-modal-close>Cancelar</button><button class="admin-button admin-button--danger" type="submit">Confirmar rechazo</button></div>
   </form>

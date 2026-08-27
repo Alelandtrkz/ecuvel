@@ -298,17 +298,6 @@ def test_ecuador_partial_day_windows_and_real_daily_metrics(session):
                 approved_at=datetime(2026, 8, 8, 7, 0, tzinfo=timezone.utc),
             ),
             PaymentAttempt(
-                order_id=today.id,
-                method=PaymentMethod.BANK_TRANSFER,
-                status=PaymentStatus.APPROVED,
-                amount=Decimal("19.95"),
-                currency="USD",
-                idempotency_key=f"pay-{_token()}",
-                request_fingerprint="d" * 64,
-                expires_at=now + timedelta(hours=1),
-                approved_at=datetime(2026, 8, 8, 8, 0, tzinfo=timezone.utc),
-            ),
-            PaymentAttempt(
                 order_id=yesterday.id,
                 method=PaymentMethod.BANK_TRANSFER,
                 status=PaymentStatus.APPROVED,
