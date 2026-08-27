@@ -909,7 +909,28 @@ def build_payment_timeline(
         entries.append(PaymentTimelineEntry(
             attempt.status.value.lower(), label, _utc(attempt.failed_at), "danger"
         ))
-    return tuple(sorted(entries, key=lambda item: (item.timestamp, item.key)))
+    semantic_order = {
+        "payment_started": 10,
+        "awaiting_proof": 20,
+        "proof_received": 30,
+        "precheck_started": 40,
+        "precheck_completed": 50,
+        "precheck_failed": 50,
+        "manual_review": 60,
+        "approved": 70,
+        "rejected": 70,
+        PaymentStatus.FAILED.value.lower(): 70,
+        PaymentStatus.CANCELLED.value.lower(): 70,
+        PaymentStatus.EXPIRED.value.lower(): 70,
+    }
+    return tuple(sorted(
+        entries,
+        key=lambda item: (
+            item.timestamp,
+            semantic_order.get(item.key, 100),
+            item.key,
+        ),
+    ))
 
 
 def get_order_payment_attempt_history(

@@ -50,7 +50,7 @@ ADMIN_NAVIGATION = (
     AdminNavigationGroup(
         "Finanzas",
         (
-            AdminNavigationItem("payments", "Pagos", "banknote", "admin.module_placeholder"),
+            AdminNavigationItem("payments", "Pagos", "banknote", "admin.payments", True),
             AdminNavigationItem("payouts", "Liquidaciones", "wallet-cards", "admin.module_placeholder"),
         ),
     ),

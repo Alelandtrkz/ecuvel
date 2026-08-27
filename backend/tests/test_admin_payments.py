@@ -479,6 +479,27 @@ def test_detail_is_safe_and_timeline_uses_only_real_timestamps(session: Session)
         get_admin_payment_detail(session, "PMT-99999999")
 
 
+def test_timeline_uses_semantic_order_when_events_share_timestamp(session: Session):
+    buyer = _buyer(session)
+    order = _order(session, buyer, amount=Decimal("11.00"))
+    created = datetime(2026, 8, 25, 20, tzinfo=timezone.utc)
+    attempt = _attempt(
+        session,
+        order,
+        code="PMT-00000040",
+        status=PaymentStatus.AWAITING_PROOF,
+        created_at=created,
+    )
+
+    timeline = build_payment_timeline(attempt, None, None)
+
+    assert [entry.key for entry in timeline] == [
+        "payment_started",
+        "awaiting_proof",
+    ]
+    assert timeline[0].timestamp == timeline[1].timestamp == created
+
+
 def test_failed_precheck_timeline_does_not_claim_completion(session: Session):
     buyer = _buyer(session)
     order = _order(session, buyer, amount=Decimal("11.00"))

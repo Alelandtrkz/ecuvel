@@ -1,0 +1,216 @@
+{% extends "admin/base.html" %}
+{% block admin_title %}Pagos · ECUVEL Admin{% endblock %}
+
+{% macro status_tone(status) -%}
+  {%- if status == 'APPROVED' -%}success
+  {%- elif status in ('REJECTED', 'FAILED') -%}danger
+  {%- elif status == 'PROCESSING' -%}warning
+  {%- elif status in ('CANCELLED', 'EXPIRED') -%}neutral
+  {%- else -%}info
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro status_badge(status, label) -%}
+  <span class="admin-payment-status admin-payment-status--{{ status_tone(status) }}">
+    <i data-lucide="{{ 'circle-check' if status == 'APPROVED' else ('triangle-alert' if status in ('REJECTED', 'FAILED') else ('ban' if status in ('CANCELLED', 'EXPIRED') else ('clock-3' if status == 'PROCESSING' else 'hourglass'))) }}" aria-hidden="true"></i>
+    {{ label }}
+  </span>
+{%- endmacro %}
+
+{% macro clear_filter_url() -%}
+  {{ payment_url(q=none, method=none, status=none, date_from=none, date_to=none,
+      amount_min=none, amount_max=none, analysis=none, page=none, detail=none) }}
+{%- endmacro %}
+
+{% block styles %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin-payments.css') }}">
+{% endblock %}
+
+{% block admin_content %}
+<div class="admin-page admin-payments-page" data-admin-payments>
+  <header class="admin-page-heading admin-payments-heading">
+    <div>
+      <p class="admin-eyebrow">Finanzas</p>
+      <h1>Pagos</h1>
+      <p>Consulta y gestiona los intentos de pago realizados en ECUVEL.</p>
+    </div>
+  </header>
+
+  <section class="admin-payment-kpis" aria-label="Resumen de pagos">
+    <article class="admin-payment-kpi admin-payment-kpi--success">
+      <div><span>Cobrado hoy</span><i data-lucide="circle-dollar-sign" aria-hidden="true"></i></div>
+      <strong>{{ kpis.collected_today_amount|money('USD') }}</strong>
+      <small>{{ kpis.collected_today_count }} {{ 'pago aprobado' if kpis.collected_today_count == 1 else 'pagos aprobados' }}</small>
+    </article>
+    <article class="admin-payment-kpi admin-payment-kpi--warning">
+      <div><span>En revisión</span><i data-lucide="clipboard-clock" aria-hidden="true"></i></div>
+      <strong>{{ kpis.manual_review_count }}</strong>
+      <small>Comprobantes pendientes{% if kpis.manual_review_flagged_count %} · {{ kpis.manual_review_flagged_count }} {{ 'requiere' if kpis.manual_review_flagged_count == 1 else 'requieren' }} atención{% endif %}</small>
+    </article>
+    <article class="admin-payment-kpi admin-payment-kpi--info">
+      <div><span>Esperando comprobante</span><i data-lucide="hourglass" aria-hidden="true"></i></div>
+      <strong>{{ kpis.awaiting_proof_count }}</strong>
+      <small>Transferencias pendientes{% if kpis.awaiting_proof_next_expiration_at %} · próxima expiración {{ kpis.awaiting_proof_next_expiration_at|ecuador_datetime }}{% endif %}</small>
+    </article>
+    <article class="admin-payment-kpi admin-payment-kpi--danger">
+      <div><span>Fallidos / rechazados hoy</span><i data-lucide="circle-x" aria-hidden="true"></i></div>
+      <strong>{{ kpis.failed_rejected_today_count }}</strong>
+      <small>Hoy</small>
+    </article>
+  </section>
+
+  <section class="admin-card admin-payment-panel" aria-labelledby="payment-results-title">
+    <form class="admin-payment-filters" method="get" action="{{ url_for('admin.payments') }}" role="search">
+      <input type="hidden" name="tab" value="{{ active_tab }}">
+      <input type="hidden" name="sort_by" value="{{ payment_query.get('sort_by', 'created_at') }}">
+      <input type="hidden" name="sort_direction" value="{{ payment_query.get('sort_direction', 'desc') }}">
+      <label class="admin-payment-search">
+        <span class="sr-only">Buscar pagos</span>
+        <i data-lucide="search" aria-hidden="true"></i>
+        <input type="search" name="q" maxlength="120" value="{{ payment_query.get('q', '') }}" placeholder="Buscar por ID, pedido, cliente o referencia…">
+      </label>
+      <label>
+        <span class="sr-only">Método</span>
+        <select name="method" aria-label="Método de pago">
+          <option value="">Todos los métodos</option>
+          {% for value, label in payment_method_labels.items() %}<option value="{{ value }}" {{ 'selected' if payment_query.get('method') == value }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>
+        <span class="sr-only">Estado</span>
+        <select name="status" aria-label="Estado del pago">
+          <option value="">Todos los estados</option>
+          {% for value, label in payment_statuses %}<option value="{{ value }}" {{ 'selected' if payment_query.get('status') == value }}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="admin-button" type="submit"><i data-lucide="search" aria-hidden="true"></i>Buscar</button>
+      <button class="admin-payment-advanced-toggle" type="button" data-payment-advanced-trigger aria-expanded="{{ 'true' if has_advanced_payment_filters else 'false' }}" aria-controls="payment-advanced-filters">
+        <i data-lucide="sliders-horizontal" aria-hidden="true"></i><span>Más filtros</span>
+      </button>
+      <div class="admin-payment-advanced" id="payment-advanced-filters" data-payment-advanced-panel {% if not has_advanced_payment_filters %}hidden{% endif %}>
+        <label><span>Desde</span><input type="date" name="date_from" value="{{ payment_query.get('date_from', '') }}"></label>
+        <label><span>Hasta</span><input type="date" name="date_to" value="{{ payment_query.get('date_to', '') }}"></label>
+        <label><span>Monto mínimo</span><input type="number" name="amount_min" min="0" step="0.01" value="{{ payment_query.get('amount_min', '') }}"></label>
+        <label><span>Monto máximo</span><input type="number" name="amount_max" min="0" step="0.01" value="{{ payment_query.get('amount_max', '') }}"></label>
+        <label><span>Prevalidación</span><select name="analysis"><option value="">Todas</option>{% for value, label in payment_analysis_labels.items() %}<option value="{{ value }}" {{ 'selected' if payment_query.get('analysis') == value }}>{{ label }}</option>{% endfor %}</select></label>
+      </div>
+      {% if has_payment_filters %}<a class="admin-payment-clear" href="{{ clear_filter_url() }}"><i data-lucide="filter-x" aria-hidden="true"></i>Limpiar filtros</a>{% endif %}
+    </form>
+
+    <nav class="admin-payment-tabs" aria-label="Estados de pagos">
+      {% for key, label in payment_tabs %}
+        <a class="{{ 'is-active' if key == active_tab }}" href="{{ payment_url(tab=key, page=none, detail=none) }}" {% if key == active_tab %}aria-current="page"{% endif %}>{{ label }}{% if key == 'manual_review' and kpis.manual_review_count %}<span>{{ kpis.manual_review_count }}</span>{% endif %}</a>
+      {% endfor %}
+    </nav>
+
+    <div class="admin-payment-results-heading">
+      <div><h2 id="payment-results-title">Resultados</h2><p>{{ payments.total }} {{ 'intento' if payments.total == 1 else 'intentos' }} de pago</p></div>
+    </div>
+
+    {% if payments.items %}
+      <div class="admin-payment-table-wrap">
+        <table class="admin-payment-table">
+          <thead><tr><th>Pago / pedido</th><th>Cliente</th><th>Método / monto</th><th>Estado / verificación</th><th>Fecha</th><th>Acción</th></tr></thead>
+          <tbody>
+            {% for row in payments.items %}
+              <tr>
+                <td><div class="admin-payment-code-line"><strong class="admin-payment-code">{{ row.payment_public_code }}</strong><button type="button" data-copy-payment-reference="{{ row.payment_public_code }}" aria-label="Copiar {{ row.payment_public_code }}"><i data-lucide="copy" aria-hidden="true"></i></button></div><small>Pedido {{ row.order_number }}</small></td>
+                <td><div class="admin-payment-customer"><span>{{ row.customer.display_name[:1]|upper }}</span><div><strong>{{ row.customer.display_name }}</strong><small>{{ row.customer.public_code }}</small></div></div></td>
+                <td><strong>{{ row.amount|money(row.currency) }}</strong><small><i data-lucide="{{ 'landmark' if row.method == 'BANK_TRANSFER' else 'credit-card' }}" aria-hidden="true"></i>{{ payment_method_labels.get(row.method, row.method) }}</small></td>
+                <td>{{ status_badge(row.status, row.status_label_es) }}<small class="admin-payment-verification">{{ row.verification_summary }}</small></td>
+                <td><time datetime="{{ row.relevant_at.isoformat() }}">{{ row.relevant_at|ecuador_datetime }}</time></td>
+                <td><a class="admin-payment-detail-link" href="{{ payment_url(detail=row.payment_public_code) }}" data-payment-detail-link><i data-lucide="eye" aria-hidden="true"></i>Ver detalle</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <footer class="admin-payment-pagination">
+        <p>Mostrando {{ ((payments.page - 1) * payments.per_page) + 1 }} a {{ [payments.page * payments.per_page, payments.total]|min }} de {{ payments.total }} resultados</p>
+        <nav aria-label="Paginación de pagos">
+          {% if payments.has_prev %}<a href="{{ payment_url(page=payments.page - 1, detail=none) }}" aria-label="Página anterior"><i data-lucide="chevron-left" aria-hidden="true"></i></a>{% else %}<span aria-hidden="true"><i data-lucide="chevron-left"></i></span>{% endif %}
+          {% for number in pagination_window %}
+            {% if number %}<a class="{{ 'is-active' if number == payments.page }}" href="{{ payment_url(page=number, detail=none) }}" {% if number == payments.page %}aria-current="page"{% endif %}>{{ number }}</a>{% else %}<span class="is-gap">…</span>{% endif %}
+          {% endfor %}
+          {% if payments.has_next %}<a href="{{ payment_url(page=payments.page + 1, detail=none) }}" aria-label="Página siguiente"><i data-lucide="chevron-right" aria-hidden="true"></i></a>{% else %}<span aria-hidden="true"><i data-lucide="chevron-right"></i></span>{% endif %}
+        </nav>
+      </footer>
+    {% else %}
+      <div class="admin-payment-empty"><i data-lucide="receipt-text" aria-hidden="true"></i><h2>{% if has_payment_filters %}No encontramos pagos con estos filtros{% else %}No hay intentos de pago{% endif %}</h2><p>{% if has_payment_filters %}Prueba otra búsqueda o limpia los filtros aplicados.{% else %}Los intentos aparecerán aquí cuando los clientes inicien un pago.{% endif %}</p>{% if has_payment_filters %}<a href="{{ clear_filter_url() }}">Limpiar filtros</a>{% endif %}</div>
+    {% endif %}
+  </section>
+</div>
+
+{% if detail %}
+  {% set close_url = payment_url(detail=none) %}
+  <div class="admin-payment-drawer-layer" data-payment-drawer-layer>
+    <a class="admin-payment-drawer-backdrop" href="{{ close_url }}" data-payment-drawer-close aria-label="Cerrar detalle del pago"></a>
+    <aside class="admin-payment-drawer" data-payment-drawer role="dialog" aria-modal="true" aria-labelledby="payment-drawer-title" tabindex="-1">
+      <header>
+        <div><h2 id="payment-drawer-title">Detalle del pago {{ detail.payment_public_code }}</h2>{{ status_badge(detail.status, detail.status_label_es) }}</div>
+        <a href="{{ close_url }}" data-payment-drawer-close aria-label="Cerrar detalle"><i data-lucide="x" aria-hidden="true"></i></a>
+      </header>
+      <div class="admin-payment-drawer-body">
+        <section aria-labelledby="payment-summary-title">
+          <h3 id="payment-summary-title">Resumen de la transacción</h3>
+          <dl class="admin-payment-summary">
+            <div><dt>Pedido</dt><dd><a href="{{ url_for('admin.order_detail', order_number=detail.order_number) }}">{{ detail.order_number }}</a></dd></div>
+            <div class="admin-payment-customer"><dt>Cliente</dt><dd><span>{{ detail.customer.display_name }}</span><small>{{ detail.customer.public_code }}</small></dd></div>
+            <div><dt>Monto total</dt><dd><strong>{{ detail.amount|money(detail.currency) }}</strong></dd></div>
+            <div><dt>Método</dt><dd><i data-lucide="{{ 'landmark' if detail.method == 'BANK_TRANSFER' else 'credit-card' }}" aria-hidden="true"></i>{{ payment_method_labels.get(detail.method, detail.method) }}</dd></div>
+            <div><dt>Estado</dt><dd>{{ detail.status_label_es }}</dd></div>
+            <div><dt>Inicio</dt><dd>{{ detail.created_at|ecuador_datetime }}</dd></div>
+            <div><dt>Vencimiento</dt><dd>{{ detail.expires_at|ecuador_datetime }}</dd></div>
+          </dl>
+        </section>
+
+        {% if detail.provider or detail.provider_reference %}
+          <section aria-labelledby="payment-provider-title"><h3 id="payment-provider-title">Información del proveedor</h3><dl class="admin-payment-provider"><div><dt>Proveedor registrado</dt><dd>{{ detail.provider or 'No identificado' }}</dd></div><div><dt>Referencia</dt><dd><code>{{ detail.provider_reference or 'No disponible' }}</code><button type="button" data-copy-payment-reference="{{ detail.provider_reference or '' }}" aria-label="Copiar referencia" {{ 'disabled' if not detail.provider_reference }}><i data-lucide="copy" aria-hidden="true"></i></button></dd></div></dl></section>
+        {% endif %}
+
+        <section aria-labelledby="payment-timeline-title">
+          <h3 id="payment-timeline-title">Historial de la transacción</h3>
+          <ol class="admin-payment-timeline">
+            {% for event in detail.timeline %}<li class="admin-payment-timeline--{{ event.tone }}"><span></span><div><strong>{{ event.label }}</strong>{% if event.is_derived %}<small>Estado derivado del intento</small>{% endif %}</div><time datetime="{{ event.timestamp.isoformat() }}">{{ event.timestamp|ecuador_datetime }}</time></li>{% endfor %}
+          </ol>
+        </section>
+
+        {% if detail.proof %}
+          <section aria-labelledby="payment-proof-title"><h3 id="payment-proof-title">Documento adjunto</h3><article class="admin-payment-proof"><i data-lucide="file-text" aria-hidden="true"></i><div><strong>{{ detail.proof.original_filename }}</strong><small>{{ (detail.proof.size_bytes / 1024)|round(1) }} KB · {{ detail.proof.created_at|ecuador_datetime }}</small></div><a href="{{ url_for('admin.payment_attempt_proof', payment_code=detail.payment_public_code) }}" target="_blank" rel="noopener" aria-label="Ver comprobante"><i data-lucide="eye" aria-hidden="true"></i></a><a href="{{ url_for('admin.payment_attempt_proof', payment_code=detail.payment_public_code, download=1) }}" aria-label="Descargar comprobante"><i data-lucide="download" aria-hidden="true"></i></a></article></section>
+        {% elif detail.method == 'BANK_TRANSFER' %}
+          <section aria-labelledby="payment-proof-title"><h3 id="payment-proof-title">Documento adjunto</h3><p class="admin-payment-muted-state">Todavía no se ha recibido un comprobante para este intento.</p></section>
+        {% endif %}
+
+        {% if detail.analysis %}
+          <section aria-labelledby="payment-analysis-title"><h3 id="payment-analysis-title">Prevalidación automática</h3><dl class="admin-payment-analysis">
+            <div><dt>Resultado</dt><dd>{% if detail.analysis.processing_status == 'FAILED' %}No se pudo completar{% elif detail.analysis.processing_status in ('QUEUED', 'PROCESSING') %}Procesando{% else %}{{ payment_analysis_labels.get(detail.analysis.outcome, 'Sin prevalidación') }}{% endif %}</dd></div>
+            {% if detail.analysis.bank_name_detected %}<div><dt>Banco detectado</dt><dd>{{ detail.analysis.bank_name_detected }}</dd></div>{% endif %}
+            {% if detail.analysis.amount_detected is not none %}<div><dt>Monto detectado</dt><dd>{{ detail.analysis.amount_detected|money(detail.currency) }}</dd></div>{% endif %}
+            {% if detail.analysis.destination_account_suffix %}<div><dt>Cuenta destino</dt><dd>Terminación {{ detail.analysis.destination_account_suffix }}</dd></div>{% endif %}
+            {% if detail.analysis.transaction_at_detected %}<div><dt>Fecha detectada</dt><dd>{{ detail.analysis.transaction_at_detected|ecuador_datetime }}</dd></div>{% endif %}
+            {% if detail.analysis.receipt_number_detected %}<div><dt>Número de comprobante</dt><dd>{{ detail.analysis.receipt_number_detected }}</dd></div>{% endif %}
+            {% if detail.analysis.transaction_reference_detected %}<div><dt>Referencia detectada</dt><dd>{{ detail.analysis.transaction_reference_detected }}</dd></div>{% endif %}
+          </dl>
+          {% if detail.analysis.processing_status == 'FAILED' %}<p class="admin-payment-analysis-error">La prevalidación no pudo finalizar. El comprobante requiere revisión manual.</p>{% endif %}
+          {% if detail.analysis.findings %}<ul class="admin-payment-findings">{% for finding in detail.analysis.findings %}<li class="is-{{ finding.severity }}"><strong>{{ finding.code|replace('_', ' ')|title }}</strong><span>{{ finding.message }}</span></li>{% endfor %}</ul>{% endif %}
+          </section>
+        {% endif %}
+
+        {% if detail.proof and detail.proof.reviewed_at %}
+          <section aria-labelledby="payment-review-title"><h3 id="payment-review-title">Revisión registrada</h3><dl class="admin-payment-review"><div><dt>Resultado</dt><dd>{{ 'Aprobado' if detail.proof.status == 'APPROVED' else ('Rechazado' if detail.proof.status == 'REJECTED' else detail.proof.status) }}</dd></div>{% if detail.proof.reviewer_name %}<div><dt>Revisado por</dt><dd>{{ detail.proof.reviewer_name }}{% if detail.proof.reviewer_public_code %}<small>{{ detail.proof.reviewer_public_code }}</small>{% endif %}</dd></div>{% endif %}<div><dt>Fecha</dt><dd>{{ detail.proof.reviewed_at|ecuador_datetime }}</dd></div>{% if detail.proof.rejection_reason %}<div><dt>Motivo</dt><dd>{{ detail.proof.rejection_reason }}</dd></div>{% endif %}{% if detail.proof.internal_review_notes %}<div class="is-wide"><dt>Nota interna</dt><dd>{{ detail.proof.internal_review_notes }}</dd></div>{% endif %}</dl></section>
+        {% endif %}
+
+        {% if detail.attempt_history %}
+          <section aria-labelledby="payment-attempts-title"><h3 id="payment-attempts-title">Intentos del pedido</h3><ul class="admin-payment-attempts">{% for attempt in detail.attempt_history %}<li><a href="{{ payment_url(detail=attempt.payment_public_code) }}"><strong>{{ attempt.payment_public_code }}</strong><span>{{ attempt.status_label_es }} · {{ attempt.amount|money(attempt.currency) }} · {{ attempt.created_at|ecuador_datetime }}</span></a>{% if attempt.is_current %}<small>Actual</small>{% endif %}</li>{% endfor %}</ul></section>
+        {% endif %}
+      </div>
+    </aside>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script src="{{ url_for('static', filename='js/admin-payments.js') }}" defer></script>
+{% endblock %}

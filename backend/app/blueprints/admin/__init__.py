@@ -4,6 +4,7 @@ import base64
 import re
 import uuid
 from datetime import datetime, timezone
+from pathlib import PurePath
 from zoneinfo import ZoneInfo
 
 from flask import (
@@ -75,6 +76,13 @@ from app.services.admin_orders import (
     get_admin_order_detail,
     get_admin_orders_page,
     get_admin_payment_review,
+)
+from app.services.admin_payments import (
+    AdminPaymentNotFoundError,
+    AdminPaymentQueryError,
+    get_admin_payment_detail,
+    get_admin_payment_kpis,
+    list_admin_payments,
 )
 from app.services.admin_products import (
     commission_snapshot_complete,
@@ -180,8 +188,11 @@ from app.services.review_moderation import (
     ReviewModerationError,
     apply_review_moderation_decision,
 )
-from app.models import ProductReview, ProductReviewImage
+from app.models import PaymentAttempt, PaymentProof, ProductReview, ProductReviewImage
 from app.models.enums import (
+    PaymentMethod,
+    PaymentProofPrecheckOutcome,
+    PaymentStatus,
     ReviewModerationDecisionAction,
     ReviewModerationDecisionSource,
     StaffEmploymentStatus,
@@ -211,6 +222,7 @@ def _shell_context(section: str) -> dict:
         "products": "products.moderate",
         "stores": "stores.moderate",
         "reviews": "reviews.view",
+        "payments": "payments.view",
     }
     visible_sections.update(
         key for key, permission in section_permissions.items()
@@ -1091,6 +1103,208 @@ def order_detail(order_number: str):
         detail=detail,
         **_shell_context("orders"),
     )
+
+
+_ADMIN_PAYMENT_QUERY_KEYS = (
+    "tab",
+    "q",
+    "method",
+    "status",
+    "date_from",
+    "date_to",
+    "amount_min",
+    "amount_max",
+    "analysis",
+    "page",
+    "per_page",
+    "sort_by",
+    "sort_direction",
+    "detail",
+)
+_ADMIN_PAYMENT_TABS = (
+    ("all", "Todos"),
+    ("manual_review", "Revisión manual"),
+    ("approved", "Aprobados"),
+    ("rejected_failed", "Rechazados / fallidos"),
+    ("expired", "Expirados"),
+)
+_ADMIN_PAYMENT_METHOD_LABELS = {
+    PaymentMethod.BANK_TRANSFER.value: "Transferencia bancaria",
+    PaymentMethod.CARD.value: "Tarjeta",
+}
+_ADMIN_PAYMENT_ANALYSIS_LABELS = {
+    PaymentProofPrecheckOutcome.PASSED.value: "Correcta",
+    PaymentProofPrecheckOutcome.NEEDS_MANUAL_REVIEW.value: "Revisión manual requerida",
+    PaymentProofPrecheckOutcome.FAILED.value: "Fallida",
+    "NO_ANALYSIS": "Sin prevalidación",
+}
+
+
+def _admin_payment_query_state() -> dict[str, str]:
+    return {
+        key: value
+        for key in _ADMIN_PAYMENT_QUERY_KEYS
+        if (value := (request.args.get(key) or "").strip())
+    }
+
+
+def _admin_payment_url_builder():
+    base = _admin_payment_query_state()
+
+    def build(**overrides) -> str:
+        values = dict(base)
+        for key, value in overrides.items():
+            if key not in _ADMIN_PAYMENT_QUERY_KEYS:
+                continue
+            if value is None or value == "":
+                values.pop(key, None)
+            else:
+                values[key] = str(value)
+        return url_for("admin.payments", **values)
+
+    return build
+
+
+def _admin_payment_pagination_window(page: int, pages: int) -> tuple[int | None, ...]:
+    if pages <= 0:
+        return ()
+    if pages <= 7:
+        return tuple(range(1, pages + 1))
+    candidates = {1, pages, page - 1, page, page + 1}
+    values = sorted(value for value in candidates if 1 <= value <= pages)
+    window: list[int | None] = []
+    previous = 0
+    for value in values:
+        if previous and value - previous > 1:
+            window.append(None)
+        window.append(value)
+        previous = value
+    return tuple(window)
+
+
+@admin.get("/payments")
+@admin_permission_required("payments.view")
+def payments():
+    active_tab = (request.args.get("tab") or "all").strip().lower()
+    query_state = _admin_payment_query_state()
+    try:
+        payment_list = list_admin_payments(
+            db.session,
+            current_user=current_user,
+            tab=active_tab,
+            query=request.args.get("q"),
+            method=request.args.get("method"),
+            status=request.args.get("status"),
+            date_from=request.args.get("date_from"),
+            date_to=request.args.get("date_to"),
+            amount_min=request.args.get("amount_min"),
+            amount_max=request.args.get("amount_max"),
+            analysis=request.args.get("analysis"),
+            page=request.args.get("page", 1),
+            per_page=request.args.get("per_page", 20),
+            sort_by=request.args.get("sort_by", "created_at"),
+            sort_direction=request.args.get("sort_direction", "desc"),
+        )
+    except AdminPaymentQueryError as exc:
+        flash(str(exc), "warning")
+        safe_tabs = {key for key, _label in _ADMIN_PAYMENT_TABS}
+        return redirect(url_for(
+            "admin.payments",
+            tab=active_tab if active_tab in safe_tabs else "all",
+        ))
+
+    detail = None
+    detail_code = query_state.get("detail")
+    if detail_code:
+        try:
+            detail = get_admin_payment_detail(
+                db.session,
+                detail_code,
+                current_user=current_user,
+            )
+        except AdminPaymentNotFoundError:
+            abort(404)
+
+    kpis = get_admin_payment_kpis(db.session)
+    payment_url = _admin_payment_url_builder()
+    filter_keys = {
+        "q", "method", "status", "date_from", "date_to",
+        "amount_min", "amount_max", "analysis",
+    }
+    return render_template(
+        "admin/payments.html",
+        kpis=kpis,
+        payments=payment_list,
+        detail=detail,
+        active_tab=active_tab,
+        payment_tabs=_ADMIN_PAYMENT_TABS,
+        payment_method_labels=_ADMIN_PAYMENT_METHOD_LABELS,
+        payment_statuses=tuple(
+            (status.value, {
+                PaymentStatus.AWAITING_PROOF: "Esperando comprobante",
+                PaymentStatus.PENDING_PROVIDER: "Esperando proveedor",
+                PaymentStatus.PROCESSING: "En revisión",
+                PaymentStatus.APPROVED: "Aprobado",
+                PaymentStatus.REJECTED: "Rechazado",
+                PaymentStatus.FAILED: "Fallido",
+                PaymentStatus.CANCELLED: "Cancelado",
+                PaymentStatus.EXPIRED: "Expirado",
+            }[status])
+            for status in PaymentStatus
+        ),
+        payment_analysis_labels=_ADMIN_PAYMENT_ANALYSIS_LABELS,
+        payment_query=query_state,
+        payment_url=payment_url,
+        pagination_window=_admin_payment_pagination_window(
+            payment_list.page, payment_list.pages
+        ),
+        has_payment_filters=any(query_state.get(key) for key in filter_keys),
+        has_advanced_payment_filters=any(
+            query_state.get(key)
+            for key in ("date_from", "date_to", "amount_min", "amount_max", "analysis")
+        ),
+        **_shell_context("payments"),
+    )
+
+
+@admin.get("/payments/<string:payment_code>/proof")
+@admin_permission_required("payments.view")
+def payment_attempt_proof(payment_code: str):
+    normalized = " ".join((payment_code or "").split()).upper()
+    attempt = db.session.scalar(
+        select(PaymentAttempt).where(PaymentAttempt.public_code == normalized)
+    )
+    if attempt is None:
+        abort(404)
+    proof = db.session.scalar(
+        select(PaymentProof).where(PaymentProof.payment_attempt_id == attempt.id)
+    )
+    if proof is None or proof.media_type not in current_app.config[
+        "PAYMENT_PROOF_ALLOWED_MEDIA_TYPES"
+    ]:
+        abort(404)
+    try:
+        path = verify_private_file(
+            root=current_app.config["PAYMENT_PROOF_UPLOAD_DIR"],
+            storage_key=proof.storage_key,
+            size_bytes=proof.size_bytes,
+            sha256=proof.sha256,
+        )
+    except PrivateStorageError:
+        abort(404)
+    download_name = PurePath(proof.original_filename or "comprobante").name
+    response = send_file(
+        path,
+        mimetype=proof.media_type,
+        as_attachment=request.args.get("download") == "1",
+        download_name=download_name or "comprobante",
+        conditional=False,
+        max_age=0,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 def _payment_review_or_404(order_number: str):
