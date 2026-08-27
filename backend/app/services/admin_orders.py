@@ -11,7 +11,7 @@ from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, case, exists, func, literal, or_, select
-from sqlalchemy.orm import Session, aliased, selectinload
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
     LogisticsPackageState,
@@ -37,6 +37,10 @@ from app.models.enums import (
     SellerInboundPackageStatus,
 )
 from app.services.admin_operations import ecuador_comparison_windows
+from app.services.admin_payments import (
+    relevant_payment_attempt_id_subquery,
+    select_relevant_payment_record,
+)
 from app.services.fulfillment import order_ready_for_pickup_predicate
 from app.services.partner_order_workflow import partner_order_overdue_predicate
 
@@ -306,27 +310,8 @@ def _escaped(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _payment_rank(record: _PaymentRecord) -> tuple[int, float, str]:
-    attempt, proof = record.attempt, record.proof
-    if proof and proof.status == PaymentProofStatus.PENDING_REVIEW:
-        rank = 0
-        date = proof.created_at
-    elif attempt.status == PaymentStatus.PROCESSING:
-        rank = 1
-        date = attempt.updated_at
-    elif attempt.status in {PaymentStatus.APPROVED, PaymentStatus.REJECTED}:
-        rank = 2
-        date = attempt.approved_at or attempt.rejected_at or attempt.updated_at
-    else:
-        rank = 3
-        date = attempt.updated_at or attempt.created_at
-    aware = _utc(date) or datetime.min.replace(tzinfo=timezone.utc)
-    return rank, -aware.timestamp(), str(attempt.id)
-
-
 def select_relevant_payment(records: Iterable[_PaymentRecord]) -> _PaymentRecord | None:
-    values = tuple(records)
-    return min(values, key=_payment_rank) if values else None
+    return select_relevant_payment_record(records)
 
 
 def _payment_view(record: _PaymentRecord | None) -> AdminPaymentView:
@@ -448,38 +433,7 @@ def _approved_payment_exists():
 
 
 def _relevant_payment_attempt_id():
-    candidate = aliased(PaymentAttempt)
-    candidate_proof = aliased(PaymentProof)
-    pending_proof_created = (
-        select(candidate_proof.created_at)
-        .where(
-            candidate_proof.payment_attempt_id == candidate.id,
-            candidate_proof.status == PaymentProofStatus.PENDING_REVIEW,
-        )
-        .correlate(candidate)
-        .scalar_subquery()
-    )
-    priority = case(
-        (pending_proof_created.is_not(None), 0),
-        (candidate.status == PaymentStatus.PROCESSING, 1),
-        (candidate.status.in_((PaymentStatus.APPROVED, PaymentStatus.REJECTED)), 2),
-        else_=3,
-    )
-    relevant_at = func.coalesce(
-        pending_proof_created,
-        candidate.approved_at,
-        candidate.rejected_at,
-        candidate.updated_at,
-        candidate.created_at,
-    )
-    return (
-        select(candidate.id)
-        .where(candidate.order_id == Order.id)
-        .order_by(priority, relevant_at.desc(), candidate.id.desc())
-        .limit(1)
-        .correlate(Order)
-        .scalar_subquery()
-    )
+    return relevant_payment_attempt_id_subquery(Order.id)
 
 
 def _preparing_predicate():
