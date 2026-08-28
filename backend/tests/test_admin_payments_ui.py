@@ -201,7 +201,7 @@ def test_advanced_filters_start_closed_and_open_when_any_advanced_filter_is_acti
     assert "advancedPanel.hidden = expanded" in script
 
 
-def test_payment_drawer_is_exact_safe_read_only_and_preserves_context(session, client):
+def test_payment_drawer_is_exact_safe_reviewable_and_preserves_context(session, client, app):
     staff = _staff(session)
     _buyer_one, order, attempt = _payment_graph(
         session, code="PMT-00000010", status=PaymentStatus.PROCESSING
@@ -233,8 +233,19 @@ def test_payment_drawer_is_exact_safe_read_only_and_preserves_context(session, c
     assert "secret-qr-hash" not in body
     assert proof.storage_key not in body
     assert proof.sha256 not in body
-    assert "Aprobar pago" not in body
-    assert "Rechazar pago" not in body
+    assert "Aprobar pago" in body
+    assert "Rechazar pago" in body
+    assert "Confirmar aprobación" in body
+    assert "Confirma que verificaste el comprobante" in body
+    assert f'action="/admin/payments/{attempt.public_code}/approve"' in body
+    assert f'action="/admin/payments/{attempt.public_code}/reject"' in body
+    assert 'name="tab" value="manual_review"' in body
+    assert 'name="q" value="PMT"' in body
+    assert 'name="method" value="BANK_TRANSFER"' in body
+    assert 'name="detail"' not in body
+    assert 'name="next"' not in body
+    assert 'aria-haspopup="dialog"' in body
+    assert 'aria-expanded="false"' in body
     assert 'class="admin-payment-customer"' in body
     assert f"<span>{_buyer_one.full_name}</span>" in body
     assert f"<small>{_buyer_one.public_code}</small>" in body
@@ -242,6 +253,17 @@ def test_payment_drawer_is_exact_safe_read_only_and_preserves_context(session, c
     assert "q=PMT" in body
     assert "method=BANK_TRANSFER" in body
     assert "detail=PMT-00000010" not in body.split("data-payment-drawer-close", 1)[0][-500:]
+
+    script = (Path(app.static_folder) / "js" / "admin-payments.js").read_text(
+        encoding="utf-8"
+    )
+    assert 'opener.setAttribute("aria-expanded", "true")' in script
+    assert 'button.setAttribute("aria-expanded", "false")' in script
+    assert 'if (activeModalLayer)' in script
+    assert 'event.key === "Escape"' in script
+    assert 'event.key !== "Tab"' in script
+    assert 'form.dataset.submitting === "true"' in script
+    assert 'form.setAttribute("aria-busy", "true")' in script
 
     assert client.get("/admin/payments?detail=PMT-99999999").status_code == 404
 
@@ -340,12 +362,19 @@ def test_admin_payment_gets_do_not_mutate_financial_or_audit_state(session, clie
     assert after == before
 
 
-def test_p3_adds_no_payment_decision_post_routes(app):
+def test_p4_exposes_only_post_payment_decision_routes(app):
     payment_rules = [
         rule
         for rule in app.url_map.iter_rules()
         if rule.rule.startswith("/admin/payments")
     ]
     assert payment_rules
-    assert all("POST" not in rule.methods for rule in payment_rules)
-    assert not any(rule.rule.endswith("/approve") or rule.rule.endswith("/reject") for rule in payment_rules)
+    decision_rules = {
+        rule.rule: rule.methods
+        for rule in payment_rules
+        if rule.rule.endswith("/approve") or rule.rule.endswith("/reject")
+    }
+    assert decision_rules == {
+        "/admin/payments/<string:payment_code>/approve": {"OPTIONS", "POST"},
+        "/admin/payments/<string:payment_code>/reject": {"OPTIONS", "POST"},
+    }

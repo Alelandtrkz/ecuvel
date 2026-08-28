@@ -109,7 +109,11 @@ from app.services.partner_onboarding import (
     PartnerOnboardingValidationError,
 )
 from app.services.payment_proofs import (
+    PAYMENT_REJECTION_PUBLIC_REASONS,
     PAYMENT_REJECTION_REASON_LABELS,
+    InvalidPaymentProofTransitionError,
+    PaymentProofExpiredError,
+    PaymentProofIntegrityError,
     PaymentProofServiceError,
     review_payment_proof,
 )
@@ -192,6 +196,7 @@ from app.models import PaymentAttempt, PaymentProof, ProductReview, ProductRevie
 from app.models.enums import (
     PaymentMethod,
     PaymentProofPrecheckOutcome,
+    PaymentProofStatus,
     PaymentStatus,
     ReviewModerationDecisionAction,
     ReviewModerationDecisionSource,
@@ -1148,6 +1153,18 @@ def _admin_payment_query_state() -> dict[str, str]:
     }
 
 
+def _admin_payment_return_state(payment_code: str) -> dict[str, str]:
+    """Build a closed, local return context for payment mutations."""
+    values = {
+        key: value
+        for key in _ADMIN_PAYMENT_QUERY_KEYS
+        if key != "detail"
+        and (value := (request.form.get(key) or "").strip())
+    }
+    values["detail"] = payment_code
+    return values
+
+
 def _admin_payment_url_builder():
     base = _admin_payment_query_state()
 
@@ -1253,6 +1270,11 @@ def payments():
             for status in PaymentStatus
         ),
         payment_analysis_labels=_ADMIN_PAYMENT_ANALYSIS_LABELS,
+        payment_rejection_public_reasons=PAYMENT_REJECTION_PUBLIC_REASONS,
+        payment_rejection_reason_labels=PAYMENT_REJECTION_REASON_LABELS,
+        payment_return_query_keys=tuple(
+            key for key in _ADMIN_PAYMENT_QUERY_KEYS if key != "detail"
+        ),
         payment_query=query_state,
         payment_url=payment_url,
         pagination_window=_admin_payment_pagination_window(
@@ -1305,6 +1327,143 @@ def payment_attempt_proof(payment_code: str):
     response.headers["Pragma"] = "no-cache"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+def _payment_attempt_and_proof_or_404(
+    payment_code: str,
+) -> tuple[PaymentAttempt, PaymentProof | None]:
+    normalized = " ".join((payment_code or "").split()).upper()
+    attempt = db.session.scalar(
+        select(PaymentAttempt).where(PaymentAttempt.public_code == normalized)
+    )
+    if attempt is None:
+        abort(404)
+    proof = db.session.scalar(
+        select(PaymentProof).where(PaymentProof.payment_attempt_id == attempt.id)
+    )
+    return attempt, proof
+
+
+def _payment_decision_redirect(payment_code: str):
+    return redirect(
+        url_for(
+            "admin.payments",
+            **_admin_payment_return_state(payment_code),
+        )
+    )
+
+
+def _review_payment_attempt(payment_code: str, decision: str):
+    attempt, proof = _payment_attempt_and_proof_or_404(payment_code)
+    if attempt.method != PaymentMethod.BANK_TRANSFER or proof is None:
+        flash("Este intento de pago no admite una decisión manual.", "error")
+        return _payment_decision_redirect(attempt.public_code)
+
+    reason_code = None
+    reason = None
+    notes = (request.form.get("notes") or "").strip() or None
+    if notes and len(notes) > 1000:
+        flash("Las notas no pueden superar 1000 caracteres.", "error")
+        return _payment_decision_redirect(attempt.public_code)
+
+    if decision == "reject":
+        reason_code = (request.form.get("reason_code") or "").strip().upper()
+        if reason_code not in PAYMENT_REJECTION_REASON_LABELS:
+            flash("Selecciona un motivo de rechazo válido.", "error")
+            return _payment_decision_redirect(attempt.public_code)
+        if reason_code == "OTHER":
+            reason = " ".join(
+                (request.form.get("custom_reason") or "").split()
+            )
+            if not reason:
+                flash("Describe el motivo del rechazo.", "error")
+                return _payment_decision_redirect(attempt.public_code)
+            if len(reason) > 500:
+                flash("El motivo no puede superar 500 caracteres.", "error")
+                return _payment_decision_redirect(attempt.public_code)
+        else:
+            reason = PAYMENT_REJECTION_PUBLIC_REASONS[reason_code]
+
+    try:
+        result = review_payment_proof(
+            session=db.session,
+            proof_id=proof.id,
+            decision=decision,
+            reviewer_user_id=current_user.id,
+            storage_root=current_app.config["PAYMENT_PROOF_UPLOAD_DIR"],
+            reason_code=reason_code,
+            reason=reason,
+            notes=notes,
+        )
+        db.session.commit()
+    except PaymentProofExpiredError:
+        db.session.rollback()
+        flash(
+            "No es posible aprobar este pago porque la reserva del pedido ya venció.",
+            "error",
+        )
+    except InvalidPaymentProofTransitionError:
+        db.session.rollback()
+        flash(
+            "El pago ya fue decidido por otro operador. Consulta su estado actualizado.",
+            "warning",
+        )
+    except PaymentProofIntegrityError:
+        db.session.rollback()
+        flash(
+            "No se pudo verificar la integridad del comprobante. "
+            "No se aplicó ninguna decisión.",
+            "error",
+        )
+    except PaymentProofServiceError:
+        db.session.rollback()
+        flash("No se pudo aplicar la decisión solicitada.", "error")
+    except IntegrityError:
+        db.session.rollback()
+        current_app.logger.warning(
+            "Conflicto concurrente al revisar payment_code=%s",
+            attempt.public_code,
+        )
+        flash(
+            "El pago cambió mientras lo revisabas. Consulta su estado actualizado.",
+            "warning",
+        )
+    except Exception:
+        db.session.rollback()
+        current_app.logger.exception(
+            "Falló la decisión Admin payment_code=%s", attempt.public_code
+        )
+        flash("No pudimos guardar la decisión. Inténtalo nuevamente.", "error")
+    else:
+        if result.replayed:
+            flash(
+                "Este pago ya había sido aprobado."
+                if result.proof_status == PaymentProofStatus.APPROVED
+                else "Este pago ya había sido rechazado.",
+                "info",
+            )
+        else:
+            flash(
+                f"Pago {attempt.public_code} aprobado correctamente."
+                if result.proof_status == PaymentProofStatus.APPROVED
+                else f"Pago {attempt.public_code} rechazado.",
+                "success",
+            )
+    return _payment_decision_redirect(attempt.public_code)
+
+
+@admin.post("/payments/<string:payment_code>/approve")
+@limiter.limit("20 per hour")
+@admin_permission_required("payments.review")
+def approve_payment_attempt(payment_code: str):
+    return _review_payment_attempt(payment_code, "approve")
+
+
+@admin.post("/payments/<string:payment_code>/reject")
+@limiter.limit("20 per hour")
+@admin_permission_required("payments.review")
+def reject_payment_attempt(payment_code: str):
+    return _review_payment_attempt(payment_code, "reject")
 
 
 def _payment_review_or_404(order_number: str):
@@ -1376,6 +1535,9 @@ def _review_payment(order_number: str, decision: str):
     reason = request.form.get("reason")
     reason_code = request.form.get("reason_code")
     notes = request.form.get("notes")
+    if decision == "reject" and not (reason or "").strip():
+        flash("El rechazo requiere una razón.", "error")
+        return redirect(url_for("admin.payment_review", order_number=order_number))
     try:
         result = review_payment_proof(
             session=db.session,
@@ -1388,9 +1550,22 @@ def _review_payment(order_number: str, decision: str):
             notes=notes,
         )
         db.session.commit()
-    except PaymentProofServiceError as exc:
+    except PaymentProofExpiredError:
         db.session.rollback()
-        flash(str(exc), "error")
+        flash("La reserva del pedido ya venció; no se aplicó ninguna decisión.", "error")
+    except InvalidPaymentProofTransitionError:
+        db.session.rollback()
+        flash("Este comprobante ya fue decidido por otro operador.", "error")
+    except PaymentProofIntegrityError:
+        db.session.rollback()
+        flash(
+            "No se pudo verificar la integridad del comprobante. "
+            "No se aplicó ninguna decisión.",
+            "error",
+        )
+    except PaymentProofServiceError:
+        db.session.rollback()
+        flash("No se pudo aplicar la decisión solicitada.", "error")
     except Exception:
         db.session.rollback()
         current_app.logger.exception(

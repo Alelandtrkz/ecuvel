@@ -69,16 +69,46 @@ class PaymentProofExpiredError(PaymentProofServiceError):
 
 
 PAYMENT_REJECTION_REASON_LABELS = {
-    "AMOUNT_MISMATCH": "El monto no coincide",
-    "DESTINATION_ACCOUNT_MISMATCH": "La cuenta de destino no coincide",
+    "AMOUNT_MISMATCH": "Monto incorrecto",
+    "DESTINATION_ACCOUNT_MISMATCH": "Cuenta destino incorrecta",
     "DUPLICATE_PROOF": "Comprobante duplicado",
     "UNREADABLE_PROOF": "Comprobante ilegible",
-    "INVALID_DATE": "La fecha no es válida",
-    "UNVERIFIABLE_TRANSACTION": "La transacción no se puede verificar",
-    "INVALID_DOCUMENT": "Documento inválido",
+    "INVALID_DATE": "Fecha inválida",
+    "UNVERIFIABLE_TRANSACTION": "Transacción no verificable",
+    "INVALID_DOCUMENT": "Documento incorrecto",
     "OTHER": "Otro",
 }
 PAYMENT_REJECTION_REASON_CODES = frozenset(PAYMENT_REJECTION_REASON_LABELS)
+
+# Messages shown to the buyer.  Keep these deliberately separate from the
+# operator labels above so internal classification language never leaks into
+# customer-facing payment state.
+PAYMENT_REJECTION_PUBLIC_REASONS = {
+    "AMOUNT_MISMATCH": (
+        "El monto del comprobante no coincide con el total pendiente del pedido."
+    ),
+    "DESTINATION_ACCOUNT_MISMATCH": (
+        "La cuenta destino del comprobante no coincide con la cuenta indicada "
+        "por ECUVEL."
+    ),
+    "DUPLICATE_PROOF": (
+        "El comprobante ya fue utilizado o coincide con otro comprobante "
+        "registrado."
+    ),
+    "UNREADABLE_PROOF": (
+        "No fue posible verificar la información del comprobante porque el "
+        "documento no es legible."
+    ),
+    "INVALID_DATE": (
+        "La fecha del comprobante no corresponde al período esperado para este pago."
+    ),
+    "UNVERIFIABLE_TRANSACTION": (
+        "No fue posible verificar la transacción con la información enviada."
+    ),
+    "INVALID_DOCUMENT": (
+        "El archivo enviado no corresponde a un comprobante de pago válido."
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)

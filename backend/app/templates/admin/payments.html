@@ -198,13 +198,71 @@
         {% endif %}
 
         {% if detail.proof and detail.proof.reviewed_at %}
-          <section aria-labelledby="payment-review-title"><h3 id="payment-review-title">Revisión registrada</h3><dl class="admin-payment-review"><div><dt>Resultado</dt><dd>{{ 'Aprobado' if detail.proof.status == 'APPROVED' else ('Rechazado' if detail.proof.status == 'REJECTED' else detail.proof.status) }}</dd></div>{% if detail.proof.reviewer_name %}<div><dt>Revisado por</dt><dd>{{ detail.proof.reviewer_name }}{% if detail.proof.reviewer_public_code %}<small>{{ detail.proof.reviewer_public_code }}</small>{% endif %}</dd></div>{% endif %}<div><dt>Fecha</dt><dd>{{ detail.proof.reviewed_at|ecuador_datetime }}</dd></div>{% if detail.proof.rejection_reason %}<div><dt>Motivo</dt><dd>{{ detail.proof.rejection_reason }}</dd></div>{% endif %}{% if detail.proof.internal_review_notes %}<div class="is-wide"><dt>Nota interna</dt><dd>{{ detail.proof.internal_review_notes }}</dd></div>{% endif %}</dl></section>
+          <section aria-labelledby="payment-review-title">
+            <h3 id="payment-review-title">Revisión registrada</h3>
+            <dl class="admin-payment-review">
+              <div><dt>Resultado</dt><dd>{{ 'Aprobado' if detail.proof.status == 'APPROVED' else ('Rechazado' if detail.proof.status == 'REJECTED' else detail.proof.status) }}</dd></div>
+              {% if detail.proof.reviewer_name %}<div><dt>Revisado por</dt><dd>{{ detail.proof.reviewer_name }}{% if detail.proof.reviewer_public_code %}<small>{{ detail.proof.reviewer_public_code }}</small>{% endif %}</dd></div>{% endif %}
+              <div><dt>Fecha</dt><dd>{{ detail.proof.reviewed_at|ecuador_datetime }}</dd></div>
+              {% if detail.proof.rejection_reason_code %}<div><dt>Clasificación</dt><dd>{{ payment_rejection_reason_labels.get(detail.proof.rejection_reason_code, detail.proof.rejection_reason_code) }}</dd></div>{% endif %}
+              {% if detail.proof.rejection_reason %}<div class="is-wide"><dt>Motivo comunicado</dt><dd>{{ detail.proof.rejection_reason }}</dd></div>{% endif %}
+              {% if detail.proof.internal_review_notes %}<div class="is-wide"><dt>Nota interna</dt><dd>{{ detail.proof.internal_review_notes }}</dd></div>{% endif %}
+            </dl>
+          </section>
         {% endif %}
 
         {% if detail.attempt_history %}
           <section aria-labelledby="payment-attempts-title"><h3 id="payment-attempts-title">Intentos del pedido</h3><ul class="admin-payment-attempts">{% for attempt in detail.attempt_history %}<li><a href="{{ payment_url(detail=attempt.payment_public_code) }}"><strong>{{ attempt.payment_public_code }}</strong><span>{{ attempt.status_label_es }} · {{ attempt.amount|money(attempt.currency) }} · {{ attempt.created_at|ecuador_datetime }}</span></a>{% if attempt.is_current %}<small>Actual</small>{% endif %}</li>{% endfor %}</ul></section>
         {% endif %}
       </div>
+
+      {% if detail.can_review %}
+        <footer class="admin-payment-drawer-actions">
+          <button class="admin-payment-decision-button admin-payment-decision-button--reject" type="button" data-payment-modal-open="reject" aria-haspopup="dialog" aria-controls="payment-reject-modal" aria-expanded="false"><i data-lucide="ban" aria-hidden="true"></i>Rechazar pago</button>
+          <button class="admin-payment-decision-button admin-payment-decision-button--approve" type="button" data-payment-modal-open="approve" aria-haspopup="dialog" aria-controls="payment-approve-modal" aria-expanded="false"><i data-lucide="circle-check" aria-hidden="true"></i>Aprobar pago</button>
+        </footer>
+
+        <div class="admin-payment-modal-layer" data-payment-modal="approve" hidden>
+          <button class="admin-payment-modal-backdrop" type="button" data-payment-modal-close aria-label="Cancelar aprobación"></button>
+          <section class="admin-payment-modal" id="payment-approve-modal" role="dialog" aria-modal="true" aria-labelledby="payment-approve-title" tabindex="-1">
+            <header><h2 id="payment-approve-title">Confirmar aprobación</h2><button type="button" data-payment-modal-close aria-label="Cerrar"><i data-lucide="x" aria-hidden="true"></i></button></header>
+            <div class="admin-payment-modal-body">
+              <dl class="admin-payment-decision-summary">
+                <div><dt>Pago</dt><dd>{{ detail.payment_public_code }}</dd></div><div><dt>Pedido</dt><dd>{{ detail.order_number }}</dd></div><div><dt>Cliente</dt><dd>{{ detail.customer.display_name }}</dd></div><div><dt>Monto</dt><dd>{{ detail.amount|money(detail.currency) }}</dd></div>
+              </dl>
+              <p>Confirma que verificaste el comprobante y que corresponde a este pedido.</p>
+              <p>Al aprobar este pago, el pedido será confirmado y continuará su flujo operativo.</p>
+            </div>
+            <form class="admin-payment-modal-actions" method="post" action="{{ url_for('admin.approve_payment_attempt', payment_code=detail.payment_public_code) }}" data-payment-decision-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              {% for key in payment_return_query_keys %}{% if payment_query.get(key) %}<input type="hidden" name="{{ key }}" value="{{ payment_query.get(key) }}">{% endif %}{% endfor %}
+              <button type="button" class="admin-payment-modal-cancel" data-payment-modal-close>Cancelar</button>
+              <button type="submit" class="admin-payment-modal-confirm admin-payment-modal-confirm--approve"><i data-lucide="circle-check" aria-hidden="true"></i>Confirmar aprobación</button>
+            </form>
+          </section>
+        </div>
+
+        <div class="admin-payment-modal-layer" data-payment-modal="reject" hidden>
+          <button class="admin-payment-modal-backdrop" type="button" data-payment-modal-close aria-label="Cancelar rechazo"></button>
+          <section class="admin-payment-modal" id="payment-reject-modal" role="dialog" aria-modal="true" aria-labelledby="payment-reject-title" tabindex="-1">
+            <header><div><h2 id="payment-reject-title">Rechazar comprobante</h2><p>Selecciona el motivo por el cual este pago no puede ser aprobado.</p></div><button type="button" data-payment-modal-close aria-label="Cerrar"><i data-lucide="x" aria-hidden="true"></i></button></header>
+            <form method="post" action="{{ url_for('admin.reject_payment_attempt', payment_code=detail.payment_public_code) }}" data-payment-decision-form data-payment-reject-form>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              {% for key in payment_return_query_keys %}{% if payment_query.get(key) %}<input type="hidden" name="{{ key }}" value="{{ payment_query.get(key) }}">{% endif %}{% endfor %}
+              <div class="admin-payment-modal-body">
+                <label class="admin-payment-modal-field">Motivo <span aria-hidden="true">*</span>
+                  <select name="reason_code" required data-payment-reject-reason><option value="">Selecciona un motivo</option>{% for code, label in payment_rejection_reason_labels.items() %}<option value="{{ code }}" data-public-reason="{{ payment_rejection_public_reasons.get(code, '') }}">{{ label }}</option>{% endfor %}</select>
+                </label>
+                <div class="admin-payment-public-reason" data-payment-public-reason hidden><strong>Mensaje para el cliente</strong><p></p></div>
+                <label class="admin-payment-modal-field" data-payment-custom-reason hidden>Motivo para el cliente <span aria-hidden="true">*</span><textarea name="custom_reason" maxlength="500" rows="4" disabled placeholder="Describe de forma clara por qué el comprobante fue rechazado."></textarea><small>Máximo 500 caracteres.</small></label>
+                <label class="admin-payment-modal-field">Notas internas<textarea name="notes" maxlength="1000" rows="3" placeholder="Agrega contexto para el equipo financiero (opcional)."></textarea><small>Solo será visible para personal autorizado de ECUVEL.</small></label>
+                <p class="admin-payment-rejection-warning"><i data-lucide="triangle-alert" aria-hidden="true"></i><span>Rechazar este comprobante cancelará el pedido actual y liberará sus reservas. En esta versión el cliente no podrá reemplazar el comprobante dentro del mismo intento.</span></p>
+              </div>
+              <footer class="admin-payment-modal-actions"><button type="button" class="admin-payment-modal-cancel" data-payment-modal-close>Cancelar</button><button type="submit" class="admin-payment-modal-confirm admin-payment-modal-confirm--reject"><i data-lucide="ban" aria-hidden="true"></i>Confirmar rechazo</button></footer>
+            </form>
+          </section>
+        </div>
+      {% endif %}
     </aside>
   </div>
 {% endif %}

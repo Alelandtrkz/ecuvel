@@ -297,6 +297,7 @@ def _can_review(
     return bool(
         current_user is not None
         and user_has_permission(current_user, "payments.review")
+        and attempt.method == PaymentMethod.BANK_TRANSFER
         and attempt.status == PaymentStatus.PROCESSING
         and proof is not None
         and proof.status == PaymentProofStatus.PENDING_REVIEW
