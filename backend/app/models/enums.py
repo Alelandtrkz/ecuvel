@@ -262,6 +262,13 @@ class ReviewNotificationStatus(StrEnum):
     RETRY = "RETRY"
 
 
+class PaymentNotificationStatus(StrEnum):
+    PENDING = "PENDING"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    RETRY = "RETRY"
+
+
 class ProductDraftStatus(StrEnum):
     DRAFT = "DRAFT"
     INCOMPLETE = "INCOMPLETE"

@@ -21,6 +21,7 @@ from app.models import (
     InventoryReservation,
     Order,
     PaymentAttempt,
+    PaymentNotificationOutbox,
     PaymentProof,
     SellerOrder,
     StaffProfile,
@@ -803,6 +804,10 @@ def test_concurrent_approval_is_idempotent(
     results, errors = concurrent_runner([worker, worker])
     assert not errors and len(results) == 2
     assert sorted(result.replayed for result in results) == [False, True]
+    session.expire_all()
+    events = list(session.scalars(select(PaymentNotificationOutbox)))
+    assert len(events) == 1
+    assert events[0].event_type == "PAYMENT_APPROVED"
 
 
 @pytest.mark.concurrency
@@ -835,3 +840,12 @@ def test_concurrent_opposite_decisions_are_atomic(
     results, errors = concurrent_runner([worker("approve"), worker("reject")])
     assert len(results) == 1 and len(errors) == 1
     assert isinstance(errors[0], InvalidPaymentProofTransitionError)
+    session.expire_all()
+    events = list(session.scalars(select(PaymentNotificationOutbox)))
+    assert len(events) == 1
+    expected_event = (
+        "PAYMENT_APPROVED"
+        if results[0].proof_status == PaymentProofStatus.APPROVED
+        else "PAYMENT_REJECTED"
+    )
+    assert events[0].event_type == expected_event

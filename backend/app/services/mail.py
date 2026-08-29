@@ -33,6 +33,7 @@ class OutgoingMail:
     from_address: str | None = None
     reply_to: str | None = None
     tags: Mapping[str, str] | None = None
+    idempotency_key: str | None = None
 
     def __post_init__(self) -> None:
         # ``body`` remains a compatibility alias while ``text_body`` is the
@@ -42,6 +43,16 @@ class OutgoingMail:
             raise ValueError("El correo requiere destinatario, asunto y texto.")
         object.__setattr__(self, "text_body", plain)
         object.__setattr__(self, "body", plain)
+        if self.idempotency_key is not None:
+            clean_key = self.idempotency_key.strip()
+            if (
+                not clean_key
+                or len(clean_key) > 256
+                or "\r" in clean_key
+                or "\n" in clean_key
+            ):
+                raise ValueError("La clave de idempotencia del correo no es válida.")
+            object.__setattr__(self, "idempotency_key", clean_key)
         if self.html_body is None:
             safe_text = escape(plain or "").replace("\n", "<br>")
             object.__setattr__(
@@ -163,15 +174,18 @@ class MailService:
         tags = _validated_tags(message.tags)
         if tags:
             payload["tags"] = tags
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json",
+            "User-Agent": "ECUVEL-MailService/1.0",
+        }
+        if message.idempotency_key:
+            headers["Idempotency-Key"] = message.idempotency_key
         request = Request(
             f"{base_url}/emails",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json; charset=utf-8",
-                "Accept": "application/json",
-                "User-Agent": "ECUVEL-MailService/1.0",
-            },
+            headers=headers,
             method="POST",
         )
         try:

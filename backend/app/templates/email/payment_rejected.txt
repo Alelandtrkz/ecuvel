@@ -1,0 +1,13 @@
+No pudimos aprobar tu pago de ECUVEL
+
+Hola {{ buyer_name }}, no fue posible aprobar el pago asociado a tu pedido.
+
+Pago: {{ payment_public_code }}
+Pedido: {{ order_number }}
+Total: {{ currency }} {{ amount }}
+Estado: Rechazado
+Motivo: {{ public_reason }}
+
+El pedido fue cancelado. Puedes consultar el detalle desde tu cuenta ECUVEL.
+
+Ver mi pedido: {{ action_url }}

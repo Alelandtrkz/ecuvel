@@ -26,6 +26,7 @@ def _mail(
     subject: str,
     template_name: str,
     mail_type: str,
+    idempotency_key: str | None = None,
     **context,
 ) -> OutgoingMail:
     template_context = {"subject": subject, **context}
@@ -41,6 +42,7 @@ def _mail(
         text_body=text_template.render(**template_context).strip(),
         html_body=html_template.render(**template_context).strip(),
         tags={"mail_type": mail_type},
+        idempotency_key=idempotency_key,
     )
 
 
@@ -102,5 +104,59 @@ def review_rejected_mail(
         mail_type="REVIEW_REJECTED",
         action_url=action_url,
         product_title=product_title,
+        public_reason=public_reason,
+    )
+
+
+def payment_approved_mail(
+    *,
+    to: str,
+    action_url: str,
+    buyer_name: str,
+    payment_public_code: str,
+    order_number: str,
+    amount: str,
+    currency: str,
+    idempotency_key: str | None = None,
+) -> OutgoingMail:
+    return _mail(
+        to=to,
+        subject="Hemos confirmado tu pago de ECUVEL",
+        template_name="payment_approved",
+        mail_type="PAYMENT_APPROVED",
+        idempotency_key=idempotency_key,
+        action_url=action_url,
+        buyer_name=buyer_name,
+        payment_public_code=payment_public_code,
+        order_number=order_number,
+        amount=amount,
+        currency=currency,
+    )
+
+
+def payment_rejected_mail(
+    *,
+    to: str,
+    action_url: str,
+    buyer_name: str,
+    payment_public_code: str,
+    order_number: str,
+    amount: str,
+    currency: str,
+    public_reason: str,
+    idempotency_key: str | None = None,
+) -> OutgoingMail:
+    return _mail(
+        to=to,
+        subject="No pudimos aprobar tu pago de ECUVEL",
+        template_name="payment_rejected",
+        mail_type="PAYMENT_REJECTED",
+        idempotency_key=idempotency_key,
+        action_url=action_url,
+        buyer_name=buyer_name,
+        payment_public_code=payment_public_code,
+        order_number=order_number,
+        amount=amount,
+        currency=currency,
         public_reason=public_reason,
     )

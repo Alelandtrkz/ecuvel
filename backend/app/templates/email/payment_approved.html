@@ -1,0 +1,13 @@
+{% extends "email/base.html" %}
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:26px;line-height:1.25;">Pago confirmado</h1>
+<p style="margin:0 0 16px;">Hola {{ buyer_name }}, confirmamos que tu pago fue aprobado correctamente.</p>
+<div style="margin:0 0 20px;padding:16px;background:#f0f5f4;border-radius:10px;">
+  <strong>Pago:</strong> {{ payment_public_code }}<br>
+  <strong>Pedido:</strong> {{ order_number }}<br>
+  <strong>Total:</strong> {{ currency }} {{ amount }}<br>
+  <strong>Estado:</strong> Aprobado
+</div>
+<p style="margin:0 0 24px;">Tu pedido continuará con el proceso de preparación. Puedes consultar su estado desde tu cuenta ECUVEL.</p>
+<p style="margin:0;"><a href="{{ action_url }}" style="display:inline-block;background:#006653;color:#ffffff;text-decoration:none;font-weight:700;padding:13px 22px;border-radius:10px;">Ver mi pedido</a></p>
+{% endblock %}

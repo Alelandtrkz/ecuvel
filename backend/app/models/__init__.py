@@ -31,7 +31,11 @@ from app.models.order import (
     OrderItem,
     SellerOrder,
 )
-from app.models.payment import PaymentAttempt, PaymentProof
+from app.models.payment import (
+    PaymentAttempt,
+    PaymentNotificationOutbox,
+    PaymentProof,
+)
 from app.models.payout import SellerPayout, SellerPayoutItem
 from app.models.payment_analysis import PaymentProofAnalysis
 from app.models.partner_onboarding import (
@@ -91,6 +95,7 @@ __all__ = [
     "OrderItem",
     "PaymentAttempt",
     "PaymentProof",
+    "PaymentNotificationOutbox",
     "PaymentProofAnalysis",
     "SellerPayout",
     "SellerPayoutItem",

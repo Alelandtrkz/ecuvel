@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -20,7 +21,12 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.extensions import db
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
-from app.models.enums import PaymentMethod, PaymentProofStatus, PaymentStatus
+from app.models.enums import (
+    PaymentMethod,
+    PaymentNotificationStatus,
+    PaymentProofStatus,
+    PaymentStatus,
+)
 
 
 class PaymentAttempt(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
@@ -195,5 +201,65 @@ class PaymentProof(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             "'DUPLICATE_PROOF', 'UNREADABLE_PROOF', 'INVALID_DATE', "
             "'UNVERIFIABLE_TRANSACTION', 'INVALID_DOCUMENT', 'OTHER')",
             name="payment_proof_rejection_reason_code_valid",
+        ),
+    )
+
+
+class PaymentNotificationOutbox(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
+    __tablename__ = "payment_notification_outbox"
+
+    payment_attempt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("payment_attempts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    order_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orders.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(15),
+        nullable=False,
+        default=PaymentNotificationStatus.PENDING.value,
+        server_default=PaymentNotificationStatus.PENDING.value,
+        index=True,
+    )
+    attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    payment_attempt: Mapped["PaymentAttempt"] = relationship("PaymentAttempt")
+    order: Mapped["Order"] = relationship("Order")
+    user: Mapped["User"] = relationship("User")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "payment_attempt_id",
+            "event_type",
+            name="uq_payment_notification_outbox_event",
+        ),
+        CheckConstraint(
+            "event_type IN ('PAYMENT_APPROVED', 'PAYMENT_REJECTED')",
+            name="ck_payment_notification_event_type",
+        ),
+        CheckConstraint(
+            "attempts >= 0", name="ck_payment_notification_attempts"
         ),
     )

@@ -93,6 +93,23 @@ services:
       db:
         condition: service_healthy
 
+  payment_notification_dispatcher:
+    build:
+      context: ./backend
+    container_name: ecuvel-payment-notification-dispatcher
+    restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - sh
+      - -c
+      - while true; do flask --app wsgi:app payment-notifications dispatch --limit 100; sleep 30; done
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   ecuvel_postgres_data:
   payment_proofs_data:

@@ -64,6 +64,7 @@ def create_app() -> Flask:
         review_moderation_command,
         review_notifications_command,
     )
+    from app.commands.payment_notifications import payment_notifications_command
     from app.blueprints.auth import auth
     from app.blueprints.account import account
     from app.blueprints.partners import partners
@@ -116,6 +117,7 @@ def create_app() -> Flask:
     app.cli.add_command(marketplace_policy_command)
     app.cli.add_command(review_moderation_command)
     app.cli.add_command(review_notifications_command)
+    app.cli.add_command(payment_notifications_command)
 
     app.register_blueprint(auth)
     app.register_blueprint(account)

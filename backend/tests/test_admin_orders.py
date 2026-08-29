@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.extensions import db
 from app.models import (
@@ -15,6 +15,7 @@ from app.models import (
     OrderItem,
     OrderPackage,
     PaymentAttempt,
+    PaymentNotificationOutbox,
     PaymentProof,
     SellerOrder,
     StaffProfile,
@@ -544,6 +545,8 @@ def test_approve_web_uses_domain_service_and_is_not_available_by_get(session, cl
     assert session.get(PaymentAttempt, attempt.id).status == PaymentStatus.APPROVED
     assert session.get(Order, order.id).status == OrderStatus.CONFIRMED
     assert session.get(PaymentProof, proof.id).reviewed_by_user_id == staff.id
+    assert session.scalar(select(func.count(PaymentNotificationOutbox.id))) == 1
+    assert session.scalar(select(PaymentNotificationOutbox.event_type)) == "PAYMENT_APPROVED"
     seller_orders = session.scalars(select(SellerOrder).where(SellerOrder.order_id == order.id)).all()
     assert all(item.status == SellerOrderStatus.CONFIRMED for item in seller_orders)
     assert all(
@@ -560,6 +563,7 @@ def test_approve_web_uses_domain_service_and_is_not_available_by_get(session, cl
     ).status_code == 302
     session.expire_all()
     assert session.get(PaymentProof, proof.id).status == PaymentProofStatus.APPROVED
+    assert session.scalar(select(func.count(PaymentNotificationOutbox.id))) == 1
 
 
 def test_reject_requires_reason_and_releases_reservations(session, client, app, tmp_path):
@@ -585,6 +589,8 @@ def test_reject_requires_reason_and_releases_reservations(session, client, app, 
     assert session.get(PaymentProof, proof.id).status == PaymentProofStatus.REJECTED
     assert session.get(PaymentAttempt, attempt.id).status == PaymentStatus.REJECTED
     assert session.get(Order, order.id).status == OrderStatus.CANCELLED
+    assert session.scalar(select(func.count(PaymentNotificationOutbox.id))) == 1
+    assert session.scalar(select(PaymentNotificationOutbox.event_type)) == "PAYMENT_REJECTED"
     assert all(
         reservation.status == ReservationStatus.RELEASED
         for reservation in session.scalars(select(InventoryReservation))

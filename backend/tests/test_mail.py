@@ -106,7 +106,16 @@ def test_resend_success_returns_provider_id_and_sends_utf8(app, monkeypatch):
         return _Response(b'{"id":"provider-message-123"}')
 
     monkeypatch.setattr("app.services.mail.urlopen", fake_open)
-    result = service.send(_message())
+    source_message = _message()
+    message = OutgoingMail(
+        to=source_message.to,
+        subject=source_message.subject,
+        text_body=source_message.text_body,
+        html_body=source_message.html_body,
+        tags=source_message.tags,
+        idempotency_key="payment-notification/stable-outbox-id",
+    )
+    result = service.send(message)
     request = captured["request"]
     payload = json.loads(request.data.decode("utf-8"))
 
@@ -118,7 +127,27 @@ def test_resend_success_returns_provider_id_and_sends_utf8(app, monkeypatch):
     assert payload["text"] == _message().text_body
     assert payload["html"] == _message().html_body
     assert payload["tags"] == [{"name": "mail_type", "value": "VERIFY_EMAIL"}]
+    headers = {name.casefold(): value for name, value in request.header_items()}
+    assert headers["idempotency-key"] == (
+        "payment-notification/stable-outbox-id"
+    )
     assert request.data.decode("utf-8").count("�") == 0
+
+
+def test_optional_idempotency_key_is_preserved_by_memory_backend(app):
+    service = MailService()
+    app.config["MAIL_BACKEND"] = "memory"
+
+    service.send(OutgoingMail(
+        to="recipient@example.test",
+        subject="Asunto",
+        body="Texto",
+        idempotency_key="payment-notification/stable-outbox-id",
+    ))
+
+    assert service.outbox[0].idempotency_key == (
+        "payment-notification/stable-outbox-id"
+    )
 
 
 @pytest.mark.parametrize("status", (401, 403, 429, 500))

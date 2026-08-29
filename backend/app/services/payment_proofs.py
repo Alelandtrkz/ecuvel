@@ -14,6 +14,7 @@ from app.models import (
     Order,
     OrderItem,
     PaymentAttempt,
+    PaymentNotificationOutbox,
     PaymentProof,
     SellerOrder,
     User,
@@ -460,6 +461,18 @@ def review_payment_proof(
                 else "PAYMENT_REJECTED"
             ),
             metadata_json=audit_metadata,
+        )
+    )
+    session.add(
+        PaymentNotificationOutbox(
+            payment_attempt_id=attempt.id,
+            order_id=order.id,
+            user_id=order.buyer_id,
+            event_type=(
+                "PAYMENT_APPROVED"
+                if target == PaymentProofStatus.APPROVED
+                else "PAYMENT_REJECTED"
+            ),
         )
     )
     session.flush()
