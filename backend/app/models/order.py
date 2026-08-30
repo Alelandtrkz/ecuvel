@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Numeric,
     String,
     UniqueConstraint,
@@ -327,6 +328,11 @@ class SellerOrder(
             "order_id",
             "store_id",
             name="uq_seller_orders_order_store",
+        ),
+        Index(
+            "ix_seller_orders_store_payout_eligible",
+            "store_id",
+            "payout_eligible_at",
         ),
         CheckConstraint(
             "subtotal >= 0",

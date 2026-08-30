@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -34,8 +35,6 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     payout_number: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        unique=True,
-        index=True,
         server_default=text(
             "('PAY-' || lpad(nextval('seller_payout_number_seq'::regclass)::text, 8, '0'))"
         ),
@@ -106,6 +105,14 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     )
 
     __table_args__ = (
+        UniqueConstraint("payout_number", name="uq_seller_payouts_payout_number"),
+        Index("ix_seller_payouts_payout_number", "payout_number"),
+        Index(
+            "ix_seller_payouts_store_status_schedule",
+            "store_id",
+            "status",
+            "scheduled_for",
+        ),
         CheckConstraint("gross_sales_total >= 0", name="seller_payout_gross_nonnegative"),
         CheckConstraint("discount_total >= 0", name="seller_payout_discount_nonnegative"),
         CheckConstraint("commission_total >= 0", name="seller_payout_commission_nonnegative"),
@@ -163,6 +170,11 @@ class SellerPayoutItem(db.Model):
 
     __table_args__ = (
         UniqueConstraint("seller_order_id", name="uq_seller_payout_items_seller_order"),
+        Index(
+            "ix_seller_payout_items_payout_eligible",
+            "payout_id",
+            "eligible_at",
+        ),
         CheckConstraint(
             "gross_amount_snapshot >= 0", name="seller_payout_item_gross_nonnegative"
         ),
