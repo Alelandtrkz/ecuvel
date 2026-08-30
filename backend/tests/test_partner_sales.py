@@ -140,7 +140,15 @@ def _sale(
     discount: Decimal = Decimal("2.00"),
     commission: Decimal = Decimal("3.00"),
 ):
-    order_id, _number, item_ids = create_order_items(session, base, [quantity])
+    order_id, _number, item_ids = create_order_items(
+        session,
+        base,
+        [quantity],
+        discount_total=discount,
+        commission_rate=(
+            commission / (Decimal(quantity) * Decimal("10.00")) * Decimal("100")
+        ),
+    )
     order = session.get(Order, order_id)
     seller_order = session.scalar(
         select(SellerOrder).where(SellerOrder.order_id == order_id)
@@ -149,13 +157,7 @@ def _sale(
     order.status = OrderStatus.CONFIRMED
     seller_order.status = SellerOrderStatus.CONFIRMED
     seller_order.decision_status = SellerOrderDecisionStatus.APPROVED
-    seller_order.discount_total = discount
-    seller_order.commission_total = commission
-    seller_order.seller_net_total = seller_order.subtotal - discount - commission
-    item.discount_amount = discount
-    item.commission_rate_snapshot = Decimal("15.00")
-    item.commission_amount_snapshot = commission
-    item.line_total = item.unit_price * item.quantity - discount
+    assert seller_order.commission_total == commission
     attempt = PaymentAttempt(
         order_id=order.id,
         method=PaymentMethod.BANK_TRANSFER,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -47,6 +48,12 @@ def app():
     application.config["TESTING"] = True
     application.config["WTF_CSRF_ENABLED"] = False
     application.config["RATELIMIT_ENABLED"] = False
+    application.config["BANK_ACCOUNT_ENCRYPTION_KEY"] = base64.b64encode(
+        bytes(range(32))
+    ).decode("ascii")
+    application.config["BANK_ACCOUNT_FINGERPRINT_KEY"] = base64.b64encode(
+        bytes(range(32, 64))
+    ).decode("ascii")
     limiter.enabled = False
 
     with application.app_context():

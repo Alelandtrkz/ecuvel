@@ -24,6 +24,7 @@ from app.models import (
 from app.models.enums import (
     LocationType,
     OfferStatus,
+    SellerCommissionType,
     SellerOrderDecisionStatus,
     StoreStatus,
     UserStatus,
@@ -202,6 +203,9 @@ def create_order_items(
     session: Session,
     base: BaseData,
     quantities: list[int],
+    *,
+    discount_total: Decimal = Decimal("0.00"),
+    commission_rate: Decimal = Decimal("0.00"),
 ) -> tuple[uuid.UUID, str, tuple[uuid.UUID, ...]]:
     token = _token()
     subtotal = Decimal(sum(quantities) * 10)
@@ -218,14 +222,18 @@ def create_order_items(
     session.add(order)
     session.flush()
 
+    commission_total = (subtotal * commission_rate / Decimal("100")).quantize(
+        Decimal("0.01")
+    )
     seller_order = SellerOrder(
         seller_order_number=f"SORD-{token}",
         order_id=order.id,
         store_id=base.store_id,
         subtotal=subtotal,
-        discount_total=Decimal("0.00"),
-        commission_total=Decimal("0.00"),
-        seller_net_total=subtotal,
+        discount_total=discount_total,
+        commission_total=commission_total,
+        seller_net_total=subtotal - discount_total - commission_total,
+        currency="USD",
         decision_status=SellerOrderDecisionStatus.APPROVED,
     )
     session.add(seller_order)
@@ -235,18 +243,28 @@ def create_order_items(
 
     for index, quantity in enumerate(quantities):
         total = Decimal(quantity * 10)
+        item_discount = discount_total if index == 0 else Decimal("0.00")
+        item_commission = (total * commission_rate / Decimal("100")).quantize(
+            Decimal("0.01")
+        )
         item = OrderItem(
             seller_order_id=seller_order.id,
             offer_id=base.offer_id,
+            store_id_snapshot=base.store_id,
             quantity=quantity,
             unit_price=Decimal("10.00"),
-            discount_amount=Decimal("0.00"),
+            discount_amount=item_discount,
             tax_amount=Decimal("0.00"),
-            line_total=total,
+            line_total=total - item_discount,
+            currency="USD",
+            gross_line_amount=total,
             product_name_snapshot=f"Product {index}",
             seller_name_snapshot="Store Test",
             seller_sku_snapshot=f"ITEM-{token}-{index}",
             variant_snapshot={},
+            commission_type_snapshot=SellerCommissionType.PERCENTAGE,
+            commission_rate_snapshot=commission_rate,
+            commission_amount_snapshot=item_commission,
         )
         session.add(item)
         items.append(item)

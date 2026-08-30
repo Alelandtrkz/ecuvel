@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -15,6 +15,7 @@ from app.models import (
     StoreInventoryLocation,
     StoreMember,
     StoreOnboarding,
+    StoreBankAccountVersion,
     User,
     Warehouse,
 )
@@ -23,6 +24,7 @@ from app.models.enums import (
     StoreMemberRole,
     StoreOnboardingStatus,
     StoreStatus,
+    BankAccountVersionStatus,
     UserStatus,
 )
 from app.services.mail import mail_service
@@ -126,6 +128,14 @@ def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client
     member = session.scalar(select(StoreMember).where(StoreMember.store_id == store.id))
     assert member.user_id == user.id
     assert member.role == StoreMemberRole.OWNER
+    bank_version = session.scalar(
+        select(StoreBankAccountVersion).where(
+            StoreBankAccountVersion.store_id == store.id
+        )
+    )
+    assert bank_version.status == BankAccountVersionStatus.PENDING_REVIEW
+    assert bank_version.encrypted_account_number
+    assert bank_version.account_last4 == "6789"
 
     review_onboarding(
         session=session,
@@ -135,6 +145,9 @@ def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client
         comments="Datos verificados.",
     )
     session.commit()
+    session.refresh(bank_version)
+    assert bank_version.status == BankAccountVersionStatus.APPROVED
+    assert bank_version.usable_from == bank_version.reviewed_at + timedelta(hours=48)
 
     assert client.get("/partners/contract").status_code == 200
     monkeypatch.setattr("app.services.partner_onboarding.secrets.randbelow", lambda upper: 123456)

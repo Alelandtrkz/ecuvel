@@ -13,6 +13,12 @@ from app.services.admin_access import ecuvel_staff_required
 P = ParamSpec("P")
 R = TypeVar("R")
 
+PAYOUT_PERMISSIONS = frozenset({
+    "payouts.view", "payouts.schedule", "payouts.hold", "payouts.pay",
+    "payouts.cancel", "payouts.proof.view",
+})
+BANK_SENSITIVE_PERMISSION = "bank_accounts.sensitive.view"
+
 ALL_PERMISSIONS = frozenset({
     "admin.users.view", "admin.users.manage", "admin.staff.view", "admin.staff.manage",
     "scanner.use", "scanner.receive_package", "scanner.dispatch_package",
@@ -21,7 +27,15 @@ ALL_PERMISSIONS = frozenset({
     "stores.moderate", "operations.supervise",
     "reviews.view", "reviews.moderate",
     "payments.view", "payments.review",
-})
+}) | PAYOUT_PERMISSIONS | {BANK_SENSITIVE_PERMISSION}
+
+# Mantiene el acceso Admin histórico sin convertir la condición genérica de
+# staff legacy en autorización para descifrar datos bancarios ni operar pagos.
+LEGACY_PERMISSIONS = (
+    ALL_PERMISSIONS
+    - PAYOUT_PERMISSIONS
+    - {BANK_SENSITIVE_PERMISSION}
+) | {"payouts.view", "payouts.proof.view"}
 
 ROLE_PERMISSIONS: dict[StaffRole, frozenset[str]] = {
     StaffRole.SUPER_ADMIN: ALL_PERMISSIONS,
@@ -54,9 +68,9 @@ def permissions_for_user(user) -> frozenset[str]:
         return frozenset()
     profile = getattr(user, "staff_profile", None)
     # Legacy staff existed before StaffProfile. Preserve its current admin access
-    # until an explicit profile is adopted; never fabricate identity data.
+    # until an explicit profile is adopted, except new sensitive bank access.
     if profile is None:
-        return ALL_PERMISSIONS
+        return LEGACY_PERMISSIONS
     if profile.employment_status != StaffEmploymentStatus.ACTIVE:
         return frozenset()
     return ROLE_PERMISSIONS.get(profile.role, frozenset())

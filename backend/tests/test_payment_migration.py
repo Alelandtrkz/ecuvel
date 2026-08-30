@@ -85,6 +85,13 @@ def test_payment_identity_migration_backfills_legacy_rows_deterministically(
                 "AND column_name = 'public_code'"
             )).scalar_one() == 0
 
+        # L1A was intentionally applied after the controlled cleanup left zero
+        # OrderItems. These rows are only scaffolding for the payment migration
+        # test, so preserve its real precondition instead of manufacturing a
+        # LEGACY_INCOMPLETE financial cohort during the re-upgrade.
+        with engine.begin() as connection:
+            connection.execute(text("DELETE FROM order_items"))
+
         with app.app_context():
             upgrade(directory=str(migrations_dir))
 
@@ -102,4 +109,3 @@ def test_payment_identity_migration_backfills_legacy_rows_deterministically(
     assert [row[:7] for row in after] == before
     assert [row.id for row in after] == attempt_ids
     assert [row.public_code for row in after] == ["PMT-00000001", "PMT-00000002"]
-

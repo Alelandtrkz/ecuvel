@@ -132,6 +132,18 @@ class SellerCommissionType(StrEnum):
     FIXED = "FIXED"
 
 
+class BankAccountType(StrEnum):
+    UNKNOWN = "UNKNOWN"
+    CHECKING = "CHECKING"
+    SAVINGS = "SAVINGS"
+
+
+class BankAccountVersionStatus(StrEnum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    SUPERSEDED = "SUPERSEDED"
+
+
 class OrderStatus(StrEnum):
     PENDING_PAYMENT = "PENDING_PAYMENT"
     CONFIRMED = "CONFIRMED"

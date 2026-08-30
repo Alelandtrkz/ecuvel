@@ -121,6 +121,12 @@ class Store(
         back_populates="store",
     )
 
+    bank_account_versions: Mapped[list["StoreBankAccountVersion"]] = relationship(
+        "StoreBankAccountVersion",
+        back_populates="store",
+        order_by="StoreBankAccountVersion.version",
+    )
+
     product_code_counter: Mapped["StoreProductCounter | None"] = relationship(
         "StoreProductCounter",
         back_populates="store",

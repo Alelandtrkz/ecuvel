@@ -92,6 +92,17 @@ class Config:
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_ENABLED = not TESTING
 
+    # Secretos bancarios lazy: la aplicación puede iniciar sin ellos, pero toda
+    # operación de cifrado/descifrado falla cerrada hasta configurarlos.
+    BANK_ACCOUNT_ENCRYPTION_KEY = os.getenv("BANK_ACCOUNT_ENCRYPTION_KEY")
+    BANK_ACCOUNT_ENCRYPTION_KEY_VERSION = os.getenv(
+        "BANK_ACCOUNT_ENCRYPTION_KEY_VERSION", "v1"
+    )
+    BANK_ACCOUNT_FINGERPRINT_KEY = os.getenv("BANK_ACCOUNT_FINGERPRINT_KEY")
+    BANK_ACCOUNT_FINGERPRINT_KEY_VERSION = os.getenv(
+        "BANK_ACCOUNT_FINGERPRINT_KEY_VERSION", "v1"
+    )
+
     ADMIN_CRITICAL_STOCK_THRESHOLD = _environment_int_range(
         "ADMIN_CRITICAL_STOCK_THRESHOLD", 5, 1, 1000
     )

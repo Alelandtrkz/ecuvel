@@ -38,6 +38,11 @@ from app.models.enums import (
     StoreVerificationDecision,
 )
 from app.services.mail import OutgoingMail, mail_service
+from app.services.bank_accounts import (
+    BankAccountVersionError,
+    approve_latest_onboarding_bank_version,
+    sync_bank_version_from_onboarding,
+)
 from app.services.phone_otp import get_phone_otp_sender, mask_phone
 from app.services.marketplace_policy import ensure_store_inventory_location
 from app.services.private_storage import (
@@ -153,6 +158,13 @@ def save_step(
     validate_step(onboarding, step, data, require_documents=False)
     for field in STEPS[step].fields:
         setattr(onboarding, field, _clean(data.get(field)))
+    if step == 5 and onboarding.store_id is not None:
+        try:
+            sync_bank_version_from_onboarding(
+                session, onboarding, actor_user_id=user_id
+            )
+        except BankAccountVersionError as exc:
+            raise PartnerOnboardingStateError(str(exc)) from exc
     if step == 4 and staged_documents:
         if storage_root is None:
             raise PartnerOnboardingStateError("No se configuró el almacenamiento de documentos.")
@@ -280,6 +292,12 @@ def submit_for_review(session: Session, user_id) -> StoreOnboarding:
         store.tax_id = onboarding.legal_id_number
         store.status = StoreStatus.PENDING_REVIEW
         store.is_verified = False
+    try:
+        sync_bank_version_from_onboarding(
+            session, onboarding, actor_user_id=user_id
+        )
+    except BankAccountVersionError as exc:
+        raise PartnerOnboardingStateError(str(exc)) from exc
     onboarding.status = StoreOnboardingStatus.SUBMITTED
     onboarding.current_stage = StoreOnboardingStage.WAITING_VERIFICATION
     onboarding.submitted_at = now
@@ -348,6 +366,15 @@ def review_onboarding(
         onboarding.status = StoreOnboardingStatus.APPROVED
         onboarding.current_stage = StoreOnboardingStage.CONTRACT_ACCEPTANCE
         onboarding.approved_at = now
+        try:
+            approve_latest_onboarding_bank_version(
+                session,
+                onboarding,
+                reviewed_at=now,
+                reviewer_user_id=_optional_uuid(reviewer_user_id),
+            )
+        except BankAccountVersionError as exc:
+            raise PartnerOnboardingStateError(str(exc)) from exc
         if onboarding.store:
             onboarding.store.status = StoreStatus.PENDING_REVIEW
         for document in onboarding.documents:

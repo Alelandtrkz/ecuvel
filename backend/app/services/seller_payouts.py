@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -18,7 +17,6 @@ from app.models import (
     SellerOrder,
     SellerPayout,
     SellerPayoutItem,
-    StoreOnboarding,
 )
 from app.models.enums import (
     PackageStatus,
@@ -26,7 +24,11 @@ from app.models.enums import (
     SellerOrderDecisionStatus,
     SellerOrderStatus,
     SellerPayoutStatus,
-    StoreOnboardingStatus,
+)
+from app.services.bank_accounts import usable_bank_account_version
+from app.services.financial_reconciliation import (
+    FinancialReconciliationError,
+    reconcile_seller_order,
 )
 from app.services.private_storage import StagedPrivateFile, promote_private_file
 
@@ -246,26 +248,6 @@ def eligible_seller_orders(
     )
 
 
-def _bank_snapshot(session: Session, store_id: uuid.UUID) -> tuple[str, str]:
-    onboarding = session.scalar(
-        select(StoreOnboarding)
-        .where(
-            StoreOnboarding.store_id == store_id,
-            StoreOnboarding.status == StoreOnboardingStatus.COMPLETED,
-        )
-        .order_by(StoreOnboarding.completed_at.desc().nullslast(), StoreOnboarding.id)
-        .limit(1)
-    )
-    bank_name = (onboarding.bank_name or "").strip() if onboarding else ""
-    raw_account = (onboarding.bank_account_number or "").strip() if onboarding else ""
-    compact_account = re.sub(r"[^A-Za-z0-9]", "", raw_account)
-    if not bank_name or len(compact_account) < 4:
-        raise SellerPayoutEligibilityError(
-            "La tienda no tiene una cuenta bancaria completa para programar la liquidación."
-        )
-    return bank_name[:120], compact_account[-4:]
-
-
 def schedule_seller_payout(
     session: Session,
     *,
@@ -280,6 +262,9 @@ def schedule_seller_payout(
     if status not in {SellerPayoutStatus.SCHEDULED, SellerPayoutStatus.ON_HOLD}:
         raise SellerPayoutTransitionError("El lote nuevo debe quedar programado o en revisión.")
     scheduled_at = _utc(scheduled_for)
+    effective_now = _utc(now or datetime.now(timezone.utc))
+    if currency != "USD":
+        raise SellerPayoutEligibilityError("Liquidaciones V1 opera únicamente en USD.")
     orders = eligible_seller_orders(
         session,
         store_id=store_id,
@@ -290,7 +275,40 @@ def schedule_seller_payout(
     )
     if not orders:
         raise SellerPayoutEligibilityError("No existen pedidos elegibles para liquidar.")
-    bank_name, account_last4 = _bank_snapshot(session, store_id)
+    bank_version = usable_bank_account_version(
+        session,
+        store_id=store_id,
+        at=effective_now,
+        lock=True,
+    )
+    if bank_version is None:
+        raise SellerPayoutEligibilityError(
+            "La tienda no tiene una versión bancaria aprobada y utilizable."
+        )
+    try:
+        reconciled = {
+            row.seller_order_id: reconcile_seller_order(
+                session,
+                seller_order_id=row.seller_order_id,
+                expected_store_id=store_id,
+                expected_currency=currency,
+                lock=True,
+            )
+            for row in orders
+        }
+    except FinancialReconciliationError as exc:
+        raise SellerPayoutEligibilityError(str(exc)) from exc
+    if any(
+        snapshot.subtotal != row.gross_amount
+        or snapshot.discount_total != row.discount_amount
+        or snapshot.commission_total != row.commission_amount
+        or snapshot.seller_net_total != row.net_amount
+        for row in orders
+        for snapshot in (reconciled[row.seller_order_id],)
+    ):
+        raise SellerPayoutEligibilityError(
+            "Los snapshots financieros de los pedidos no son consistentes."
+        )
     gross = sum((row.gross_amount for row in orders), ZERO)
     discounts = sum((row.discount_amount for row in orders), ZERO)
     commission = sum((row.commission_amount for row in orders), ZERO)
@@ -301,6 +319,7 @@ def schedule_seller_payout(
         )
     payout = SellerPayout(
         store_id=store_id,
+        bank_account_version_id=bank_version.id,
         status=status,
         currency=currency,
         gross_sales_total=gross,
@@ -308,8 +327,8 @@ def schedule_seller_payout(
         commission_total=commission,
         net_total=net,
         scheduled_for=scheduled_at,
-        destination_bank_name_snapshot=bank_name,
-        destination_account_last4=account_last4,
+        destination_bank_name_snapshot=bank_version.bank_name,
+        destination_account_last4=bank_version.account_last4,
         notes=(notes or "").strip() or None,
     )
     session.add(payout)

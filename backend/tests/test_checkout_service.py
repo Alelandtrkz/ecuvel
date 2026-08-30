@@ -12,6 +12,7 @@ from app.models import (
     InventoryBalance,
     InventoryMovement,
     InventoryReservation,
+    MarketplaceCommissionRule,
     Order,
     OrderItem,
     PaymentAttempt,
@@ -42,6 +43,7 @@ from app.services.checkout import (
     build_checkout_preview,
     create_checkout_order,
 )
+from app.services.financial_reconciliation import reconcile_seller_order
 from tests.factories import BaseData, create_catalog_and_stock
 
 
@@ -223,11 +225,78 @@ def test_checkout_preserves_fixed_commission_compatibility(session: Session):
     item = session.scalar(
         select(OrderItem).where(OrderItem.seller_order_id == seller_order.id)
     )
-    assert item.commission_rate_snapshot == Decimal("0.00")
+    assert item.commission_type_snapshot == SellerCommissionType.FIXED
+    assert item.commission_rate_snapshot is None
+    assert item.commission_fixed_amount_snapshot == Decimal("0.25")
     assert item.quantity == 3
     assert item.commission_amount_snapshot == Decimal("0.75")
+    assert item.currency == "USD"
+    assert item.gross_line_amount == Decimal("3.00")
+    assert item.store_id_snapshot == seller_order.store_id
     assert seller_order.commission_total == Decimal("0.75")
     assert seller_order.seller_net_total == Decimal("2.25")
+
+
+def test_checkout_percentage_snapshot_does_not_follow_later_offer_changes(
+    session: Session,
+):
+    base = create_catalog_and_stock(session, stock=10)
+    offer = session.get(SellerOffer, base.offer_id)
+    offer.commission_type = SellerCommissionType.PERCENTAGE
+    offer.commission_rate = Decimal("12.50")
+    session.flush()
+    result = _checkout(
+        session, base, _cart((base.offer_id, 2, True)), "percentage-snapshot"
+    )
+    seller_order = session.scalar(
+        select(SellerOrder).where(SellerOrder.order_id == result.order_id)
+    )
+    item = seller_order.items[0]
+    assert item.commission_type_snapshot == SellerCommissionType.PERCENTAGE
+    assert item.commission_rate_snapshot == Decimal("12.50")
+    assert item.commission_fixed_amount_snapshot is None
+    assert item.commission_amount_snapshot == Decimal("2.50")
+    assert item.gross_line_amount == Decimal("20.00")
+
+    session.add(
+        MarketplaceCommissionRule(
+            category_id=offer.variant.product.category_id,
+            store_id=base.store_id,
+            commission_rate=Decimal("99.00"),
+            is_active=True,
+        )
+    )
+    offer.price = Decimal("99.00")
+    offer.commission_rate = Decimal("50.00")
+    snapshot = reconcile_seller_order(
+        session,
+        seller_order_id=seller_order.id,
+        expected_store_id=base.store_id,
+    )
+    assert snapshot.commission_total == Decimal("2.50")
+    assert snapshot.seller_net_total == Decimal("17.50")
+
+
+def test_checkout_percentage_commission_rounds_half_up(session: Session):
+    base = create_catalog_and_stock(session, stock=10)
+    offer = session.get(SellerOffer, base.offer_id)
+    offer.price = Decimal("0.05")
+    offer.commission_type = SellerCommissionType.PERCENTAGE
+    offer.commission_rate = Decimal("10.00")
+    session.flush()
+
+    result = _checkout(
+        session, base, _cart((base.offer_id, 1, True)), "percentage-rounding"
+    )
+    seller_order = session.scalar(
+        select(SellerOrder).where(SellerOrder.order_id == result.order_id)
+    )
+    item = seller_order.items[0]
+
+    assert item.gross_line_amount == Decimal("0.05")
+    assert item.commission_amount_snapshot == Decimal("0.01")
+    assert seller_order.commission_total == Decimal("0.01")
+    assert seller_order.seller_net_total == Decimal("0.04")
 
 
 def test_checkout_creates_one_seller_order_per_store(session: Session):

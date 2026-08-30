@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 import click
 from flask.cli import with_appcontext
@@ -20,6 +20,7 @@ from app.models import (
     Warehouse,
     WarehouseLocation,
 )
+from app.models.enums import SellerCommissionType
 from app.services.inventory import (
     InventoryServiceError,
     consume_inventory_reservation,
@@ -384,15 +385,26 @@ def reserve_demo_stock(
             )
 
             if order is None:
-                subtotal = (
-                    offer.price * quantity
-                ).quantize(Decimal("0.01"))
+                subtotal = (offer.price * quantity).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
 
-                commission_total = (
-                    subtotal
-                    * offer.commission_rate
-                    / Decimal("100")
-                ).quantize(Decimal("0.01"))
+                if offer.commission_type == SellerCommissionType.FIXED:
+                    if offer.commission_fixed_amount is None:
+                        raise click.ClickException(
+                            "La oferta no tiene una comisión fija completa."
+                        )
+                    commission_rate = None
+                    commission_fixed = offer.commission_fixed_amount
+                    commission_total = (
+                        commission_fixed * quantity
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                else:
+                    commission_rate = offer.commission_rate
+                    commission_fixed = None
+                    commission_total = (
+                        subtotal * commission_rate / Decimal("100")
+                    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                 seller_net_total = (
                     subtotal - commission_total
@@ -424,6 +436,7 @@ def reserve_demo_stock(
                         commission_total
                     ),
                     seller_net_total=seller_net_total,
+                    currency="USD",
                 )
 
                 session.add(seller_order)
@@ -432,11 +445,14 @@ def reserve_demo_stock(
                 order_item = OrderItem(
                     seller_order_id=seller_order.id,
                     offer_id=offer.id,
+                    store_id_snapshot=offer.store_id,
                     quantity=quantity,
                     unit_price=offer.price,
                     discount_amount=Decimal("0.00"),
                     tax_amount=Decimal("0.00"),
                     line_total=subtotal,
+                    currency="USD",
+                    gross_line_amount=subtotal,
                     product_name_snapshot=(
                         offer.variant.product.title
                     ),
@@ -450,6 +466,10 @@ def reserve_demo_stock(
                     variant_snapshot=dict(
                         offer.variant.attributes or {}
                     ),
+                    commission_type_snapshot=offer.commission_type,
+                    commission_rate_snapshot=commission_rate,
+                    commission_fixed_amount_snapshot=commission_fixed,
+                    commission_amount_snapshot=commission_total,
                 )
 
                 session.add(order_item)

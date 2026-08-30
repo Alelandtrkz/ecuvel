@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -60,6 +61,9 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     currency: Mapped[str] = mapped_column(
         String(3), nullable=False, default="USD", server_default="USD"
     )
+    bank_account_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
     gross_sales_total: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, default=Decimal("0.00"), server_default="0.00"
     )
@@ -97,6 +101,11 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     store: Mapped["Store"] = relationship("Store", back_populates="payouts")
+    bank_account_version: Mapped["StoreBankAccountVersion | None"] = relationship(
+        "StoreBankAccountVersion",
+        back_populates="payouts",
+        foreign_keys=[bank_account_version_id],
+    )
     items: Mapped[list["SellerPayoutItem"]] = relationship(
         "SellerPayoutItem",
         back_populates="payout",
@@ -106,6 +115,15 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
 
     __table_args__ = (
         UniqueConstraint("payout_number", name="uq_seller_payouts_payout_number"),
+        UniqueConstraint(
+            "external_reference", name="uq_seller_payouts_external_reference"
+        ),
+        ForeignKeyConstraint(
+            ["bank_account_version_id", "store_id"],
+            ["store_bank_account_versions.id", "store_bank_account_versions.store_id"],
+            name="fk_seller_payouts_bank_version_store",
+            ondelete="RESTRICT",
+        ),
         Index("ix_seller_payouts_payout_number", "payout_number"),
         Index(
             "ix_seller_payouts_store_status_schedule",
@@ -114,6 +132,7 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             "scheduled_for",
         ),
         CheckConstraint("gross_sales_total >= 0", name="seller_payout_gross_nonnegative"),
+        CheckConstraint("currency = 'USD'", name="seller_payout_currency_usd"),
         CheckConstraint("discount_total >= 0", name="seller_payout_discount_nonnegative"),
         CheckConstraint("commission_total >= 0", name="seller_payout_commission_nonnegative"),
         CheckConstraint("net_total >= 0", name="seller_payout_net_nonnegative"),
@@ -202,6 +221,7 @@ _PAYOUT_TOTAL_FIELDS = (
     "net_total",
     "currency",
     "store_id",
+    "bank_account_version_id",
 )
 _PAYOUT_ITEM_SNAPSHOT_FIELDS = (
     "seller_order_id",

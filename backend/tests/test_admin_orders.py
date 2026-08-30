@@ -29,6 +29,7 @@ from app.models.enums import (
     PaymentProofStatus,
     PaymentStatus,
     ReservationStatus,
+    SellerCommissionType,
     SellerOrderDecisionStatus,
     SellerOrderStatus,
     StaffEmploymentStatus,
@@ -173,6 +174,7 @@ def _display_order(
         discount_total=Decimal("0.00"),
         commission_total=Decimal("0.00"),
         seller_net_total=Decimal("10.00"),
+        currency="USD",
         approved_at=(
             now
             if seller_status not in {
@@ -187,15 +189,21 @@ def _display_order(
     item = OrderItem(
         seller_order_id=seller_order.id,
         offer_id=base.offer_id,
+        store_id_snapshot=base.store_id,
         quantity=1,
         unit_price=Decimal("10.00"),
         discount_amount=Decimal("0.00"),
         tax_amount=Decimal("0.00"),
         line_total=Decimal("10.00"),
+        currency="USD",
+        gross_line_amount=Decimal("10.00"),
         product_name_snapshot=f"Producto {suffix}",
         seller_name_snapshot="Tienda estados",
         seller_sku_snapshot=f"SKU-{suffix}",
         variant_snapshot={},
+        commission_type_snapshot=SellerCommissionType.PERCENTAGE,
+        commission_rate_snapshot=Decimal("0.00"),
+        commission_amount_snapshot=Decimal("0.00"),
     )
     session.add(item)
     session.flush()

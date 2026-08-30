@@ -38,6 +38,7 @@ from app.services.inventory import (
     get_sellable_quantities_by_warehouse_for_offers,
     reserve_inventory,
 )
+from app.services.financial_reconciliation import reconcile_seller_order
 
 
 ZERO = Decimal("0.00")
@@ -193,19 +194,43 @@ def _checkout_image_url(
     return f"/productos/{product.slug}/media/{selected.public_id}"
 
 
-def _line_commission(row: _CheckoutRow) -> Decimal:
+def _commission_snapshot(
+    row: _CheckoutRow,
+) -> tuple[SellerCommissionType, Decimal | None, Decimal | None, Decimal]:
+    gross = (row.offer.price * row.quantity).quantize(
+        MONEY_QUANTUM, rounding=ROUND_HALF_UP
+    )
     if row.offer.commission_type == SellerCommissionType.FIXED:
-        if row.offer.commission_fixed_amount is None:
+        if (
+            row.offer.commission_fixed_amount is None
+            or row.offer.commission_fixed_amount <= ZERO
+            or row.offer.commission_currency != "USD"
+        ):
             raise CheckoutPriceError("La oferta no tiene una tarifa fija válida.")
-        return (row.offer.commission_fixed_amount * row.quantity).quantize(
+        amount = (row.offer.commission_fixed_amount * row.quantity).quantize(
             MONEY_QUANTUM, rounding=ROUND_HALF_UP
         )
-    return (
-        row.offer.price
-        * row.quantity
-        * row.offer.commission_rate
-        / Decimal("100")
-    ).quantize(MONEY_QUANTUM, rounding=ROUND_HALF_UP)
+        if amount > gross:
+            raise CheckoutPriceError("La oferta no tiene una tarifa fija válida.")
+        return (
+            SellerCommissionType.FIXED,
+            None,
+            row.offer.commission_fixed_amount,
+            amount,
+        )
+    if row.offer.commission_type != SellerCommissionType.PERCENTAGE:
+        raise CheckoutPriceError("La oferta no tiene un tipo de comisión válido.")
+    rate = row.offer.commission_rate
+    if rate is None or rate < ZERO or rate > Decimal("100"):
+        raise CheckoutPriceError("La oferta no tiene una comisión válida.")
+    amount = (gross * rate / Decimal("100")).quantize(
+        MONEY_QUANTUM, rounding=ROUND_HALF_UP
+    )
+    return SellerCommissionType.PERCENTAGE, rate, None, amount
+
+
+def _line_commission(row: _CheckoutRow) -> Decimal:
+    return _commission_snapshot(row)[3]
 
 
 def _selected_items(cart_state: object) -> dict[uuid.UUID, int]:
@@ -572,6 +597,7 @@ def create_checkout_order(
             discount_total=ZERO,
             commission_total=commission_total,
             seller_net_total=store_subtotal - commission_total,
+            currency="USD",
         )
         session.add(seller_order)
         session.flush()
@@ -580,14 +606,20 @@ def create_checkout_order(
             line_total = (row.offer.price * row.quantity).quantize(
                 MONEY_QUANTUM
             )
+            commission_type, commission_rate, commission_fixed, commission_amount = (
+                _commission_snapshot(row)
+            )
             order_item = OrderItem(
                 seller_order_id=seller_order.id,
                 offer_id=row.offer.id,
+                store_id_snapshot=store_id,
                 quantity=row.quantity,
                 unit_price=row.offer.price,
                 discount_amount=ZERO,
                 tax_amount=ZERO,
                 line_total=line_total,
+                currency="USD",
+                gross_line_amount=line_total,
                 product_name_snapshot=row.product.title,
                 seller_name_snapshot=row.store.name,
                 seller_sku_snapshot=row.offer.seller_sku,
@@ -597,8 +629,10 @@ def create_checkout_order(
                     "catalog_sku": row.variant.catalog_sku,
                     "attributes": dict(row.variant.attributes or {}),
                 },
-                commission_rate_snapshot=row.offer.commission_rate,
-                commission_amount_snapshot=_line_commission(row),
+                commission_type_snapshot=commission_type,
+                commission_rate_snapshot=commission_rate,
+                commission_fixed_amount_snapshot=commission_fixed,
+                commission_amount_snapshot=commission_amount,
                 category_name_snapshot=row.category.name,
                 category_code_snapshot=row.category.code,
             )
@@ -619,6 +653,13 @@ def create_checkout_order(
             except InventoryServiceError as exc:
                 raise CheckoutItemUnavailableError(str(exc)) from exc
             purchased_offer_ids.append(row.offer.id)
+
+        reconcile_seller_order(
+            session,
+            seller_order_id=seller_order.id,
+            expected_store_id=store_id,
+            expected_currency="USD",
+        )
 
     attempt = PaymentAttempt(
         order_id=order.id,

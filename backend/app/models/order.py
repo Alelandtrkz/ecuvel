@@ -22,6 +22,7 @@ from app.extensions import db
 from app.models.base import TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import (
     OrderStatus,
+    SellerCommissionType,
     SellerOrderDecisionStatus,
     SellerOrderRejectionReason,
     SellerOrderStatus,
@@ -118,6 +119,10 @@ class Order(
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "currency = 'USD'",
+            name="order_currency_usd",
+        ),
         CheckConstraint(
             "subtotal >= 0",
             name="order_subtotal_nonnegative",
@@ -289,6 +294,10 @@ class SellerOrder(
         server_default="0.00",
     )
 
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="USD", server_default="USD"
+    )
+
     order: Mapped["Order"] = relationship(
         "Order",
         back_populates="seller_orders",
@@ -333,6 +342,10 @@ class SellerOrder(
             "ix_seller_orders_store_payout_eligible",
             "store_id",
             "payout_eligible_at",
+        ),
+        CheckConstraint(
+            "currency = 'USD'",
+            name="seller_order_currency_usd",
         ),
         CheckConstraint(
             "subtotal >= 0",
@@ -412,6 +425,13 @@ class OrderItem(
         index=True,
     )
 
+    store_id_snapshot: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("stores.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+
     quantity: Mapped[int] = mapped_column(
         nullable=False,
     )
@@ -440,6 +460,14 @@ class OrderItem(
         nullable=False,
     )
 
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="USD", server_default="USD"
+    )
+
+    gross_line_amount: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False
+    )
+
     product_name_snapshot: Mapped[str] = mapped_column(
         String(250),
         nullable=False,
@@ -466,11 +494,24 @@ class OrderItem(
         default=dict,
     )
 
+    commission_type_snapshot: Mapped[SellerCommissionType] = mapped_column(
+        Enum(
+            SellerCommissionType,
+            name="seller_commission_type",
+            native_enum=True,
+            validate_strings=True,
+            create_constraint=False,
+        ),
+        nullable=False,
+    )
     commission_rate_snapshot: Mapped[Decimal | None] = mapped_column(
         Numeric(5, 2), nullable=True
     )
-    commission_amount_snapshot: Mapped[Decimal | None] = mapped_column(
+    commission_fixed_amount_snapshot: Mapped[Decimal | None] = mapped_column(
         Numeric(12, 2), nullable=True
+    )
+    commission_amount_snapshot: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False
     )
     category_name_snapshot: Mapped[str | None] = mapped_column(
         String(120), nullable=True
@@ -498,6 +539,14 @@ class OrderItem(
         CheckConstraint(
             "quantity > 0",
             name="order_item_quantity_positive",
+        ),
+        CheckConstraint(
+            "currency = 'USD'",
+            name="order_item_currency_usd",
+        ),
+        CheckConstraint(
+            "gross_line_amount = unit_price * quantity",
+            name="order_item_gross_line_consistent",
         ),
         CheckConstraint(
             "unit_price >= 0",
@@ -536,12 +585,21 @@ class OrderItem(
             name="order_item_commission_rate_valid",
         ),
         CheckConstraint(
-            "commission_amount_snapshot IS NULL OR commission_amount_snapshot >= 0",
+            "commission_fixed_amount_snapshot IS NULL OR "
+            "commission_fixed_amount_snapshot >= 0",
+            name="order_item_commission_fixed_nonnegative",
+        ),
+        CheckConstraint(
+            "commission_amount_snapshot >= 0",
             name="order_item_commission_amount_nonnegative",
         ),
         CheckConstraint(
-            "(commission_rate_snapshot IS NULL) = "
-            "(commission_amount_snapshot IS NULL)",
+            "(commission_type_snapshot = 'PERCENTAGE' "
+            "AND commission_rate_snapshot IS NOT NULL "
+            "AND commission_fixed_amount_snapshot IS NULL) OR "
+            "(commission_type_snapshot = 'FIXED' "
+            "AND commission_rate_snapshot IS NULL "
+            "AND commission_fixed_amount_snapshot IS NOT NULL)",
             name="order_item_commission_snapshot_complete",
         ),
     )

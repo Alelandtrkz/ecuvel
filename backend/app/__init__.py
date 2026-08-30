@@ -59,6 +59,7 @@ def create_app() -> Flask:
         verify_user_email_command,
     )
     from app.commands.seller_payouts import seller_payouts_command
+    from app.commands.bank_accounts import bank_accounts_command
     from app.commands.marketplace_policy import marketplace_policy_command
     from app.commands.review_moderation import (
         review_moderation_command,
@@ -114,6 +115,7 @@ def create_app() -> Flask:
     app.cli.add_command(verify_user_email_command)
     app.cli.add_command(list_unverified_users_command)
     app.cli.add_command(seller_payouts_command)
+    app.cli.add_command(bank_accounts_command)
     app.cli.add_command(marketplace_policy_command)
     app.cli.add_command(review_moderation_command)
     app.cli.add_command(review_notifications_command)

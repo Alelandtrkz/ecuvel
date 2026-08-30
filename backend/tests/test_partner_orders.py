@@ -35,6 +35,7 @@ from app.models.enums import (
     PaymentMethod,
     PaymentStatus,
     ReservationStatus,
+    SellerCommissionType,
     SellerInboundPackageStatus,
     SellerOrderDecisionStatus,
     SellerOrderRejectionReason,
@@ -392,17 +393,23 @@ def test_rejected_seller_order_does_not_cancel_other_store_or_global_order(sessi
         decision_status=SellerOrderDecisionStatus.PENDING,
         subtotal=Decimal("10.00"), discount_total=Decimal("0.00"),
         commission_total=Decimal("0.00"), seller_net_total=Decimal("10.00"),
+        currency="USD",
     )
     session.add(foreign_order)
     session.flush()
     session.add(OrderItem(
         seller_order_id=foreign_order.id,
         offer_id=foreign.offer_id,
+        store_id_snapshot=foreign.store_id,
         quantity=1, unit_price=Decimal("10.00"),
         discount_amount=Decimal("0.00"), tax_amount=Decimal("0.00"),
         line_total=Decimal("10.00"), product_name_snapshot="Producto otra tienda",
+        currency="USD", gross_line_amount=Decimal("10.00"),
         seller_name_snapshot="Otra tienda", seller_sku_snapshot="OTHER-1",
         variant_snapshot={},
+        commission_type_snapshot=SellerCommissionType.PERCENTAGE,
+        commission_rate_snapshot=Decimal("0.00"),
+        commission_amount_snapshot=Decimal("0.00"),
     ))
     order.subtotal += Decimal("10.00")
     order.grand_total += Decimal("10.00")
@@ -481,14 +488,12 @@ def test_checkout_snapshots_commission_category_and_image(session: Session):
     assert item.image_url_snapshot == f"/productos/{product.slug}/media/{media.public_id}"
 
 
-def test_legacy_order_without_line_snapshots_still_builds_detail(session: Session):
+def test_complete_financial_snapshot_builds_detail_without_image(session: Session):
     base = create_catalog_and_stock(session)
     owner = _enable_owner(session, base)
     _order, seller_order, item_ids, *_ = _paid_pending_order(session, base)
     item = session.get(OrderItem, item_ids[0])
     item.image_url_snapshot = None
-    item.commission_rate_snapshot = None
-    item.commission_amount_snapshot = None
     detail = get_partner_order_detail(
         session,
         user_id=owner.id,
@@ -498,7 +503,7 @@ def test_legacy_order_without_line_snapshots_still_builds_detail(session: Sessio
         placeholder_image="/placeholder.svg",
     )
     assert detail.lines[0].image_url == "/placeholder.svg"
-    assert not detail.commission_breakdown_available
+    assert detail.commission_breakdown_available
     assert detail.buyer_pickup_point_name == "Punto de entrega Ecuvel"
 
 

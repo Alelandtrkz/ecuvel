@@ -16,6 +16,7 @@ from app.models import (
     SellerPayoutItem,
     Store,
     StoreOnboarding,
+    StoreBankAccountVersion,
 )
 from app.models.enums import (
     OrderStatus,
@@ -33,6 +34,10 @@ from app.services.seller_payouts import (
     eligible_seller_orders,
     mark_seller_payout_paid,
     schedule_seller_payout,
+)
+from app.services.bank_accounts import (
+    approve_store_bank_account_version,
+    create_store_bank_account_version,
 )
 from tests.factories import (
     create_catalog_and_stock,
@@ -55,10 +60,27 @@ def _bank_onboarding(session: Session, base):
         bank_account_owner="Tienda Test",
         bank_account_number="001-0000-4567",
         bank_name="Pichincha",
+        bank_id_number="TEST-ID-1",
         completed_at=datetime.now(timezone.utc),
     )
     session.add(onboarding)
     session.flush()
+    version, created = create_store_bank_account_version(
+        session,
+        store_id=base.store_id,
+        holder_name=onboarding.bank_account_owner,
+        holder_identification=onboarding.bank_id_number,
+        bank_name=onboarding.bank_name,
+        account_number=onboarding.bank_account_number,
+        source_onboarding_id=onboarding.id,
+    )
+    assert created
+    approve_store_bank_account_version(
+        session,
+        version=version,
+        reviewed_at=datetime.now(timezone.utc) - timedelta(days=3),
+        reviewer_user_id=None,
+    )
     return onboarding
 
 
@@ -163,6 +185,10 @@ def test_schedule_snapshots_totals_bank_and_prevents_double_payout(session: Sess
     )
     assert payout.destination_bank_name_snapshot == "Pichincha"
     assert payout.destination_account_last4 == "4567"
+    assert payout.bank_account_version_id is not None
+    assert session.get(
+        StoreBankAccountVersion, payout.bank_account_version_id
+    ).store_id == payout.store_id
     item = session.scalar(
         select(SellerPayoutItem).where(
             SellerPayoutItem.seller_order_id == seller_order.id

@@ -37,6 +37,7 @@ from app.models.payment import (
     PaymentProof,
 )
 from app.models.payout import SellerPayout, SellerPayoutItem
+from app.models.bank_account import StoreBankAccountVersion
 from app.models.payment_analysis import PaymentProofAnalysis
 from app.models.partner_onboarding import (
     StoreContractAcceptance,
@@ -99,6 +100,7 @@ __all__ = [
     "PaymentProofAnalysis",
     "SellerPayout",
     "SellerPayoutItem",
+    "StoreBankAccountVersion",
     "StoreOnboarding",
     "StoreOnboardingDocument",
     "StoreVerificationReview",
