@@ -326,10 +326,10 @@ class SellerOrder(
         cascade="all, delete-orphan",
     )
 
-    payout_item: Mapped["SellerPayoutItem | None"] = relationship(
+    payout_items: Mapped[list["SellerPayoutItem"]] = relationship(
         "SellerPayoutItem",
         back_populates="seller_order",
-        uselist=False,
+        order_by="SellerPayoutItem.payout_id",
     )
 
     __table_args__ = (

@@ -276,11 +276,7 @@ def test_l1b2_upgrade_fails_closed_before_any_drop_for_sensitive_jsonb(
         _upgrade(app)
 
 
-def test_l1b2_head_has_no_legacy_columns_and_preserves_bank_email(engine) -> None:
+def test_l1b2_schema_has_no_legacy_columns_and_preserves_bank_email(engine) -> None:
     columns = _onboarding_columns(engine)
     assert not (LEGACY_COLUMNS & set(columns))
     assert columns["bank_email"]["nullable"] is True
-    with engine.connect() as connection:
-        assert connection.execute(
-            text("SELECT version_num FROM alembic_version")
-        ).scalar_one() == L1B2_HEAD

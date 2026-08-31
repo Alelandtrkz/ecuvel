@@ -664,7 +664,8 @@ def _payout_rows(
     payments = approved_payment_dates_subquery()
     assigned = exists(
         select(SellerPayoutItem.seller_order_id).where(
-            SellerPayoutItem.seller_order_id == SellerOrder.id
+            SellerPayoutItem.seller_order_id == SellerOrder.id,
+            SellerPayoutItem.released_at.is_(None),
         )
     )
     local_eligible_date = cast(
@@ -692,7 +693,7 @@ def _payout_rows(
                 date_label=(
                     f"{eligible_date.day:02d} {MONTH_ABBR_ES[eligible_date.month - 1]} {eligible_date.year}"
                     if eligible_date is not None
-                    else "Después de la entrega + 15 días"
+                    else "Después de la entrega + 4 días"
                 ),
                 status_key="pending",
                 status_label="Pendiente",
@@ -874,7 +875,8 @@ def get_partner_sales_export(
         .join(OrderItem, OrderItem.seller_order_id == SellerOrder.id)
         .outerjoin(
             SellerPayoutItem,
-            SellerPayoutItem.seller_order_id == SellerOrder.id,
+            (SellerPayoutItem.seller_order_id == SellerOrder.id)
+            & SellerPayoutItem.released_at.is_(None),
         )
         .outerjoin(SellerPayout, SellerPayout.id == SellerPayoutItem.payout_id)
         .where(

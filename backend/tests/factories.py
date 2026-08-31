@@ -390,3 +390,31 @@ def handover_ready_order(
         actor_user_id=base.operator_id,
         notes="test handover",
     )
+
+
+def create_approved_bank_version(
+    session: Session,
+    base: BaseData,
+    *,
+    reviewed_at: datetime | None = None,
+):
+    from app.services.bank_accounts import (
+        approve_store_bank_account_version,
+        create_store_bank_account_version,
+    )
+
+    version, _ = create_store_bank_account_version(
+        session,
+        store_id=base.store_id,
+        holder_name="Test payout holder",
+        holder_identification=f"TEST-{uuid.uuid4().hex[:10]}",
+        bank_name="Test Bank",
+        account_number=f"0010000{uuid.uuid4().int % 10_000_000:07d}",
+    )
+    approve_store_bank_account_version(
+        session,
+        version=version,
+        reviewed_at=reviewed_at or datetime.now(timezone.utc) - timedelta(days=3),
+        reviewer_user_id=None,
+    )
+    return version

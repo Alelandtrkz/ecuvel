@@ -43,7 +43,11 @@ from app.services.partner_sales import (
     resolve_sales_period,
 )
 from app.services.private_storage import private_file_path
-from tests.factories import create_catalog_and_stock, create_order_items
+from tests.factories import (
+    create_approved_bank_version,
+    create_catalog_and_stock,
+    create_order_items,
+)
 
 
 pytestmark = pytest.mark.integration
@@ -178,6 +182,10 @@ def _login(client, user: User):
     assert response.status_code == 302
 
 
+def _bank_id(session: Session, base):
+    return create_approved_bank_version(session, base).id
+
+
 def test_sales_metrics_chart_top_and_pending_use_real_store_snapshots(session: Session):
     base = create_catalog_and_stock(session)
     owner = _enable_store(session, base)
@@ -232,6 +240,7 @@ def test_sales_comparison_uses_previous_period_and_paid_is_not_pending(session: 
     )
     payout = SellerPayout(
         store_id=base.store_id,
+        bank_account_version_id=_bank_id(session, base),
         status=SellerPayoutStatus.PAID,
         currency="USD",
         gross_sales_total=current_seller_order.subtotal,
@@ -317,6 +326,7 @@ def test_sales_route_export_and_foreign_payout_are_private(client, session: Sess
     foreign_base = create_catalog_and_stock(session)
     foreign_payout = SellerPayout(
         store_id=foreign_base.store_id,
+        bank_account_version_id=_bank_id(session, foreign_base),
         status=SellerPayoutStatus.SCHEDULED,
         currency="USD",
         gross_sales_total=Decimal("10.00"),
@@ -356,6 +366,7 @@ def test_paid_payout_detail_masks_account_and_serves_private_receipt(
     path.write_bytes(payload)
     payout = SellerPayout(
         store_id=base.store_id,
+        bank_account_version_id=_bank_id(session, base),
         status=SellerPayoutStatus.PAID,
         currency="USD",
         gross_sales_total=Decimal("20.00"),

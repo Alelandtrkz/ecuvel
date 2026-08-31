@@ -48,7 +48,11 @@ from app.services.admin_operations import (
     get_admin_operations_page,
     search_admin_records,
 )
-from tests.factories import create_catalog_and_stock, create_order_items
+from tests.factories import (
+    create_approved_bank_version,
+    create_catalog_and_stock,
+    create_order_items,
+)
 
 
 @pytest.fixture
@@ -436,6 +440,7 @@ def test_dashboard_workflow_alerts_stock_attention_and_activity(session):
     session.add(
         SellerPayout(
             store_id=store.id,
+            bank_account_version_id=create_approved_bank_version(session, base).id,
             status=SellerPayoutStatus.ON_HOLD,
             currency="USD",
             gross_sales_total=Decimal("0.00"),

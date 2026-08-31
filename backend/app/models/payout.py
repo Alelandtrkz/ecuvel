@@ -61,8 +61,8 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     currency: Mapped[str] = mapped_column(
         String(3), nullable=False, default="USD", server_default="USD"
     )
-    bank_account_version_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True, index=True
+    bank_account_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, index=True
     )
     gross_sales_total: Mapped[Decimal] = mapped_column(
         Numeric(12, 2), nullable=False, default=Decimal("0.00"), server_default="0.00"
@@ -80,6 +80,9 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
         DateTime(timezone=True), nullable=False, index=True
     )
     paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
     external_reference: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -101,7 +104,7 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     store: Mapped["Store"] = relationship("Store", back_populates="payouts")
-    bank_account_version: Mapped["StoreBankAccountVersion | None"] = relationship(
+    bank_account_version: Mapped["StoreBankAccountVersion"] = relationship(
         "StoreBankAccountVersion",
         back_populates="payouts",
         foreign_keys=[bank_account_version_id],
@@ -154,8 +157,24 @@ class SellerPayout(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
             name="seller_payout_receipt_metadata_complete",
         ),
         CheckConstraint(
-            "status != 'PAID' OR (paid_at IS NOT NULL AND external_reference IS NOT NULL)",
-            name="seller_payout_paid_state_valid",
+            "(status IN ('SCHEDULED', 'ON_HOLD') AND paid_at IS NULL "
+            "AND external_reference IS NULL AND cancelled_at IS NULL) OR "
+            "(status = 'PAID' AND paid_at IS NOT NULL "
+            "AND external_reference IS NOT NULL AND btrim(external_reference) != '' "
+            "AND cancelled_at IS NULL) OR "
+            "(status = 'CANCELLED' AND cancelled_at IS NOT NULL "
+            "AND paid_at IS NULL AND external_reference IS NULL)",
+            name="seller_payout_state_valid",
+        ),
+        CheckConstraint(
+            "status != 'PAID' OR paid_at >= scheduled_for",
+            name="seller_payout_paid_not_before_schedule",
+        ),
+        CheckConstraint(
+            "status = 'PAID' OR (receipt_storage_key IS NULL "
+            "AND receipt_original_filename IS NULL AND receipt_media_type IS NULL "
+            "AND receipt_size_bytes IS NULL AND receipt_sha256 IS NULL)",
+            name="seller_payout_receipt_paid_only",
         ),
     )
 
@@ -181,14 +200,22 @@ class SellerPayoutItem(db.Model):
     commission_amount_snapshot: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     net_amount_snapshot: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     eligible_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     payout: Mapped[SellerPayout] = relationship("SellerPayout", back_populates="items")
     seller_order: Mapped["SellerOrder"] = relationship(
-        "SellerOrder", back_populates="payout_item"
+        "SellerOrder", back_populates="payout_items"
     )
 
     __table_args__ = (
-        UniqueConstraint("seller_order_id", name="uq_seller_payout_items_seller_order"),
+        Index(
+            "uq_seller_payout_items_active_seller_order",
+            "seller_order_id",
+            unique=True,
+            postgresql_where=text("released_at IS NULL"),
+        ),
         Index(
             "ix_seller_payout_items_payout_eligible",
             "payout_id",
@@ -222,8 +249,14 @@ _PAYOUT_TOTAL_FIELDS = (
     "currency",
     "store_id",
     "bank_account_version_id",
+    "payout_number",
+    "scheduled_for",
+    "destination_bank_name_snapshot",
+    "destination_account_last4",
+    "created_at",
 )
 _PAYOUT_ITEM_SNAPSHOT_FIELDS = (
+    "payout_id",
     "seller_order_id",
     "gross_amount_snapshot",
     "discount_amount_snapshot",
@@ -248,3 +281,9 @@ def _keep_payout_item_snapshot_immutable(_mapper, _connection, target) -> None:
         for field in _PAYOUT_ITEM_SNAPSHOT_FIELDS
     ):
         raise ValueError("El snapshot de un pedido liquidado es inmutable.")
+    released_history = state.attrs.released_at.history
+    if released_history.has_changes() and released_history.deleted:
+        previous = released_history.deleted[0]
+        current = released_history.added[0] if released_history.added else None
+        if previous is not None:
+            raise ValueError("La liberación histórica de un pedido es inmutable.")
