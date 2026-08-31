@@ -65,10 +65,6 @@ class StoreOnboarding(UUIDPrimaryKeyMixin, TimestampMixin, db.Model):
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     whatsapp_or_nickname: Mapped[str | None] = mapped_column(String(80), nullable=True)
-    bank_account_owner: Mapped[str | None] = mapped_column(String(150), nullable=True)
-    bank_account_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    bank_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    bank_id_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
     bank_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
 
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

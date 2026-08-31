@@ -73,9 +73,6 @@ def _enable_store(session: Session, base) -> User:
         current_step=5,
         store_name=session.get(Store, base.store_id).name,
         legal_id_number="1711111111",
-        bank_account_owner="Tienda Test",
-        bank_account_number="2200004567",
-        bank_name="Pichincha",
         completed_at=datetime.now(timezone.utc),
     )
     session.add_all(

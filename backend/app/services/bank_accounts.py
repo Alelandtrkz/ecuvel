@@ -2,31 +2,23 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
-from app.models import (
-    StoreBankAccountVersion,
-    StoreOnboarding,
-    StoreVerificationReview,
-)
+from app.models import StoreBankAccountVersion, StoreOnboarding
 from app.models.enums import (
     BankAccountType,
     BankAccountVersionStatus,
-    StoreOnboardingStatus,
-    StoreVerificationDecision,
 )
 from app.services.admin_permissions import user_has_permission
 from app.services.bank_account_crypto import (
     BankAccountCryptoError,
     configured_bank_account_crypto,
-    normalize_bank_account_number,
 )
 from app.services.financial_audit import (
-    BANK_ACCOUNT_LEGACY_PLAINTEXT_PURGED,
     BANK_ACCOUNT_VERSION_APPROVED,
     BANK_ACCOUNT_VERSION_CREATED,
     BANK_ACCOUNT_VERSION_SUPERSEDED,
@@ -35,12 +27,6 @@ from app.services.financial_audit import (
 
 
 BANK_ACCOUNT_USABILITY_DELAY = timedelta(hours=48)
-LEGACY_BANK_FIELDS = (
-    "bank_account_owner",
-    "bank_account_number",
-    "bank_name",
-    "bank_id_number",
-)
 LIVE_BANK_VERSION_STATUSES = (
     BankAccountVersionStatus.PENDING_REVIEW,
     BankAccountVersionStatus.APPROVED,
@@ -56,14 +42,6 @@ class BankAccountAccessError(BankAccountVersionError):
 
 
 @dataclass(frozen=True, slots=True)
-class BankAccountBackfillResult:
-    eligible: int
-    created: int
-    existing: int
-    skipped: int
-
-
-@dataclass(frozen=True, slots=True)
 class BankAccountSummary:
     id: uuid.UUID
     bank_name: str
@@ -74,34 +52,6 @@ class BankAccountSummary:
     status: BankAccountVersionStatus
     reviewed_at: datetime | None
     usable_from: datetime | None
-
-
-@dataclass(frozen=True, slots=True)
-class LegacyBankCleanupReport:
-    legacy_onboarding_rows: int
-    legacy_complete_rows: int
-    rows_with_store: int
-    rows_with_matching_bank_version: int
-    rows_without_bank_version: int
-    provenance_mismatch_rows: int
-    store_mismatch_rows: int
-    pending_versions: int
-    approved_versions: int
-    superseded_versions: int
-    crypto_fields_missing: int
-    authenticated_decrypt_success: int
-    account_mismatch_rows: int
-    identity_mismatch_rows: int
-    reviews_with_issues: int
-    bank_correction_issues: int
-    sensitive_snapshot_previous_values: int
-    account_number_snapshot_previous_values: int
-    rows_eligible_for_purge: int
-    blocked_rows: int
-    purged_rows: int = 0
-    sanitized_snapshot_previous_values: int = 0
-    sanitized_reviews: int = 0
-
 
 def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
@@ -408,35 +358,6 @@ def approve_store_bank_account_version(
     return version
 
 
-def sync_bank_version_from_onboarding(
-    session: Session,
-    onboarding: StoreOnboarding,
-    *,
-    actor_user_id: uuid.UUID | None = None,
-) -> tuple[StoreBankAccountVersion, bool] | None:
-    if onboarding.store_id is None:
-        return None
-    required = (
-        onboarding.bank_account_owner,
-        onboarding.bank_account_number,
-        onboarding.bank_name,
-        onboarding.bank_id_number,
-    )
-    if not all(_clean(value, 500) for value in required):
-        raise BankAccountVersionError("Los datos bancarios del onboarding están incompletos.")
-    return create_store_bank_account_version(
-        session,
-        store_id=onboarding.store_id,
-        holder_name=onboarding.bank_account_owner,
-        holder_identification=onboarding.bank_id_number,
-        bank_name=onboarding.bank_name,
-        account_number=onboarding.bank_account_number,
-        account_type=BankAccountType.UNKNOWN,
-        source_onboarding_id=onboarding.id,
-        actor_user_id=actor_user_id,
-    )
-
-
 def approve_latest_onboarding_bank_version(
     session: Session,
     onboarding: StoreOnboarding,
@@ -455,310 +376,6 @@ def approve_latest_onboarding_bank_version(
         reviewed_at=reviewed_at,
         reviewer_user_id=reviewer_user_id,
     )
-
-
-def backfill_legacy_bank_account_versions(
-    session: Session,
-) -> BankAccountBackfillResult:
-    onboardings = session.scalars(
-        select(StoreOnboarding)
-        .where(
-            StoreOnboarding.status == StoreOnboardingStatus.COMPLETED,
-            StoreOnboarding.store_id.is_not(None),
-            StoreOnboarding.bank_account_owner.is_not(None),
-            StoreOnboarding.bank_account_number.is_not(None),
-            StoreOnboarding.bank_name.is_not(None),
-            StoreOnboarding.bank_id_number.is_not(None),
-        )
-        .order_by(StoreOnboarding.id)
-    ).all()
-    created = existing = skipped = 0
-    for onboarding in onboardings:
-        try:
-            approval_time = onboarding.approved_at or onboarding.completed_at
-            if approval_time is None:
-                skipped += 1
-                continue
-            version, was_created = sync_bank_version_from_onboarding(
-                session, onboarding
-            ) or (None, False)
-            if version is None:
-                skipped += 1
-                continue
-            if was_created:
-                approved_review = next(
-                    (
-                        review
-                        for review in reversed(onboarding.reviews)
-                        if review.decision == StoreVerificationDecision.APPROVED
-                    ),
-                    None,
-                )
-                approve_store_bank_account_version(
-                    session,
-                    version=version,
-                    reviewed_at=approval_time,
-                    reviewer_user_id=(
-                        approved_review.reviewer_user_id if approved_review else None
-                    ),
-                )
-                created += 1
-            else:
-                existing += 1
-        except BankAccountVersionError:
-            raise
-    session.flush()
-    return BankAccountBackfillResult(
-        eligible=len(onboardings),
-        created=created,
-        existing=existing,
-        skipped=skipped,
-    )
-
-
-def cleanup_legacy_onboarding_bank_data(
-    session: Session,
-    *,
-    apply: bool,
-) -> LegacyBankCleanupReport:
-    statement = (
-        select(StoreOnboarding)
-        .where(
-            or_(
-                func.coalesce(StoreOnboarding.bank_account_owner, "") != "",
-                func.coalesce(StoreOnboarding.bank_account_number, "") != "",
-                func.coalesce(StoreOnboarding.bank_name, "") != "",
-                func.coalesce(StoreOnboarding.bank_id_number, "") != "",
-            )
-        )
-        .order_by(StoreOnboarding.id)
-    )
-    if apply:
-        statement = statement.with_for_update()
-    onboardings = session.scalars(statement).all()
-    crypto = configured_bank_account_crypto()
-    legacy_complete = rows_with_store = matching = without_version = 0
-    provenance_mismatch = store_mismatch = crypto_missing = decrypt_success = 0
-    account_mismatch = identity_mismatch = eligible = 0
-    status_counts = {status: 0 for status in BankAccountVersionStatus}
-    verified_versions: dict[uuid.UUID, StoreBankAccountVersion] = {}
-
-    for onboarding in onboardings:
-        values = tuple(_clean(getattr(onboarding, field), 500) for field in LEGACY_BANK_FIELDS)
-        row_blocked = False
-        if all(values):
-            legacy_complete += 1
-        else:
-            row_blocked = True
-        if onboarding.store_id is not None:
-            rows_with_store += 1
-        else:
-            row_blocked = True
-
-        source_versions = session.scalars(
-            select(StoreBankAccountVersion)
-            .where(StoreBankAccountVersion.source_onboarding_id == onboarding.id)
-            .order_by(StoreBankAccountVersion.version.desc())
-        ).all()
-        same_store_versions = [
-            version
-            for version in source_versions
-            if version.store_id == onboarding.store_id
-        ]
-        for related_version in same_store_versions:
-            status_counts[related_version.status] += 1
-        if source_versions and not same_store_versions:
-            store_mismatch += 1
-            row_blocked = True
-        live_versions = [
-            version
-            for version in same_store_versions
-            if version.status in LIVE_BANK_VERSION_STATUSES and version.currency == "USD"
-        ]
-        if not live_versions:
-            other_live_for_store = (
-                session.scalar(
-                    select(StoreBankAccountVersion.id).where(
-                        StoreBankAccountVersion.store_id == onboarding.store_id,
-                        StoreBankAccountVersion.status.in_(LIVE_BANK_VERSION_STATUSES),
-                    )
-                )
-                if onboarding.store_id is not None
-                else None
-            )
-            if other_live_for_store is not None:
-                provenance_mismatch += 1
-            else:
-                without_version += 1
-            row_blocked = True
-            continue
-
-        version = next(
-            (
-                item
-                for item in live_versions
-                if item.status == BankAccountVersionStatus.PENDING_REVIEW
-            ),
-            live_versions[0],
-        )
-        matching += 1
-        if any(
-            not value
-            for value in (
-                version.encrypted_account_number,
-                version.encryption_nonce,
-                version.account_fingerprint,
-                version.encryption_key_version,
-                version.fingerprint_key_version,
-            )
-        ):
-            crypto_missing += 1
-            row_blocked = True
-        else:
-            try:
-                decrypted = crypto.decrypt(
-                    ciphertext=version.encrypted_account_number,
-                    nonce=version.encryption_nonce,
-                    store_id=version.store_id,
-                    version_id=version.id,
-                    encryption_key_version=version.encryption_key_version,
-                )
-            except BankAccountCryptoError:
-                row_blocked = True
-            else:
-                decrypt_success += 1
-                try:
-                    accounts_match = normalize_bank_account_number(decrypted) == (
-                        normalize_bank_account_number(onboarding.bank_account_number or "")
-                    )
-                except BankAccountCryptoError:
-                    accounts_match = False
-                if not accounts_match:
-                    account_mismatch += 1
-                    row_blocked = True
-        if (
-            _clean(version.holder_name, 150)
-            != _clean(onboarding.bank_account_owner, 150)
-            or _clean(version.holder_identification, 40)
-            != _clean(onboarding.bank_id_number, 40)
-            or _clean(version.bank_name, 120) != _clean(onboarding.bank_name, 120)
-        ):
-            identity_mismatch += 1
-            row_blocked = True
-        if not row_blocked:
-            eligible += 1
-            verified_versions[onboarding.id] = version
-
-    (
-        reviews_with_issues,
-        bank_correction_issues,
-        sensitive_previous_values,
-        account_previous_values,
-    ) = _bank_review_snapshot_counts(session)
-    blocked = len(onboardings) - eligible
-    report = LegacyBankCleanupReport(
-        legacy_onboarding_rows=len(onboardings),
-        legacy_complete_rows=legacy_complete,
-        rows_with_store=rows_with_store,
-        rows_with_matching_bank_version=matching,
-        rows_without_bank_version=without_version,
-        provenance_mismatch_rows=provenance_mismatch,
-        store_mismatch_rows=store_mismatch,
-        pending_versions=status_counts[BankAccountVersionStatus.PENDING_REVIEW],
-        approved_versions=status_counts[BankAccountVersionStatus.APPROVED],
-        superseded_versions=status_counts[BankAccountVersionStatus.SUPERSEDED],
-        crypto_fields_missing=crypto_missing,
-        authenticated_decrypt_success=decrypt_success,
-        account_mismatch_rows=account_mismatch,
-        identity_mismatch_rows=identity_mismatch,
-        reviews_with_issues=reviews_with_issues,
-        bank_correction_issues=bank_correction_issues,
-        sensitive_snapshot_previous_values=sensitive_previous_values,
-        account_number_snapshot_previous_values=account_previous_values,
-        rows_eligible_for_purge=eligible,
-        blocked_rows=blocked,
-    )
-    if not apply:
-        return report
-    if blocked:
-        raise BankAccountVersionError(
-            f"El cleanup bancario está bloqueado para {blocked} fila(s); no se modificó plaintext."
-        )
-
-    sanitized_values, sanitized_reviews = _sanitize_bank_review_snapshots(session)
-    for onboarding in onboardings:
-        version = verified_versions[onboarding.id]
-        for field in LEGACY_BANK_FIELDS:
-            setattr(onboarding, field, None)
-        record_financial_audit(
-            session,
-            action=BANK_ACCOUNT_LEGACY_PLAINTEXT_PURGED,
-            metadata={
-                "store_id": str(version.store_id),
-                "bank_account_version_id": str(version.id),
-                "status": version.status.value,
-            },
-        )
-    session.flush()
-    return replace(
-        report,
-        purged_rows=len(onboardings),
-        sanitized_snapshot_previous_values=sanitized_values,
-        sanitized_reviews=sanitized_reviews,
-    )
-
-
-def _bank_review_snapshot_counts(session: Session) -> tuple[int, int, int, int]:
-    reviews_with_issues = bank_issues = previous_values = account_previous_values = 0
-    for snapshot in session.scalars(
-        select(StoreVerificationReview.issues_snapshot).where(
-            StoreVerificationReview.issues_snapshot.is_not(None)
-        )
-    ):
-        if snapshot:
-            reviews_with_issues += 1
-        for issue in snapshot or []:
-            if not isinstance(issue, dict) or issue.get("field") not in LEGACY_BANK_FIELDS:
-                continue
-            bank_issues += 1
-            if "previous_value" not in issue:
-                continue
-            previous_values += 1
-            if issue.get("field") == "bank_account_number":
-                account_previous_values += 1
-    return (
-        reviews_with_issues,
-        bank_issues,
-        previous_values,
-        account_previous_values,
-    )
-
-
-def _sanitize_bank_review_snapshots(session: Session) -> tuple[int, int]:
-    removed = reviews_changed = 0
-    reviews = session.scalars(
-        select(StoreVerificationReview)
-        .where(StoreVerificationReview.issues_snapshot.is_not(None))
-        .with_for_update()
-    ).all()
-    for review in reviews:
-        changed = False
-        sanitized: list[dict] = []
-        for raw_issue in review.issues_snapshot or []:
-            issue = dict(raw_issue) if isinstance(raw_issue, dict) else raw_issue
-            if (
-                isinstance(issue, dict)
-                and issue.get("field") in LEGACY_BANK_FIELDS
-                and "previous_value" in issue
-            ):
-                issue.pop("previous_value", None)
-                removed += 1
-                changed = True
-            sanitized.append(issue)
-        if changed:
-            review.issues_snapshot = sanitized
-            reviews_changed += 1
-    return removed, reviews_changed
 
 
 def usable_bank_account_version(

@@ -19,7 +19,6 @@ from app.models import (
     SellerPayout,
     StoreBankAccountVersion,
     StoreOnboarding,
-    StoreVerificationReview,
 )
 from app.models.enums import (
     BankAccountVersionStatus,
@@ -29,7 +28,6 @@ from app.models.enums import (
     StaffEmploymentStatus,
     StaffRole,
     StoreOnboardingStatus,
-    StoreVerificationDecision,
 )
 from app.services.admin_permissions import permissions_for_user
 from app.services.bank_account_crypto import (
@@ -39,15 +37,11 @@ from app.services.bank_account_crypto import (
 )
 from app.services.bank_accounts import (
     BankAccountAccessError,
-    BankAccountVersionError,
     approve_store_bank_account_version,
-    backfill_legacy_bank_account_versions,
-    cleanup_legacy_onboarding_bank_data,
     create_store_bank_account_version,
     decrypt_bank_account_for_staff,
 )
 from app.services.financial_audit import (
-    BANK_ACCOUNT_LEGACY_PLAINTEXT_PURGED,
     BANK_ACCOUNT_VERSION_CREATED,
     record_financial_audit,
 )
@@ -574,10 +568,6 @@ def test_bank_provenance_is_restricted_and_usability_delay_is_enforced(
         user_id=base.operator_id,
         store_id=base.store_id,
         status=StoreOnboardingStatus.COMPLETED,
-        bank_account_owner="Holder",
-        bank_account_number="001-0000-6677",
-        bank_name="Bank",
-        bank_id_number="ID",
         approved_at=datetime.now(timezone.utc),
         completed_at=datetime.now(timezone.utc),
     )
@@ -685,261 +675,6 @@ def test_payout_remains_bound_to_exact_immutable_bank_version(session: Session):
         )
     session.rollback()
     assert session.get(SellerPayout, payout.id).bank_account_version_id == version.id
-
-
-def test_backfill_skip_has_no_bank_or_audit_side_effect(session: Session):
-    base = create_catalog_and_stock(session)
-    onboarding = StoreOnboarding(
-        user_id=base.operator_id,
-        store_id=base.store_id,
-        status=StoreOnboardingStatus.COMPLETED,
-        bank_account_owner="Legacy Holder",
-        bank_account_number="001-0000-7777",
-        bank_name="Legacy Bank",
-        bank_id_number="LEGACY-ID",
-        approved_at=None,
-        completed_at=None,
-    )
-    session.add(onboarding)
-    session.flush()
-
-    result = backfill_legacy_bank_account_versions(session)
-
-    assert (result.eligible, result.created, result.existing, result.skipped) == (
-        1,
-        0,
-        0,
-        1,
-    )
-    assert list(session.scalars(select(StoreBankAccountVersion))) == []
-    assert list(
-        session.scalars(
-            select(AdminAuditEvent).where(
-                AdminAuditEvent.action == BANK_ACCOUNT_VERSION_CREATED
-            )
-        )
-    ) == []
-
-
-def test_bank_backfill_is_idempotent_and_keeps_plaintext(session: Session):
-    base = create_catalog_and_stock(session)
-    account = "001-0000-9876"
-    now = datetime.now(timezone.utc) - timedelta(days=5)
-    onboarding = StoreOnboarding(
-        user_id=base.operator_id,
-        store_id=base.store_id,
-        status=StoreOnboardingStatus.COMPLETED,
-        bank_account_owner="Legacy Holder",
-        bank_account_number=account,
-        bank_name="Legacy Bank",
-        bank_id_number="LEGACY-ID",
-        approved_at=now,
-        completed_at=now + timedelta(hours=1),
-    )
-    session.add(onboarding)
-    session.flush()
-
-    first = backfill_legacy_bank_account_versions(session)
-    second = backfill_legacy_bank_account_versions(session)
-    version = session.scalar(
-        select(StoreBankAccountVersion).where(
-            StoreBankAccountVersion.source_onboarding_id == onboarding.id
-        )
-    )
-    assert (first.created, second.created) == (1, 0)
-    assert second.existing == 1
-    assert version.encrypted_account_number != account.encode("ascii")
-    assert len(version.encryption_nonce) == 12
-    assert len(version.account_fingerprint) == 32
-    assert version.account_last4 == "9876"
-    assert version.usable_from == now + timedelta(hours=48)
-    assert onboarding.bank_account_number == account
-
-
-def _legacy_onboarding_for_cleanup(
-    session: Session,
-    *,
-    create_version: bool = True,
-    version_store_id: uuid.UUID | None = None,
-    version_account: str = "001-0000-9876",
-    version_holder: str = "Legacy Holder",
-) -> tuple[StoreOnboarding, StoreBankAccountVersion | None]:
-    base = create_catalog_and_stock(session)
-    onboarding = StoreOnboarding(
-        user_id=base.operator_id,
-        store_id=base.store_id,
-        status=StoreOnboardingStatus.COMPLETED,
-        bank_account_owner="Legacy Holder",
-        bank_account_number="001-0000-9876",
-        bank_name="Legacy Bank",
-        bank_id_number="LEGACY-ID",
-        bank_email="payments@example.test",
-        approved_at=datetime.now(timezone.utc) - timedelta(days=5),
-        completed_at=datetime.now(timezone.utc) - timedelta(days=4),
-    )
-    session.add(onboarding)
-    session.flush()
-    version = None
-    if create_version:
-        version, _ = create_store_bank_account_version(
-            session,
-            store_id=version_store_id or base.store_id,
-            holder_name=version_holder,
-            holder_identification="LEGACY-ID",
-            bank_name="Legacy Bank",
-            account_number=version_account,
-            source_onboarding_id=onboarding.id,
-        )
-    return onboarding, version
-
-
-def test_legacy_bank_cleanup_is_dry_run_transactional_and_idempotent(
-    session: Session,
-) -> None:
-    onboarding, version = _legacy_onboarding_for_cleanup(session)
-    review = StoreVerificationReview(
-        onboarding_id=onboarding.id,
-        decision=StoreVerificationDecision.CORRECTIONS_REQUESTED,
-        issues_snapshot=[
-            {
-                "field": "bank_account_number",
-                "reason": "Reingresar el dato.",
-                "previous_value": "001-0000-9876",
-            },
-            {
-                "field": "address_line1",
-                "reason": "Corregir la dirección.",
-                "previous_value": "Previous address",
-            },
-        ],
-    )
-    session.add(review)
-    session.flush()
-    version_id = version.id
-
-    dry_run = cleanup_legacy_onboarding_bank_data(session, apply=False)
-
-    assert dry_run.legacy_onboarding_rows == 1
-    assert dry_run.rows_with_matching_bank_version == 1
-    assert dry_run.authenticated_decrypt_success == 1
-    assert dry_run.rows_eligible_for_purge == 1
-    assert dry_run.blocked_rows == 0
-    assert dry_run.purged_rows == 0
-    assert dry_run.reviews_with_issues == 1
-    assert dry_run.bank_correction_issues == 1
-    assert dry_run.sensitive_snapshot_previous_values == 1
-    assert dry_run.account_number_snapshot_previous_values == 1
-    assert onboarding.bank_account_number == "001-0000-9876"
-    assert "previous_value" in review.issues_snapshot[0]
-
-    applied = cleanup_legacy_onboarding_bank_data(session, apply=True)
-
-    assert applied.purged_rows == 1
-    assert applied.sanitized_snapshot_previous_values == 1
-    assert applied.sanitized_reviews == 1
-    assert all(
-        getattr(onboarding, field) is None
-        for field in (
-            "bank_account_owner",
-            "bank_account_number",
-            "bank_name",
-            "bank_id_number",
-        )
-    )
-    assert onboarding.bank_email == "payments@example.test"
-    assert session.get(StoreBankAccountVersion, version_id) is version
-    assert "previous_value" not in review.issues_snapshot[0]
-    assert review.issues_snapshot[1]["previous_value"] == "Previous address"
-    purge_event = session.scalar(
-        select(AdminAuditEvent).where(
-            AdminAuditEvent.action == BANK_ACCOUNT_LEGACY_PLAINTEXT_PURGED
-        )
-    )
-    assert purge_event is not None
-    assert set(purge_event.metadata_json) == {
-        "store_id",
-        "bank_account_version_id",
-        "status",
-    }
-
-    second = cleanup_legacy_onboarding_bank_data(session, apply=True)
-    assert second.legacy_onboarding_rows == 0
-    assert second.purged_rows == 0
-    assert second.sensitive_snapshot_previous_values == 0
-
-
-@pytest.mark.parametrize(
-    "failure_mode",
-    ("missing", "wrong_store", "account_mismatch", "identity_mismatch", "crypto"),
-)
-def test_legacy_bank_cleanup_blocks_entire_apply_on_failed_gate(
-    session: Session,
-    app,
-    monkeypatch,
-    failure_mode: str,
-) -> None:
-    if failure_mode == "missing":
-        onboarding, _ = _legacy_onboarding_for_cleanup(
-            session, create_version=False
-        )
-    elif failure_mode == "wrong_store":
-        other_store = create_catalog_and_stock(session)
-        onboarding, _ = _legacy_onboarding_for_cleanup(
-            session, version_store_id=other_store.store_id
-        )
-    elif failure_mode == "account_mismatch":
-        onboarding, _ = _legacy_onboarding_for_cleanup(
-            session, version_account="001-0000-1111"
-        )
-    elif failure_mode == "identity_mismatch":
-        onboarding, _ = _legacy_onboarding_for_cleanup(
-            session, version_holder="Different Holder"
-        )
-    else:
-        onboarding, _ = _legacy_onboarding_for_cleanup(session)
-        monkeypatch.setitem(
-            app.config,
-            "BANK_ACCOUNT_ENCRYPTION_KEY",
-            base64.b64encode(bytes([77]) * 32).decode("ascii"),
-        )
-
-    dry_run = cleanup_legacy_onboarding_bank_data(session, apply=False)
-    assert dry_run.legacy_onboarding_rows == 1
-    assert dry_run.blocked_rows == 1
-    assert dry_run.rows_eligible_for_purge == 0
-
-    with pytest.raises(BankAccountVersionError, match="bloqueado"):
-        cleanup_legacy_onboarding_bank_data(session, apply=True)
-
-    assert onboarding.bank_account_owner == "Legacy Holder"
-    assert onboarding.bank_account_number == "001-0000-9876"
-    assert onboarding.bank_name == "Legacy Bank"
-    assert onboarding.bank_id_number == "LEGACY-ID"
-    assert session.scalar(
-        select(AdminAuditEvent).where(
-            AdminAuditEvent.action == BANK_ACCOUNT_LEGACY_PLAINTEXT_PURGED
-        )
-    ) is None
-
-
-def test_legacy_bank_cleanup_cli_defaults_to_safe_non_sensitive_dry_run(
-    session: Session,
-    app,
-) -> None:
-    onboarding, _ = _legacy_onboarding_for_cleanup(session)
-    session.commit()
-
-    result = app.test_cli_runner().invoke(
-        args=["bank-accounts", "cleanup-legacy-onboarding"]
-    )
-
-    assert result.exit_code == 0
-    assert "mode=dry-run" in result.output
-    assert "rows_eligible_for_purge=1" in result.output
-    assert "001-0000-9876" not in result.output
-    assert "Legacy Holder" not in result.output
-    session.expire_all()
-    assert session.get(StoreOnboarding, onboarding.id).bank_account_number is not None
 
 
 def test_sensitive_bank_access_and_financial_audit_are_conservative(session: Session):

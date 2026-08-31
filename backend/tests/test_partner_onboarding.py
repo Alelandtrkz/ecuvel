@@ -143,10 +143,6 @@ def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client
     assert store.status == StoreStatus.DRAFT
     assert len(members) == 1
     assert len(versions) == 1
-    assert onboarding.bank_account_owner is None
-    assert onboarding.bank_account_number is None
-    assert onboarding.bank_name is None
-    assert onboarding.bank_id_number is None
     assert onboarding.bank_email == "pagos@crisbeauty.test"
     # A DRAFT store/member created only to bind the encrypted bank version
     # does not unlock the product workspace.

@@ -57,10 +57,6 @@ def _bank_onboarding(session: Session, base):
         current_stage=StoreOnboardingStage.PRODUCTS,
         current_step=5,
         store_name=session.get(Store, base.store_id).name,
-        bank_account_owner="Tienda Test",
-        bank_account_number="001-0000-4567",
-        bank_name="Pichincha",
-        bank_id_number="TEST-ID-1",
         completed_at=datetime.now(timezone.utc),
     )
     session.add(onboarding)
@@ -68,10 +64,10 @@ def _bank_onboarding(session: Session, base):
     version, created = create_store_bank_account_version(
         session,
         store_id=base.store_id,
-        holder_name=onboarding.bank_account_owner,
-        holder_identification=onboarding.bank_id_number,
-        bank_name=onboarding.bank_name,
-        account_number=onboarding.bank_account_number,
+        holder_name="Tienda Test",
+        holder_identification="TEST-ID-1",
+        bank_name="Pichincha",
+        account_number="001-0000-4567",
         source_onboarding_id=onboarding.id,
     )
     assert created
