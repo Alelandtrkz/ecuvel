@@ -1,8 +1,93 @@
+const ADMIN_SIDEBAR_STORAGE_KEY = "ecuvel.admin.sidebar.collapsed";
+const adminSidebarDesktop = window.matchMedia("(min-width: 981px)");
+const adminSidebarMedium = window.matchMedia("(min-width: 981px) and (max-width: 1240px)");
+
+const readAdminSidebarPreference = () => {
+  try {
+    const value = window.localStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY);
+    return value === "true" ? true : (value === "false" ? false : null);
+  } catch (_error) {
+    return null;
+  }
+};
+
+const writeAdminSidebarPreference = (collapsed) => {
+  try {
+    window.localStorage.setItem(ADMIN_SIDEBAR_STORAGE_KEY, String(collapsed));
+  } catch (_error) {
+    // The shell remains usable when storage is unavailable.
+  }
+};
+
+const preferredAdminSidebarState = () => {
+  const stored = readAdminSidebarPreference();
+  return stored === null ? adminSidebarMedium.matches : stored;
+};
+
+const applyAdminSidebarState = (collapsed = preferredAdminSidebarState()) => {
+  document.documentElement.classList.toggle(
+    "admin-sidebar-collapsed",
+    adminSidebarDesktop.matches && collapsed
+  );
+};
+
+applyAdminSidebarState();
+
 document.addEventListener("DOMContentLoaded", () => {
   const sidebar = document.querySelector("#admin-sidebar");
   const backdrop = document.querySelector(".admin-sidebar-backdrop");
   const openButton = document.querySelector("[data-admin-sidebar-open]");
   const closeButtons = document.querySelectorAll("[data-admin-sidebar-close]");
+  const collapseButton = document.querySelector("[data-admin-sidebar-toggle]");
+  const sidebarTooltip = document.querySelector("#admin-sidebar-tooltip");
+  const tooltipTargets = document.querySelectorAll("[data-admin-tooltip]");
+
+  const isSidebarCollapsed = () => document.documentElement.classList.contains(
+    "admin-sidebar-collapsed"
+  );
+
+  const updateCollapseButton = () => {
+    if (!collapseButton) return;
+    const expanded = !isSidebarCollapsed();
+    const label = expanded ? "Contraer barra lateral" : "Expandir barra lateral";
+    collapseButton.setAttribute("aria-expanded", String(expanded));
+    collapseButton.setAttribute("aria-label", label);
+    collapseButton.title = label;
+  };
+
+  const hideSidebarTooltip = () => {
+    if (!sidebarTooltip) return;
+    sidebarTooltip.hidden = true;
+    tooltipTargets.forEach((target) => target.removeAttribute("aria-describedby"));
+  };
+
+  const showSidebarTooltip = (target) => {
+    if (!sidebarTooltip || !isSidebarCollapsed() || !adminSidebarDesktop.matches) return;
+    const label = target.dataset.adminTooltip || target.getAttribute("aria-label");
+    if (!label) return;
+    const bounds = target.getBoundingClientRect();
+    sidebarTooltip.textContent = label;
+    sidebarTooltip.hidden = false;
+    sidebarTooltip.style.left = `${Math.round(bounds.right + 10)}px`;
+    sidebarTooltip.style.top = `${Math.round(bounds.top + (bounds.height / 2))}px`;
+    sidebarTooltip.style.transform = "translateY(-50%)";
+    target.setAttribute("aria-describedby", sidebarTooltip.id);
+  };
+
+  collapseButton?.addEventListener("click", () => {
+    const collapsed = !isSidebarCollapsed();
+    writeAdminSidebarPreference(collapsed);
+    applyAdminSidebarState(collapsed);
+    hideSidebarTooltip();
+    updateCollapseButton();
+  });
+  tooltipTargets.forEach((target) => {
+    target.addEventListener("mouseenter", () => showSidebarTooltip(target));
+    target.addEventListener("focus", () => showSidebarTooltip(target));
+    target.addEventListener("mouseleave", hideSidebarTooltip);
+    target.addEventListener("blur", hideSidebarTooltip);
+  });
+  updateCollapseButton();
 
   const closeSidebar = () => {
     if (!sidebar || !backdrop) return;
@@ -105,6 +190,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
+    hideSidebarTooltip();
     const openMenu = disclosures.find((menu) => !menu.panel.hidden);
     if (openMenu) openMenu.close(true);
     if (sidebar?.classList.contains("is-open")) closeSidebar();
@@ -112,5 +198,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.matchMedia("(min-width: 981px)").addEventListener("change", (event) => {
     if (event.matches && sidebar?.classList.contains("is-open")) closeSidebar();
+    applyAdminSidebarState();
+    hideSidebarTooltip();
+    updateCollapseButton();
+  });
+  adminSidebarMedium.addEventListener("change", () => {
+    if (readAdminSidebarPreference() !== null) return;
+    applyAdminSidebarState();
+    hideSidebarTooltip();
+    updateCollapseButton();
   });
 });

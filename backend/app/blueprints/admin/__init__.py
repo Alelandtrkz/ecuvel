@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import PurePath
 from zoneinfo import ZoneInfo
 
@@ -85,6 +85,19 @@ from app.services.admin_payments import (
     get_admin_payment_kpis,
     list_admin_payments,
 )
+from app.services.admin_payouts import (
+    AdminPayoutNotFoundError,
+    AdminPayoutQueryError,
+    PAYOUT_STATUS_LABELS,
+    PAYOUT_TAB_STATUSES,
+    calendar_months,
+    cycle_options,
+    get_admin_cycle_preview,
+    get_admin_payout_detail,
+    get_admin_payout_kpis,
+    list_admin_payouts,
+    list_payout_stores,
+)
 from app.services.admin_products import (
     commission_snapshot_complete,
     get_admin_product_draft,
@@ -140,7 +153,13 @@ from app.services.seller_inbound_packages import (
     SellerInboundPackageReceptionAccessError,
     receive_seller_inbound_package,
 )
-from app.services.private_storage import PrivateStorageError, private_file_path, verify_private_file
+from app.services.private_storage import (
+    PrivateStorageError,
+    delete_private_file,
+    private_file_path,
+    stage_private_upload,
+    verify_private_file,
+)
 from app.services.product_draft_preview import build_product_draft_preview
 from app.services.product_drafts import (
     build_product_draft_view,
@@ -168,6 +187,18 @@ from app.services.bank_accounts import (
 from app.services.financial_audit import (
     BANK_ACCOUNT_SENSITIVE_VIEWED,
     record_financial_audit,
+)
+from app.services.payout_calendar import PAYOUT_TIMEZONE, payout_cycle_window
+from app.services.seller_payouts import (
+    SellerPayoutEligibilityError,
+    SellerPayoutError,
+    SellerPayoutNotFoundError,
+    SellerPayoutTransitionError,
+    cancel_seller_payout,
+    hold_seller_payout,
+    mark_seller_payout_paid,
+    resume_seller_payout,
+    schedule_payout_cycle,
 )
 from app.services.admin_users import (
     AdminUserError,
@@ -203,7 +234,7 @@ from app.services.review_moderation import (
     ReviewModerationError,
     apply_review_moderation_decision,
 )
-from app.models import PaymentAttempt, PaymentProof, ProductReview, ProductReviewImage
+from app.models import PaymentAttempt, PaymentProof, ProductReview, ProductReviewImage, SellerPayout
 from app.models.enums import (
     PaymentMethod,
     PaymentProofPrecheckOutcome,
@@ -226,6 +257,18 @@ def ecuador_datetime(value) -> str:
     return format_ecuador_datetime(value)
 
 
+@admin.app_template_filter("ecuador_date")
+def ecuador_date(value) -> str:
+    if value is None:
+        return ""
+    local_value = value.astimezone(PAYOUT_TIMEZONE).date() if isinstance(value, datetime) else value
+    months = (
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    )
+    return f"{local_value.day} de {months[local_value.month - 1]} de {local_value.year}"
+
+
 def _shell_context(section: str) -> dict:
     profile = getattr(current_user, "staff_profile", None)
     permissions = permissions_for_user(current_user)
@@ -239,6 +282,7 @@ def _shell_context(section: str) -> dict:
         "stores": "stores.moderate",
         "reviews": "reviews.view",
         "payments": "payments.view",
+        "payouts": "payouts.view",
     }
     visible_sections.update(
         key for key, permission in section_permissions.items()
@@ -2555,6 +2599,313 @@ def review_decision(review_id: uuid.UUID):
             **{key: value for key, value in return_params.items() if value},
         )
     )
+
+
+_ADMIN_PAYOUT_QUERY_KEYS = (
+    "tab", "q", "status", "cycle", "date_from", "date_to", "store",
+    "page", "per_page", "sort_by", "sort_direction", "detail",
+)
+_ADMIN_PAYOUT_TABS = (
+    ("all", "Todas"), ("scheduled", "Programadas"),
+    ("on_hold", "En hold"), ("paid", "Pagadas"),
+    ("cancelled", "Canceladas"),
+)
+
+
+def _admin_payout_query_state() -> dict[str, str]:
+    return {
+        key: value
+        for key in _ADMIN_PAYOUT_QUERY_KEYS
+        if (value := (request.args.get(key) or "").strip())
+    }
+
+
+def _admin_payout_return_state(payout_number: str | None = None) -> dict[str, str]:
+    values = {
+        key: value
+        for key in _ADMIN_PAYOUT_QUERY_KEYS
+        if key != "detail" and (value := (request.form.get(key) or "").strip())
+    }
+    if payout_number:
+        values["detail"] = payout_number
+    return values
+
+
+def _admin_payout_url_builder():
+    base = _admin_payout_query_state()
+
+    def build(**overrides) -> str:
+        values = dict(base)
+        for key, value in overrides.items():
+            if key not in (*_ADMIN_PAYOUT_QUERY_KEYS, "calendar", "schedule", "cycle_date"):
+                continue
+            if value is None or value == "":
+                values.pop(key, None)
+            else:
+                values[key] = str(value)
+        return url_for("admin.payouts", **values)
+
+    return build
+
+
+def _admin_payout_pagination_window(page: int, pages: int) -> tuple[int | None, ...]:
+    if pages <= 0:
+        return ()
+    if pages <= 7:
+        return tuple(range(1, pages + 1))
+    candidates = sorted(value for value in {1, pages, page - 1, page, page + 1} if 1 <= value <= pages)
+    window: list[int | None] = []
+    previous = 0
+    for value in candidates:
+        if previous and value - previous > 1:
+            window.append(None)
+        window.append(value)
+        previous = value
+    return tuple(window)
+
+
+def _parse_cycle_date(raw: str | None) -> date:
+    try:
+        value = date.fromisoformat((raw or "").strip())
+        payout_cycle_window(value)
+        return value
+    except (TypeError, ValueError) as exc:
+        raise SellerPayoutEligibilityError(
+            "Selecciona una fecha oficial de ciclo válida."
+        ) from exc
+
+
+def _parse_paid_at_local(raw: str | None) -> datetime:
+    try:
+        value = datetime.fromisoformat((raw or "").strip())
+    except (TypeError, ValueError) as exc:
+        raise SellerPayoutTransitionError("La fecha real del pago no es válida.") from exc
+    if value.tzinfo is not None or value.utcoffset() is not None:
+        raise SellerPayoutTransitionError("La fecha real del pago debe usar la hora de Ecuador.")
+    return value.replace(tzinfo=PAYOUT_TIMEZONE).astimezone(timezone.utc)
+
+
+@admin.get("/payouts")
+@admin_permission_required("payouts.view")
+def payouts():
+    active_tab = (request.args.get("tab") or "all").strip().lower()
+    query_state = _admin_payout_query_state()
+    try:
+        payout_list = list_admin_payouts(
+            db.session,
+            tab=active_tab,
+            query=request.args.get("q"),
+            status=request.args.get("status"),
+            cycle=request.args.get("cycle"),
+            date_from=request.args.get("date_from"),
+            date_to=request.args.get("date_to"),
+            store=request.args.get("store"),
+            page=request.args.get("page", 1),
+            per_page=request.args.get("per_page", 20),
+            sort_by=request.args.get("sort_by", "scheduled_for"),
+            sort_direction=request.args.get("sort_direction", "desc"),
+        )
+    except AdminPayoutQueryError as exc:
+        flash(str(exc), "warning")
+        return redirect(url_for("admin.payouts", tab=active_tab if active_tab in PAYOUT_TAB_STATUSES else "all"))
+
+    detail = None
+    if detail_code := query_state.get("detail"):
+        try:
+            detail = get_admin_payout_detail(db.session, detail_code)
+        except AdminPayoutNotFoundError:
+            abort(404)
+
+    now = datetime.now(timezone.utc)
+    options = cycle_options(now=now)
+    preview = None
+    preview_error = None
+    if request.args.get("schedule") == "1" and request.args.get("cycle_date"):
+        try:
+            selected_date = _parse_cycle_date(request.args.get("cycle_date"))
+            preview = get_admin_cycle_preview(db.session, cycle_date=selected_date, now=now)
+        except SellerPayoutError as exc:
+            preview_error = str(exc)
+    payout_url = _admin_payout_url_builder()
+    filter_keys = {"q", "status", "cycle", "date_from", "date_to", "store"}
+    return render_template(
+        "admin/payouts.html",
+        payouts=payout_list,
+        kpis=get_admin_payout_kpis(db.session, now=now),
+        detail=detail,
+        active_tab=active_tab,
+        payout_tabs=_ADMIN_PAYOUT_TABS,
+        payout_statuses=tuple((status.value, label) for status, label in PAYOUT_STATUS_LABELS.items()),
+        payout_stores=list_payout_stores(db.session),
+        payout_query=query_state,
+        payout_url=payout_url,
+        pagination_window=_admin_payout_pagination_window(payout_list.page, payout_list.pages),
+        payout_return_query_keys=tuple(key for key in _ADMIN_PAYOUT_QUERY_KEYS if key != "detail"),
+        has_payout_filters=any(query_state.get(key) for key in filter_keys),
+        cycle_options=options,
+        next_cycle=options[0] if options else None,
+        calendar_data=calendar_months(now=now),
+        show_calendar=request.args.get("calendar") == "1",
+        show_schedule=request.args.get("schedule") == "1",
+        cycle_preview=preview,
+        cycle_preview_error=preview_error,
+        payout_now_local=now.astimezone(PAYOUT_TIMEZONE).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M"),
+        receipt_max_mib=current_app.config["SELLER_PAYOUT_RECEIPT_MAX_BYTES"] / (1024 * 1024),
+        can_schedule=user_has_permission(current_user, "payouts.schedule"),
+        can_hold=user_has_permission(current_user, "payouts.hold"),
+        can_cancel=user_has_permission(current_user, "payouts.cancel"),
+        can_pay=user_has_permission(current_user, "payouts.pay"),
+        can_view_proof=user_has_permission(current_user, "payouts.proof.view"),
+        **_shell_context("payouts"),
+    )
+
+
+def _payout_mutation_redirect(payout_number: str | None = None):
+    return redirect(url_for("admin.payouts", **_admin_payout_return_state(payout_number)))
+
+
+def _payout_transition(action, payout_number: str, success: str, replay: str):
+    try:
+        result = action(db.session, payout_number=payout_number, actor_user_id=current_user.id)
+        db.session.commit()
+    except SellerPayoutNotFoundError:
+        db.session.rollback()
+        abort(404)
+    except SellerPayoutTransitionError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    else:
+        flash(replay if result.replayed else success, "info" if result.replayed else "success")
+    return _payout_mutation_redirect(payout_number)
+
+
+@admin.post("/payouts/<string:payout_number>/hold")
+@limiter.limit("30 per hour")
+@admin_permission_required("payouts.hold")
+def hold_payout(payout_number: str):
+    return _payout_transition(hold_seller_payout, payout_number, "Liquidación puesta en hold.", "La liquidación ya estaba en hold.")
+
+
+@admin.post("/payouts/<string:payout_number>/resume")
+@limiter.limit("30 per hour")
+@admin_permission_required("payouts.hold")
+def resume_payout(payout_number: str):
+    return _payout_transition(resume_seller_payout, payout_number, "Liquidación reanudada.", "La liquidación ya estaba programada.")
+
+
+@admin.post("/payouts/<string:payout_number>/cancel")
+@limiter.limit("30 per hour")
+@admin_permission_required("payouts.cancel")
+def cancel_payout(payout_number: str):
+    def cancel_action(session, *, payout_number, actor_user_id):
+        return cancel_seller_payout(
+            session, payout_number=payout_number,
+            cancelled_at=datetime.now(timezone.utc), actor_user_id=actor_user_id,
+        )
+    return _payout_transition(cancel_action, payout_number, "Liquidación cancelada; sus pedidos fueron liberados.", "La liquidación ya estaba cancelada.")
+
+
+@admin.post("/payouts/schedule")
+@limiter.limit("10 per hour")
+@admin_permission_required("payouts.schedule")
+def schedule_payouts():
+    try:
+        cycle_date = _parse_cycle_date(request.form.get("cycle_date"))
+        result = schedule_payout_cycle(
+            db.session, cycle_date=cycle_date, now=datetime.now(timezone.utc),
+            actor_user_id=current_user.id,
+        )
+        db.session.commit()
+    except SellerPayoutError as exc:
+        db.session.rollback()
+        flash(str(exc), "warning")
+    else:
+        count = len(result.payouts)
+        flash(f"Ciclo {cycle_date:%d %b %Y} programado: {count} liquidaciones creadas.", "success")
+        if result.skipped_store_ids:
+            flash(f"{len(result.skipped_store_ids)} tiendas no pudieron incluirse; revisa su elegibilidad.", "warning")
+    values = _admin_payout_return_state()
+    values["tab"] = "scheduled"
+    return redirect(url_for("admin.payouts", **values))
+
+
+@admin.post("/payouts/<string:payout_number>/pay")
+@limiter.limit("20 per hour")
+@admin_permission_required("payouts.pay")
+def pay_payout(payout_number: str):
+    staged = None
+    promoted_path = None
+    receipt_root = current_app.config["SELLER_PAYOUT_RECEIPT_DIR"]
+    try:
+        paid_at = _parse_paid_at_local(request.form.get("paid_at"))
+        upload = request.files.get("receipt")
+        if upload is not None and upload.filename:
+            staged = stage_private_upload(
+                upload, root=receipt_root,
+                max_bytes=current_app.config["SELLER_PAYOUT_RECEIPT_MAX_BYTES"],
+                allowed_extensions={"jpg", "jpeg", "png", "pdf"},
+                storage_prefix="payout-receipts",
+            )
+            promoted_path = private_file_path(receipt_root, staged.storage_key)
+        result = mark_seller_payout_paid(
+            db.session, payout_number=payout_number,
+            external_reference=request.form.get("external_reference") or "",
+            paid_at=paid_at, actor_user_id=current_user.id,
+            staged_receipt=staged, receipt_root=receipt_root,
+        )
+        db.session.commit()
+    except SellerPayoutNotFoundError:
+        db.session.rollback()
+        if staged is not None:
+            delete_private_file(staged.temporary_path)
+        if promoted_path is not None:
+            delete_private_file(promoted_path)
+        abort(404)
+    except (SellerPayoutTransitionError, PrivateStorageError) as exc:
+        db.session.rollback()
+        if staged is not None:
+            delete_private_file(staged.temporary_path)
+        if promoted_path is not None:
+            delete_private_file(promoted_path)
+        flash(str(exc), "warning")
+    except Exception:
+        db.session.rollback()
+        if staged is not None:
+            delete_private_file(staged.temporary_path)
+        if promoted_path is not None:
+            delete_private_file(promoted_path)
+        raise
+    else:
+        flash("La liquidación ya estaba pagada." if result.replayed else "Liquidación marcada como pagada.", "info" if result.replayed else "success")
+    return _payout_mutation_redirect(payout_number)
+
+
+@admin.get("/payouts/<string:payout_number>/receipt")
+@admin_permission_required("payouts.proof.view")
+def payout_receipt(payout_number: str):
+    normalized = " ".join((payout_number or "").split()).upper()
+    payout = db.session.scalar(select(SellerPayout).where(SellerPayout.payout_number == normalized))
+    if payout is None or not payout.receipt_storage_key:
+        abort(404)
+    try:
+        path = verify_private_file(
+            root=current_app.config["SELLER_PAYOUT_RECEIPT_DIR"],
+            storage_key=payout.receipt_storage_key,
+            size_bytes=payout.receipt_size_bytes,
+            sha256=payout.receipt_sha256,
+        )
+    except PrivateStorageError:
+        abort(404)
+    response = send_file(
+        path, mimetype=payout.receipt_media_type,
+        as_attachment=request.args.get("download") == "1",
+        download_name=PurePath(payout.receipt_original_filename or "comprobante").name,
+        conditional=False, max_age=0,
+    )
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @admin.get("/modules/<string:module_key>")

@@ -17,13 +17,20 @@
         <strong>ECUVEL</strong>
         <span>Admin Panel</span>
       </a>
+      <button type="button" class="admin-sidebar__toggle" data-admin-sidebar-toggle
+              aria-label="Contraer barra lateral" aria-expanded="true"
+              title="Contraer barra lateral">
+        <i class="admin-sidebar__toggle-collapse" data-lucide="panel-left-close" aria-hidden="true"></i>
+        <i class="admin-sidebar__toggle-expand" data-lucide="panel-left-open" aria-hidden="true"></i>
+      </button>
       <button type="button" class="admin-sidebar__close" data-admin-sidebar-close aria-label="Cerrar menú">
         <i data-lucide="x" aria-hidden="true"></i>
       </button>
     </div>
 
     <div class="admin-quick" data-admin-menu>
-      <button class="admin-quick__trigger" type="button" data-admin-menu-trigger aria-expanded="false" aria-controls="admin-quick-menu">
+      <button class="admin-quick__trigger" type="button" data-admin-menu-trigger aria-expanded="false" aria-controls="admin-quick-menu"
+              aria-label="Acción rápida" data-admin-tooltip="Acción rápida">
         <i data-lucide="circle-plus" aria-hidden="true"></i>
         <span>Acción rápida</span>
         <i data-lucide="chevron-down" aria-hidden="true"></i>
@@ -49,6 +56,7 @@
               <li>
                 <a class="{{ 'is-active' if current_admin_section == item.key else '' }}"
                    href="{{ url_for(item.endpoint) if item.implemented else url_for(item.endpoint, module_key=item.key) }}"
+                   aria-label="{{ item.label }}" data-admin-tooltip="{{ item.label }}"
                    {% if current_admin_section == item.key %}aria-current="page"{% endif %}
                    {% if not item.implemented %}title="Módulo próximamente"{% endif %}>
                   <i data-lucide="{{ item.icon }}" aria-hidden="true"></i>
@@ -68,6 +76,7 @@
         {% if item.key in admin_visible_sections %}
           <a class="{{ 'is-active' if current_admin_section == item.key else '' }}"
              href="{{ url_for(item.endpoint, module_key=item.key) }}"
+             aria-label="{{ item.label }}" data-admin-tooltip="{{ item.label }}"
              {% if current_admin_section == item.key %}aria-current="page"{% endif %}>
             <i data-lucide="{{ item.icon }}" aria-hidden="true"></i>
             <span>{{ item.label }}</span>
@@ -89,6 +98,7 @@
       </form>
     </div>
   </aside>
+  <div class="admin-sidebar-tooltip" id="admin-sidebar-tooltip" role="tooltip" hidden></div>
   <button class="admin-sidebar-backdrop" type="button" data-admin-sidebar-close aria-label="Cerrar navegación" hidden></button>
 
   <header class="admin-topbar">
