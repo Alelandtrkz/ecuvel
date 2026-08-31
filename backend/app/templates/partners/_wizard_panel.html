@@ -108,20 +108,46 @@
     {% endif %}
     {% if errors.documents %}<small class="partner-error">{{ errors.documents }}</small>{% endif %}
   {% elif step == 5 %}
+    {% if bank_summary %}
+      <section class="partner-bank-summary" aria-label="Datos bancarios registrados">
+        <h3>Cuenta registrada</h3>
+        <dl class="partner-summary">
+          <div><dt>Banco</dt><dd>{{ bank_summary.bank_name }}</dd></div>
+          <div><dt>Titular</dt><dd>{{ bank_summary.holder_name }}</dd></div>
+          <div><dt>Identificación</dt><dd>{{ bank_summary.holder_identification_masked }}</dd></div>
+          <div><dt>Cuenta</dt><dd>••••{{ bank_summary.account_last4 }}</dd></div>
+          <div><dt>Estado</dt><dd>{{ bank_summary.status.value|replace('_', ' ')|title }}</dd></div>
+        </dl>
+      </section>
+    {% endif %}
+    {% if bank_replacement_required %}
+      <p class="partner-error">La revisión requiere registrar datos bancarios nuevos.</p>
+      <input type="hidden" name="bank_action" value="replace">
+    {% elif bank_summary %}
+      <fieldset>
+        <legend>¿Qué deseas hacer?</legend>
+        <label><input type="radio" name="bank_action" value="keep" {{ 'checked' if form.get('bank_action', 'keep') != 'replace' }}> Mantener datos actuales</label>
+        <label><input type="radio" name="bank_action" value="replace" {{ 'checked' if form.get('bank_action') == 'replace' }}> Cambiar datos bancarios</label>
+      </fieldset>
+    {% else %}
+      <input type="hidden" name="bank_action" value="replace">
+    {% endif %}
+    {% if errors.bank_action %}<small class="partner-error">{{ errors.bank_action }}</small>{% endif %}
+    <p>Para registrar o cambiar la cuenta, completa nuevamente todo el bloque. El número completo nunca se muestra después de guardarlo.</p>
     <label class="partner-field">Nombre del dueño de la cuenta
-      <input name="bank_account_owner" value="{{ form.get('bank_account_owner', '') }}" required>
+      <input name="bank_account_owner" value="{{ form.get('bank_account_owner', '') }}" {{ 'required' if not bank_summary or bank_replacement_required }}>
       {% if errors.bank_account_owner %}<small>{{ errors.bank_account_owner }}</small>{% endif %}
     </label>
     <label class="partner-field">Número de cuenta
-      <input name="bank_account_number" value="{{ form.get('bank_account_number', '') }}" required>
+      <input name="bank_account_number" value="" autocomplete="off" {{ 'required' if not bank_summary or bank_replacement_required }}>
       {% if errors.bank_account_number %}<small>{{ errors.bank_account_number }}</small>{% endif %}
     </label>
     <label class="partner-field">Nombre del banco
-      <input name="bank_name" value="{{ form.get('bank_name', '') }}" required>
+      <input name="bank_name" value="{{ form.get('bank_name', '') }}" {{ 'required' if not bank_summary or bank_replacement_required }}>
       {% if errors.bank_name %}<small>{{ errors.bank_name }}</small>{% endif %}
     </label>
     <label class="partner-field">Número de cédula
-      <input name="bank_id_number" value="{{ form.get('bank_id_number', '') }}" required>
+      <input name="bank_id_number" value="{{ form.get('bank_id_number', '') }}" {{ 'required' if not bank_summary or bank_replacement_required }}>
       {% if errors.bank_id_number %}<small>{{ errors.bank_id_number }}</small>{% endif %}
     </label>
     <label class="partner-field">Correo electrónico

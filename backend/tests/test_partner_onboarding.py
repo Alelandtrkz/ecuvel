@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from werkzeug.security import generate_password_hash
 
 from app.extensions import db
@@ -105,16 +105,90 @@ def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client
         },
         content_type="multipart/form-data",
     ).status_code == 302
+    # Submission is fail-closed until Step 5 creates a valid bank version.
+    assert client.post("/partners/onboarding/review").status_code == 302
+    session.expire_all()
+    incomplete = session.scalar(
+        select(StoreOnboarding).where(StoreOnboarding.user_id == user.id)
+    )
+    assert incomplete.status == StoreOnboardingStatus.DRAFT
+    assert incomplete.store_id is None
+
+    account_number = "000123456789"
     assert client.post(
         "/partners/onboarding/step/5",
         data={
+            "bank_action": "replace",
             "bank_account_owner": "CrisBeauty",
-            "bank_account_number": "000123456789",
+            "bank_account_number": account_number,
             "bank_name": "Banco de prueba",
             "bank_id_number": "210049391",
             "bank_email": "pagos@crisbeauty.test",
         },
     ).status_code == 302
+
+    session.expire_all()
+    onboarding = session.scalar(
+        select(StoreOnboarding).where(StoreOnboarding.user_id == user.id)
+    )
+    store = session.get(Store, onboarding.store_id)
+    members = session.scalars(
+        select(StoreMember).where(StoreMember.store_id == store.id)
+    ).all()
+    versions = session.scalars(
+        select(StoreBankAccountVersion).where(
+            StoreBankAccountVersion.store_id == store.id
+        )
+    ).all()
+    assert store.status == StoreStatus.DRAFT
+    assert len(members) == 1
+    assert len(versions) == 1
+    assert onboarding.bank_account_owner is None
+    assert onboarding.bank_account_number is None
+    assert onboarding.bank_name is None
+    assert onboarding.bank_id_number is None
+    assert onboarding.bank_email == "pagos@crisbeauty.test"
+    # A DRAFT store/member created only to bind the encrypted bank version
+    # does not unlock the product workspace.
+    draft_products = client.get("/partners/products", follow_redirects=False)
+    assert draft_products.status_code == 302
+    assert not draft_products.headers["Location"].endswith("/partners/products")
+    masked_page = client.get("/partners/onboarding/step/5").get_data(as_text=True)
+    assert account_number not in masked_page
+    assert "••••6789" in masked_page
+
+    # Retrying the same bundle and then keeping it is idempotent.
+    assert client.post(
+        "/partners/onboarding/step/5",
+        data={
+            "bank_action": "replace",
+            "bank_account_owner": "CrisBeauty",
+            "bank_account_number": account_number,
+            "bank_name": "Banco de prueba",
+            "bank_id_number": "210049391",
+            "bank_email": "pagos@crisbeauty.test",
+        },
+    ).status_code == 302
+    assert client.post(
+        "/partners/onboarding/step/5",
+        data={
+            "bank_action": "keep",
+            "bank_email": "pagos@crisbeauty.test",
+        },
+    ).status_code == 302
+    session.expire_all()
+    assert session.scalar(
+        select(func.count(Store.id)).where(Store.id == store.id)
+    ) == 1
+    assert session.scalar(
+        select(func.count(StoreMember.id)).where(StoreMember.store_id == store.id)
+    ) == 1
+    assert session.scalar(
+        select(func.count(StoreBankAccountVersion.id)).where(
+            StoreBankAccountVersion.store_id == store.id
+        )
+    ) == 1
+
     assert client.post("/partners/onboarding/review").status_code == 302
 
     session.expire_all()

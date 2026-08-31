@@ -25,6 +25,7 @@ from app.models import (
     StoreOnboarding,
     StoreOnboardingDocument,
     StoreVerificationReview,
+    StoreBankAccountVersion,
     User,
 )
 from app.models.enums import (
@@ -41,7 +42,8 @@ from app.services.mail import OutgoingMail, mail_service
 from app.services.bank_accounts import (
     BankAccountVersionError,
     approve_latest_onboarding_bank_version,
-    sync_bank_version_from_onboarding,
+    create_store_bank_account_version,
+    onboarding_bank_account_version,
 )
 from app.services.phone_otp import get_phone_otp_sender, mask_phone
 from app.services.marketplace_policy import ensure_store_inventory_location
@@ -82,8 +84,16 @@ STEPS: dict[int, StepSpec] = {
     2: StepSpec(2, "Agregue la dirección de su entidad legal", "Paso 2 de 5", ("province", "city", "address")),
     3: StepSpec(3, "Añadir información de contacto", "Paso 3 de 5", ("whatsapp_or_nickname",)),
     4: StepSpec(4, "Añadir documentos", "Paso 4 de 5", ()),
-    5: StepSpec(5, "Añadir datos para el pago", "Paso 5 de 5", ("bank_account_owner", "bank_account_number", "bank_name", "bank_id_number", "bank_email")),
+    5: StepSpec(5, "Añadir datos para el pago", "Paso 5 de 5", ("bank_email",)),
 }
+
+BANK_INPUT_FIELDS = (
+    "bank_account_owner",
+    "bank_account_number",
+    "bank_name",
+    "bank_id_number",
+)
+BANK_CORRECTION_FIELDS = frozenset(BANK_INPUT_FIELDS)
 
 DOCUMENT_TYPES = {
     "IDENTITY_OR_BUSINESS": "Documento de identidad / empresa",
@@ -139,6 +149,58 @@ def can_edit(onboarding: StoreOnboarding) -> bool:
     }
 
 
+def ensure_onboarding_store(
+    session: Session,
+    onboarding: StoreOnboarding,
+    *,
+    user_id,
+) -> Store:
+    onboarding = session.scalar(
+        select(StoreOnboarding)
+        .where(StoreOnboarding.id == onboarding.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if onboarding is None:
+        raise PartnerOnboardingStateError("No se encontró la solicitud.")
+    store = onboarding.store
+    if store is None:
+        if not _clean(onboarding.store_name) or not _clean(onboarding.legal_id_number):
+            raise PartnerOnboardingValidationError(
+                "Completa los datos generales antes de registrar la cuenta bancaria."
+            )
+        store = Store(
+            public_code=_public_store_code(),
+            name=onboarding.store_name,
+            slug=_unique_store_slug(session, onboarding.store_name),
+            legal_name=onboarding.store_name,
+            tax_id=onboarding.legal_id_number,
+            status=StoreStatus.DRAFT,
+            is_verified=False,
+        )
+        session.add(store)
+        session.flush()
+        onboarding.store_id = store.id
+    member = session.scalar(
+        select(StoreMember)
+        .where(
+            StoreMember.store_id == store.id,
+            StoreMember.user_id == user_id,
+        )
+        .with_for_update()
+    )
+    if member is None:
+        session.add(
+            StoreMember(
+                store_id=store.id,
+                user_id=user_id,
+                role=StoreMemberRole.OWNER,
+                is_active=True,
+            )
+        )
+    return store
+
+
 def save_step(
     *,
     session: Session,
@@ -155,14 +217,71 @@ def save_step(
         raise PartnerOnboardingValidationError("Paso no válido.")
     if step > onboarding.current_step + 1:
         raise PartnerOnboardingStateError("Completa los pasos anteriores antes de continuar.")
-    validate_step(onboarding, step, data, require_documents=False)
-    for field in STEPS[step].fields:
-        setattr(onboarding, field, _clean(data.get(field)))
-    if step == 5 and onboarding.store_id is not None:
-        try:
-            sync_bank_version_from_onboarding(
-                session, onboarding, actor_user_id=user_id
+    if step == 5:
+        ensure_onboarding_store(session, onboarding, user_id=user_id)
+        current_version = onboarding_bank_account_version(session, onboarding, lock=True)
+        correction_requires_replacement = bank_correction_requires_replacement(
+            onboarding,
+            current_version,
+        )
+        raw_action = _clean(data.get("bank_action")).lower()
+        if raw_action not in {"", "keep", "replace"}:
+            raise PartnerOnboardingValidationError(
+                "Selecciona si deseas mantener o reemplazar los datos bancarios.",
+                {"bank_action": "Selecciona una opción válida."},
             )
+        has_bank_bundle = any(_clean(data.get(field)) for field in BANK_INPUT_FIELDS)
+        replace_bank = (
+            current_version is None
+            or raw_action == "replace"
+            or (raw_action == "" and has_bank_bundle)
+        )
+        if correction_requires_replacement and not replace_bank:
+            raise PartnerOnboardingValidationError(
+                "La corrección bancaria requiere registrar datos nuevos.",
+                {"bank_action": "Selecciona cambiar datos bancarios."},
+            )
+        errors = _bank_step_errors(
+            onboarding,
+            data,
+            require_bundle=replace_bank,
+        )
+        if errors:
+            raise PartnerOnboardingValidationError("Revisa los datos del paso.", errors)
+        email = _clean(data.get("bank_email")) or _clean(onboarding.bank_email)
+        onboarding.bank_email = email
+        if replace_bank:
+            try:
+                version, _created = create_store_bank_account_version(
+                    session,
+                    store_id=onboarding.store_id,
+                    holder_name=data.get("bank_account_owner", ""),
+                    holder_identification=data.get("bank_id_number", ""),
+                    bank_name=data.get("bank_name", ""),
+                    account_number=data.get("bank_account_number", ""),
+                    source_onboarding_id=onboarding.id,
+                    actor_user_id=user_id,
+                )
+            except BankAccountVersionError as exc:
+                raise PartnerOnboardingValidationError(
+                    str(exc),
+                    {"bank_account_number": "Revisa los datos bancarios."},
+                ) from exc
+            if correction_requires_replacement and current_version is not None and version.id == current_version.id:
+                raise PartnerOnboardingValidationError(
+                    "La corrección bancaria requiere datos diferentes a los observados.",
+                    {"bank_account_number": "Registra una cuenta bancaria distinta."},
+                )
+    else:
+        validate_step(onboarding, step, data, require_documents=False)
+        for field in STEPS[step].fields:
+            setattr(onboarding, field, _clean(data.get(field)))
+    if step == 5:
+        try:
+            if onboarding_bank_account_version(session, onboarding) is None:
+                raise BankAccountVersionError(
+                    "No existe una versión bancaria vigente para la solicitud."
+                )
         except BankAccountVersionError as exc:
             raise PartnerOnboardingStateError(str(exc)) from exc
     if step == 4 and staged_documents:
@@ -217,6 +336,7 @@ def validate_step(
     data: Mapping[str, str] | None = None,
     *,
     require_documents: bool,
+    bank_version: StoreBankAccountVersion | None = None,
 ) -> None:
     values = {field: getattr(onboarding, field, None) for field in STEPS[step].fields}
     for key, value in (data or {}).items():
@@ -242,16 +362,16 @@ def validate_step(
     elif step == 4 and require_documents and not onboarding.documents:
         errors["documents"] = "Sube al menos un documento."
     elif step == 5:
-        for field, message in {
-            "bank_account_owner": "Ingresa el nombre del titular.",
-            "bank_account_number": "Ingresa el número de cuenta.",
-            "bank_name": "Ingresa el nombre del banco.",
-            "bank_id_number": "Ingresa la cédula del titular.",
-            "bank_email": "Ingresa el correo electrónico bancario.",
-        }.items():
-            _required(errors, values, field, message)
+        _required(
+            errors,
+            values,
+            "bank_email",
+            "Ingresa el correo electrónico bancario.",
+        )
         if values.get("bank_email") and "@" not in values["bank_email"]:
             errors["bank_email"] = "Ingresa un correo electrónico válido."
+        if bank_version is None:
+            errors["bank_account_number"] = "Registra una cuenta bancaria vigente."
     if errors:
         raise PartnerOnboardingValidationError("Revisa los datos del paso.", errors)
 
@@ -260,44 +380,27 @@ def submit_for_review(session: Session, user_id) -> StoreOnboarding:
     onboarding = get_or_create_onboarding(session, user_id)
     if not can_edit(onboarding):
         raise PartnerOnboardingStateError("La solicitud ya fue enviada.")
-    for step in range(1, 6):
+    for step in range(1, 5):
         validate_step(onboarding, step, require_documents=True)
-    _validate_requested_corrections_resolved(onboarding)
+    if onboarding.store is None:
+        raise PartnerOnboardingStateError(
+            "La solicitud no tiene una tienda bancaria asociada. Completa el paso 5."
+        )
+    bank_version = onboarding_bank_account_version(session, onboarding, lock=True)
+    validate_step(
+        onboarding,
+        5,
+        require_documents=True,
+        bank_version=bank_version,
+    )
+    _validate_requested_corrections_resolved(onboarding, bank_version=bank_version)
     now = datetime.now(timezone.utc)
     store = onboarding.store
-    if store is None:
-        store = Store(
-            public_code=_public_store_code(),
-            name=onboarding.store_name,
-            slug=_unique_store_slug(session, onboarding.store_name),
-            legal_name=onboarding.store_name,
-            tax_id=onboarding.legal_id_number,
-            status=StoreStatus.PENDING_REVIEW,
-            is_verified=False,
-        )
-        session.add(store)
-        session.flush()
-        onboarding.store_id = store.id
-        session.add(
-            StoreMember(
-                store_id=store.id,
-                user_id=user_id,
-                role=StoreMemberRole.OWNER,
-                is_active=True,
-            )
-        )
-    else:
-        store.name = onboarding.store_name
-        store.legal_name = onboarding.store_name
-        store.tax_id = onboarding.legal_id_number
-        store.status = StoreStatus.PENDING_REVIEW
-        store.is_verified = False
-    try:
-        sync_bank_version_from_onboarding(
-            session, onboarding, actor_user_id=user_id
-        )
-    except BankAccountVersionError as exc:
-        raise PartnerOnboardingStateError(str(exc)) from exc
+    store.name = onboarding.store_name
+    store.legal_name = onboarding.store_name
+    store.tax_id = onboarding.legal_id_number
+    store.status = StoreStatus.PENDING_REVIEW
+    store.is_verified = False
     onboarding.status = StoreOnboardingStatus.SUBMITTED
     onboarding.current_stage = StoreOnboardingStage.WAITING_VERIFICATION
     onboarding.submitted_at = now
@@ -629,6 +732,34 @@ def _required(errors: dict[str, str], values: Mapping[str, str | None], field: s
         errors[field] = message
 
 
+def _bank_step_errors(
+    onboarding: StoreOnboarding,
+    data: Mapping[str, str],
+    *,
+    require_bundle: bool,
+) -> dict[str, str]:
+    values = {key: _clean(data.get(key)) for key in (*BANK_INPUT_FIELDS, "bank_email")}
+    values["bank_email"] = values["bank_email"] or _clean(onboarding.bank_email)
+    errors: dict[str, str] = {}
+    if require_bundle:
+        for field, message in {
+            "bank_account_owner": "Ingresa el nombre del titular.",
+            "bank_account_number": "Ingresa el número de cuenta.",
+            "bank_name": "Ingresa el nombre del banco.",
+            "bank_id_number": "Ingresa la cédula del titular.",
+        }.items():
+            _required(errors, values, field, message)
+    _required(
+        errors,
+        values,
+        "bank_email",
+        "Ingresa el correo electrónico bancario.",
+    )
+    if values.get("bank_email") and "@" not in values["bank_email"]:
+        errors["bank_email"] = "Ingresa un correo electrónico válido."
+    return errors
+
+
 def _clean(value) -> str:
     return " ".join(str(value or "").strip().split())
 
@@ -705,7 +836,11 @@ def _normalize_issues(issues: list[dict] | None) -> list[dict]:
                 continue
             item.update({"field": field, "step": step})
             identity = (target_type, field, reason_code)
-            if "previous_value" in raw:
+            if field in BANK_CORRECTION_FIELDS:
+                version_id = _optional_uuid(raw.get("bank_account_version_id"))
+                if version_id is not None:
+                    item["bank_account_version_id"] = str(version_id)
+            elif "previous_value" in raw:
                 item["previous_value"] = _clean(raw.get("previous_value"))
         if identity in seen:
             continue
@@ -746,7 +881,36 @@ def _unresolved_document_issues(onboarding: StoreOnboarding) -> list[dict]:
     return unresolved
 
 
-def unresolved_correction_issues(onboarding: StoreOnboarding) -> list[dict]:
+def bank_correction_requires_replacement(
+    onboarding: StoreOnboarding,
+    bank_version: StoreBankAccountVersion | None,
+) -> bool:
+    review = latest_correction_review(onboarding)
+    for issue in (review.issues_snapshot if review else None) or []:
+        if (
+            issue.get("target_type") != "FIELD"
+            or issue.get("field") not in BANK_CORRECTION_FIELDS
+        ):
+            continue
+        baseline_id = _optional_uuid(issue.get("bank_account_version_id"))
+        if baseline_id is not None:
+            if bank_version is None or bank_version.id == baseline_id:
+                return True
+            continue
+        if (
+            bank_version is None
+            or onboarding.correction_requested_at is None
+            or bank_version.created_at <= onboarding.correction_requested_at
+        ):
+            return True
+    return False
+
+
+def unresolved_correction_issues(
+    onboarding: StoreOnboarding,
+    *,
+    bank_version: StoreBankAccountVersion | None = None,
+) -> list[dict]:
     review = latest_correction_review(onboarding)
     unresolved = list(_unresolved_document_issues(onboarding))
     for issue in (review.issues_snapshot if review else None) or []:
@@ -754,10 +918,21 @@ def unresolved_correction_issues(onboarding: StoreOnboarding) -> list[dict]:
             continue
         if _clean(getattr(onboarding, issue.get("field", ""), None)) == _clean(issue.get("previous_value")):
             unresolved.append(issue)
+    if bank_correction_requires_replacement(onboarding, bank_version):
+        unresolved.extend(
+            issue
+            for issue in (review.issues_snapshot if review else None) or []
+            if issue.get("target_type") == "FIELD"
+            and issue.get("field") in BANK_CORRECTION_FIELDS
+        )
     return unresolved
 
 
-def _validate_requested_corrections_resolved(onboarding: StoreOnboarding) -> None:
+def _validate_requested_corrections_resolved(
+    onboarding: StoreOnboarding,
+    *,
+    bank_version: StoreBankAccountVersion | None,
+) -> None:
     if onboarding.status != StoreOnboardingStatus.CORRECTIONS_REQUESTED:
         return
     unresolved = _unresolved_document_issues(onboarding)
@@ -785,4 +960,9 @@ def _validate_requested_corrections_resolved(onboarding: StoreOnboarding) -> Non
         raise PartnerOnboardingValidationError(
             "Actualiza la información solicitada antes de reenviar.",
             {"corrections": f"Revisa los pasos {', '.join(steps)}."},
+        )
+    if bank_correction_requires_replacement(onboarding, bank_version):
+        raise PartnerOnboardingValidationError(
+            "Actualiza la información bancaria solicitada antes de reenviar.",
+            {"corrections": "Revisa el paso 5."},
         )

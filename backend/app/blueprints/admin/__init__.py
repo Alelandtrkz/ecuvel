@@ -13,6 +13,7 @@ from flask import (
     abort,
     current_app,
     flash,
+    jsonify,
     redirect,
     render_template,
     request,
@@ -157,6 +158,16 @@ from app.services.admin_permissions import (
     admin_permission_required,
     permissions_for_user,
     user_has_permission,
+)
+from app.services.bank_accounts import (
+    BankAccountAccessError,
+    bank_account_summary,
+    decrypt_bank_account_for_staff,
+    onboarding_bank_account_version,
+)
+from app.services.financial_audit import (
+    BANK_ACCOUNT_SENSITIVE_VIEWED,
+    record_financial_audit,
 )
 from app.services.admin_users import (
     AdminUserError,
@@ -1630,9 +1641,16 @@ def store_review(onboarding_id: uuid.UUID):
     onboarding = get_admin_store_review(db.session, onboarding_id)
     if onboarding is None:
         abort(404)
+    bank_version = onboarding_bank_account_version(db.session, onboarding)
+    can_reveal_bank_account = user_has_permission(
+        current_user,
+        "bank_accounts.sensitive.view",
+    )
     return render_template(
         "admin/store_review.html",
         onboarding=onboarding,
+        bank_summary=bank_account_summary(bank_version),
+        can_reveal_bank_account=can_reveal_bank_account,
         approval_checks=APPROVAL_CHECK_LABELS,
         correction_reasons=CORRECTION_REASON_LABELS,
         document_correction_reasons=DOCUMENT_CORRECTION_REASON_LABELS,
@@ -1643,6 +1661,46 @@ def store_review(onboarding_id: uuid.UUID):
         contract_status_label=contract_status_label,
         **_shell_context("stores"),
     )
+
+
+@admin.post("/stores/<uuid:onboarding_id>/bank-account/reveal")
+@limiter.limit("10 per hour")
+@admin_permission_required("bank_accounts.sensitive.view")
+def reveal_store_bank_account(onboarding_id: uuid.UUID):
+    onboarding = get_admin_store_review(db.session, onboarding_id)
+    if onboarding is None:
+        abort(404)
+    version = onboarding_bank_account_version(db.session, onboarding, lock=True)
+    try:
+        requested_version_id = uuid.UUID(request.form.get("bank_account_version_id", ""))
+    except (TypeError, ValueError):
+        abort(404)
+    if version is None or version.id != requested_version_id:
+        abort(404)
+    try:
+        account_number = decrypt_bank_account_for_staff(
+            version,
+            staff_user=current_user,
+        )
+    except BankAccountAccessError:
+        db.session.rollback()
+        abort(404)
+    record_financial_audit(
+        db.session,
+        action=BANK_ACCOUNT_SENSITIVE_VIEWED,
+        actor_user_id=current_user.id,
+        metadata={
+            "store_id": str(version.store_id),
+            "bank_account_version_id": str(version.id),
+            "status": version.status.value,
+        },
+    )
+    db.session.commit()
+    response = jsonify({"account_number": account_number})
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 @admin.get("/stores/<uuid:onboarding_id>/documents/<uuid:document_id>")
@@ -1755,7 +1813,7 @@ def _store_review_decision(onboarding_id: uuid.UUID, action: str):
 
 @admin.post("/stores/<uuid:onboarding_id>/approve")
 @limiter.limit("30 per hour")
-@ecuvel_staff_required
+@admin_permission_required("bank_accounts.sensitive.view")
 def approve_store(onboarding_id: uuid.UUID):
     return _store_review_decision(onboarding_id, "approve")
 

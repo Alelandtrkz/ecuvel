@@ -16,6 +16,7 @@ from app.models import (
     StoreOnboardingDocument,
     StoreVerificationReview,
     User,
+    StoreBankAccountVersion,
 )
 from app.models.enums import (
     StoreOnboardingDocumentStatus,
@@ -29,7 +30,10 @@ from app.services.partner_onboarding import (
     DOCUMENT_TYPES,
     PartnerOnboardingValidationError,
     review_onboarding,
+    BANK_CORRECTION_FIELDS,
 )
+from app.services.admin_permissions import user_has_permission
+from app.services.bank_accounts import onboarding_bank_account_version
 
 
 ECUADOR_TZ = ZoneInfo("America/Guayaquil")
@@ -310,7 +314,12 @@ def get_admin_store_review(session: Session, onboarding_id: uuid.UUID) -> StoreO
     )
 
 
-def build_correction_issues(onboarding: StoreOnboarding, form) -> list[dict]:
+def build_correction_issues(
+    onboarding: StoreOnboarding,
+    form,
+    *,
+    bank_account_version: StoreBankAccountVersion | None = None,
+) -> list[dict]:
     issues: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
     current_documents = {
@@ -379,14 +388,19 @@ def build_correction_issues(onboarding: StoreOnboarding, form) -> list[dict]:
         if identity in seen:
             raise PartnerOnboardingValidationError("No repitas la misma corrección.")
         seen.add(identity)
-        issues.append({
+        issue = {
             "target_type": "FIELD",
             "field": field,
             "step": step,
             "reason_code": reason_code,
             "message": general_comment or default_message,
-            "previous_value": getattr(onboarding, field, None),
-        })
+        }
+        if field in BANK_CORRECTION_FIELDS:
+            if bank_account_version is not None:
+                issue["bank_account_version_id"] = str(bank_account_version.id)
+        else:
+            issue["previous_value"] = getattr(onboarding, field, None)
+        issues.append(issue)
 
     if len(issues) > MAX_CORRECTION_ISSUES:
         raise PartnerOnboardingValidationError(
@@ -453,6 +467,14 @@ def approve_store_verification(
     expected_updated_at: str | None,
     comments: str | None,
 ) -> StoreOnboarding:
+    reviewer = session.get(User, reviewer_user_id)
+    if reviewer is None or not user_has_permission(
+        reviewer,
+        "bank_accounts.sensitive.view",
+    ):
+        raise PartnerOnboardingValidationError(
+            "No tienes permiso para aprobar la revisión bancaria."
+        )
     checklist = {key: key in checklist_values for key in ADMIN_APPROVAL_CHECKS}
     return review_onboarding(
         session=session,
@@ -476,7 +498,11 @@ def request_store_corrections(
     onboarding = session.get(StoreOnboarding, onboarding_id)
     if onboarding is None:
         raise PartnerOnboardingValidationError("No se encontró la solicitud.")
-    issues = build_correction_issues(onboarding, form)
+    issues = build_correction_issues(
+        onboarding,
+        form,
+        bank_account_version=onboarding_bank_account_version(session, onboarding),
+    )
     return review_onboarding(
         session=session,
         onboarding_id=onboarding_id,

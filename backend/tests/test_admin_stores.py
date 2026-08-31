@@ -7,11 +7,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.extensions import db
 from app.models import (
+    AdminAuditEvent,
+    StaffProfile,
     Store,
+    StoreBankAccountVersion,
     StoreMember,
     StoreOnboarding,
     StoreOnboardingDocument,
@@ -19,6 +22,10 @@ from app.models import (
     User,
 )
 from app.models.enums import (
+    BankAccountVersionStatus,
+    StaffEmploymentStatus,
+    StaffIdentificationType,
+    StaffRole,
     StoreMemberRole,
     StoreOnboardingDocumentStatus,
     StoreOnboardingStage,
@@ -28,6 +35,8 @@ from app.models.enums import (
     UserStatus,
 )
 from app.services.admin_stores import approve_store_verification
+from app.services.bank_accounts import create_store_bank_account_version
+from app.services.financial_audit import BANK_ACCOUNT_SENSITIVE_VIEWED
 from app.services.partner_onboarding import PartnerOnboardingValidationError
 
 
@@ -42,7 +51,13 @@ def client(app, tmp_path):
     db.session.remove()
 
 
-def _user(session, *, staff: bool = False, name: str = "Usuario prueba") -> User:
+def _user(
+    session,
+    *,
+    staff: bool = False,
+    sensitive_bank_access: bool = False,
+    name: str = "Usuario prueba",
+) -> User:
     token = uuid.uuid4().hex[:10]
     user = User(
         public_code=f"USR-{token}",
@@ -57,6 +72,17 @@ def _user(session, *, staff: bool = False, name: str = "Usuario prueba") -> User
     )
     session.add(user)
     session.flush()
+    if sensitive_bank_access:
+        session.add(
+            StaffProfile(
+                user_id=user.id,
+                identification_type=StaffIdentificationType.OTHER,
+                identification_number_normalized=f"TEST-{token}",
+                role=StaffRole.SUPER_ADMIN,
+                employment_status=StaffEmploymentStatus.ACTIVE,
+            )
+        )
+        session.flush()
     return user
 
 
@@ -91,15 +117,21 @@ def _submitted_onboarding(session, app, *, name: str = "Tienda Nova"):
         city="Quito",
         address="Av. República 123",
         whatsapp_or_nickname="0999001122",
-        bank_account_owner="Seller Nova",
-        bank_account_number="2200112233",
-        bank_name="Banco Pichincha",
-        bank_id_number=store.tax_id,
         bank_email="pagos@nova.test",
         submitted_at=datetime.now(timezone.utc),
     )
     session.add(onboarding)
     session.flush()
+    create_store_bank_account_version(
+        session,
+        store_id=store.id,
+        holder_name="Seller Nova",
+        holder_identification=store.tax_id,
+        bank_name="Banco Pichincha",
+        account_number="2200112233",
+        source_onboarding_id=onboarding.id,
+        actor_user_id=seller.id,
+    )
     session.add(StoreMember(
         store_id=store.id,
         user_id=seller.id,
@@ -182,7 +214,10 @@ def test_admin_store_moderation_access_list_and_private_document(app, session, c
     assert "Tienda Nova" in client.get(f"/admin/stores?q={seller.email}").get_data(as_text=True)
     detail = client.get(f"/admin/stores/{onboarding.id}")
     assert detail.status_code == 200
-    assert "Aprobar verificación" in detail.get_data(as_text=True)
+    detail_html = detail.get_data(as_text=True)
+    assert "Aprobar verificación" not in detail_html
+    assert "••••2233" in detail_html
+    assert "2200112233" not in detail_html
     assert "Rechazar" not in detail.get_data(as_text=True)
 
     private = client.get(f"/admin/stores/{onboarding.id}/documents/{document.id}")
@@ -197,11 +232,91 @@ def test_admin_store_moderation_access_list_and_private_document(app, session, c
     assert len(session.get(StoreOnboarding, onboarding.id).reviews) == review_count
 
 
+def test_bank_reveal_requires_sensitive_permission_and_audits_without_pii(
+    app,
+    session,
+    client,
+):
+    _seller, _store, onboarding, _document = _submitted_onboarding(session, app)
+    _other_seller, _other_store, other_onboarding, _other_document = _submitted_onboarding(
+        session,
+        app,
+        name="Tienda Reveal Ajena",
+    )
+    version = session.scalar(
+        select(StoreBankAccountVersion).where(
+            StoreBankAccountVersion.source_onboarding_id == onboarding.id
+        )
+    )
+    legacy_staff = _user(session, staff=True, name="Legacy Staff")
+    super_admin = _user(
+        session,
+        staff=True,
+        sensitive_bank_access=True,
+        name="Super Admin",
+    )
+    session.commit()
+
+    _login(client, legacy_staff)
+    denied = client.post(
+        f"/admin/stores/{onboarding.id}/bank-account/reveal",
+        data={"bank_account_version_id": str(version.id)},
+    )
+    assert denied.status_code == 403
+    assert session.scalar(
+        select(AdminAuditEvent).where(
+            AdminAuditEvent.action == BANK_ACCOUNT_SENSITIVE_VIEWED
+        )
+    ) is None
+    assert client.post(
+        f"/admin/stores/{onboarding.id}/approve",
+        data={"checklist": ["banking"]},
+    ).status_code == 403
+
+    _login(client, super_admin)
+    page = client.get(f"/admin/stores/{onboarding.id}")
+    assert page.status_code == 200
+    assert "2200112233" not in page.get_data(as_text=True)
+    wrong_scope = client.post(
+        f"/admin/stores/{other_onboarding.id}/bank-account/reveal",
+        data={"bank_account_version_id": str(version.id)},
+    )
+    assert wrong_scope.status_code == 404
+    revealed = client.post(
+        f"/admin/stores/{onboarding.id}/bank-account/reveal",
+        data={"bank_account_version_id": str(version.id)},
+    )
+    assert revealed.status_code == 200
+    assert revealed.get_json() == {"account_number": "2200112233"}
+    assert revealed.headers["Cache-Control"] == "private, no-store"
+    assert revealed.headers["Pragma"] == "no-cache"
+    assert revealed.headers["X-Content-Type-Options"] == "nosniff"
+
+    session.expire_all()
+    audit = session.scalar(
+        select(AdminAuditEvent)
+        .where(AdminAuditEvent.action == BANK_ACCOUNT_SENSITIVE_VIEWED)
+        .order_by(AdminAuditEvent.created_at.desc())
+    )
+    assert audit.actor_user_id == super_admin.id
+    assert set(audit.metadata_json) == {
+        "store_id",
+        "bank_account_version_id",
+        "status",
+    }
+    assert "2200112233" not in str(audit.metadata_json)
+
+
 def test_corrections_replacement_resubmission_and_approval_keep_store_pending(
     app, session, client
 ):
     seller, store, onboarding, document = _submitted_onboarding(session, app)
-    staff = _user(session, staff=True, name="Moderadora ECUVEL")
+    staff = _user(
+        session,
+        staff=True,
+        sensitive_bank_access=True,
+        name="Moderadora ECUVEL",
+    )
     session.commit()
     expected = onboarding.updated_at.isoformat()
 
@@ -393,7 +508,7 @@ def test_multiple_document_corrections_reject_foreign_and_duplicate_payload_atom
     _other_seller, _other_store, _other_onboarding, foreign_document = _submitted_onboarding(
         session, app, name="Tienda Fuera de Alcance"
     )
-    staff = _user(session, staff=True)
+    staff = _user(session, staff=True, sensitive_bank_access=True)
     session.commit()
     reviews_before = len(onboarding.reviews)
     expected_updated_at = onboarding.updated_at.isoformat()
@@ -515,7 +630,7 @@ def test_partial_multiple_document_replacement_blocks_resubmission_and_keeps_lin
 
 def test_approval_without_current_documents_uses_correct_utf8_message(app, session):
     _seller, _store, onboarding, document = _submitted_onboarding(session, app)
-    staff = _user(session, staff=True)
+    staff = _user(session, staff=True, sensitive_bank_access=True)
     session.delete(document)
     session.commit()
 
@@ -540,10 +655,9 @@ def test_approval_without_current_documents_uses_correct_utf8_message(app, sessi
 
 
 def test_structured_field_corrections_remain_supported(app, session, client):
-    _seller, _store, onboarding, document = _submitted_onboarding(session, app)
+    _seller, store, onboarding, document = _submitted_onboarding(session, app)
     staff = _user(session, staff=True)
     session.commit()
-    original_bank_account = onboarding.bank_account_number
 
     _login(client, staff)
     response = client.post(
@@ -561,14 +675,93 @@ def test_structured_field_corrections_remain_supported(app, session, client):
     issues = onboarding.reviews[-1].issues_snapshot
     assert [issue["target_type"] for issue in issues] == ["FIELD", "FIELD"]
     assert issues[0]["field"] == "bank_account_number"
-    assert issues[0]["previous_value"] == original_bank_account
+    assert "previous_value" not in issues[0]
+    assert "bank_account_version_id" in issues[0]
+    assert {"target_type", "field", "step", "reason_code", "message"} <= set(
+        issues[0]
+    )
+    assert "2200112233" not in repr(issues)
+    assert store.tax_id not in repr(issues)
     assert issues[1]["field"] == "address"
+    assert "previous_value" in issues[1]
     assert session.get(StoreOnboardingDocument, document.id).status == StoreOnboardingDocumentStatus.PENDING_REVIEW
+
+
+def test_bank_correction_requires_a_new_version_and_keep_fails_closed(
+    app,
+    session,
+    client,
+):
+    seller, store, onboarding, _document = _submitted_onboarding(session, app)
+    staff = _user(session, staff=True)
+    session.commit()
+    original_version = session.scalar(
+        select(StoreBankAccountVersion).where(
+            StoreBankAccountVersion.source_onboarding_id == onboarding.id
+        )
+    )
+
+    _login(client, staff)
+    requested = client.post(
+        f"/admin/stores/{onboarding.id}/request-corrections",
+        data={
+            "expected_updated_at": onboarding.updated_at.isoformat(),
+            "field_issue_code": "BANK_DATA_INCORRECT",
+            "comments": "Registra una cuenta bancaria corregida.",
+        },
+    )
+    assert requested.status_code == 302
+
+    _login(client, seller)
+    page = client.get("/partners/onboarding/step/5")
+    html = page.get_data(as_text=True)
+    assert page.status_code == 200
+    assert "2200112233" not in html
+    assert "••••2233" in html
+    keep = client.post(
+        "/partners/onboarding/step/5",
+        data={
+            "bank_action": "keep",
+            "bank_email": "pagos@nova.test",
+        },
+    )
+    assert keep.status_code == 400
+    assert session.scalar(
+        select(func.count(StoreBankAccountVersion.id)).where(
+            StoreBankAccountVersion.store_id == store.id
+        )
+    ) == 1
+
+    replaced = client.post(
+        "/partners/onboarding/step/5",
+        data={
+            "bank_action": "replace",
+            "bank_account_owner": "Seller Nova",
+            "bank_account_number": "2200112299",
+            "bank_name": "Banco Pichincha",
+            "bank_id_number": store.tax_id,
+            "bank_email": "pagos@nova.test",
+        },
+    )
+    assert replaced.status_code == 302
+    session.expire_all()
+    versions = session.scalars(
+        select(StoreBankAccountVersion)
+        .where(StoreBankAccountVersion.store_id == store.id)
+        .order_by(StoreBankAccountVersion.version)
+    ).all()
+    assert len(versions) == 2
+    assert versions[0].id == original_version.id
+    assert versions[1].status == BankAccountVersionStatus.PENDING_REVIEW
+    assert versions[1].account_last4 == "2299"
+    assert client.post("/partners/onboarding/review").status_code == 302
+    session.expire_all()
+    assert session.get(StoreOnboarding, onboarding.id).status == StoreOnboardingStatus.SUBMITTED
 
 
 def test_admin_store_decision_rejects_stale_version(app, session, client):
     _seller, _store, onboarding, _document = _submitted_onboarding(session, app)
-    staff = _user(session, staff=True)
+    staff = _user(session, staff=True, sensitive_bank_access=True)
     session.commit()
     stale = onboarding.updated_at.isoformat()
     onboarding.store_name = "Tienda actualizada mientras se revisaba"

@@ -22,13 +22,16 @@
         <div><dt>Email del owner</dt><dd>{{ onboarding.user.email or 'Pendiente' }}</dd></div>
       </dl></section>
 
-      <section class="admin-card admin-store-section admin-store-bank"><header><span><i data-lucide="landmark"></i></span><div><h2>Datos bancarios</h2><p>Información privada visible únicamente para ECUVEL staff.</p></div></header><dl class="admin-store-data">
-        <div><dt>Titular</dt><dd>{{ onboarding.bank_account_owner or 'Pendiente' }}</dd></div>
-        <div><dt>Identificación del titular</dt><dd>{{ onboarding.bank_id_number or 'Pendiente' }}</dd></div>
-        <div><dt>Banco</dt><dd>{{ onboarding.bank_name or 'Pendiente' }}</dd></div>
-        <div><dt>Número de cuenta</dt><dd>{{ onboarding.bank_account_number or 'Pendiente' }}</dd></div>
+      <section class="admin-card admin-store-section admin-store-bank"><header><span><i data-lucide="landmark"></i></span><div><h2>Datos bancarios</h2><p>Resumen enmascarado de la versión bancaria vigente.</p></div></header><dl class="admin-store-data">
+        <div><dt>Titular</dt><dd>{{ bank_summary.holder_name if bank_summary else 'Pendiente' }}</dd></div>
+        <div><dt>Identificación del titular</dt><dd>{{ bank_summary.holder_identification_masked if bank_summary else 'Pendiente' }}</dd></div>
+        <div><dt>Banco</dt><dd>{{ bank_summary.bank_name if bank_summary else 'Pendiente' }}</dd></div>
+        <div><dt>Número de cuenta</dt><dd>{{ ('••••' ~ bank_summary.account_last4) if bank_summary else 'Pendiente' }}</dd></div>
+        <div><dt>Versión / estado</dt><dd>{{ ('v' ~ bank_summary.version ~ ' · ' ~ (bank_summary.status.value|replace('_', ' ')|title)) if bank_summary else 'Pendiente' }}</dd></div>
+        <div><dt>Revisada</dt><dd>{{ bank_summary.reviewed_at|ecuador_datetime if bank_summary and bank_summary.reviewed_at else 'Pendiente' }}</dd></div>
+        <div><dt>Utilizable desde</dt><dd>{{ bank_summary.usable_from|ecuador_datetime if bank_summary and bank_summary.usable_from else 'Pendiente' }}</dd></div>
         <div class="is-wide"><dt>Email bancario</dt><dd>{{ onboarding.bank_email or 'Pendiente' }}</dd></div>
-      </dl></section>
+      </dl>{% if bank_summary and can_reveal_bank_account %}<form method="post" action="{{ url_for('admin.reveal_store_bank_account', onboarding_id=onboarding.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="bank_account_version_id" value="{{ bank_summary.id }}"><button class="admin-button admin-button--soft" type="submit">Revelar número completo</button></form>{% endif %}</section>
 
       <section class="admin-card admin-store-section admin-store-history"><header><span><i data-lucide="history"></i></span><div><h2>Historial de revisión</h2><p>Registro append-only de envíos y decisiones.</p></div></header>
         <ol>{% for review in onboarding.reviews|reverse %}<li><span class="admin-store-history__dot"></span><div><strong>{{ {'PENDING':'Solicitud enviada','CORRECTIONS_REQUESTED':'Correcciones solicitadas','APPROVED':'Verificación aprobada','REJECTED':'Solicitud cerrada'}.get(review.decision.value, review.decision.value) }}</strong><small>{{ review.created_at|ecuador_datetime }} · {{ review.reviewer.full_name if review.reviewer else 'Seller / sistema' }}</small>{% if review.comments %}<p>{{ review.comments }}</p>{% endif %}{% if review.issues_snapshot %}<ul>{% for issue in review.issues_snapshot %}{% set document = documents_by_id.get(issue.target_id) if issue.target_type == 'DOCUMENT' else none %}<li><strong>{{ document_type_label(document.document_type) if document else ('Paso ' ~ issue.step if issue.target_type == 'FIELD' and issue.step else 'Corrección') }} · {{ correction_reasons.get(issue.reason_code, issue.reason_code or 'Observación') }}</strong><br>{{ issue.message or review.comments or 'Sin observación adicional.' }}</li>{% endfor %}</ul>{% endif %}</div></li>{% endfor %}</ol>
@@ -46,12 +49,14 @@
       </section>
 
       {% if onboarding.status.value == 'SUBMITTED' %}<section class="admin-card admin-store-resolution"><h2>Resolución</h2><p>Al aprobar la verificación, el seller podrá continuar con la aceptación del contrato ECUVEL. La tienda se activará únicamente después de completar la firma mediante código de verificación.</p>
+        {% if can_reveal_bank_account %}
         <form method="post" action="{{ url_for('admin.approve_store', onboarding_id=onboarding.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="expected_updated_at" value="{{ onboarding.updated_at.isoformat() }}">
           <fieldset><legend>Checklist de verificación</legend>{% for key, label in approval_checks.items() %}<label><input type="checkbox" name="checklist" value="{{ key }}" required><span>{{ label }}</span></label>{% endfor %}</fieldset>
           <label class="admin-store-note">Nota interna opcional<textarea name="comments" maxlength="1000" placeholder="Observaciones de la aprobación..."></textarea></label>
           <button class="admin-button admin-store-approve" type="submit"><i data-lucide="badge-check"></i>Aprobar verificación</button>
         </form>
+        {% else %}<p class="admin-store-muted">La aprobación bancaria requiere permiso sensible.</p>{% endif %}
         <button class="admin-button admin-store-corrections" type="button" data-store-dialog-open><i data-lucide="list-restart"></i>Solicitar correcciones</button>
       </section>{% endif %}
     </aside>

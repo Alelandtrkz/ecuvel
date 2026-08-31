@@ -31,6 +31,7 @@ from app.services.partner_onboarding import (
     PartnerOnboardingValidationError,
     STEPS,
     accept_contract,
+    bank_correction_requires_replacement,
     contract_pdf_bytes,
     get_or_create_onboarding,
     get_onboarding,
@@ -40,6 +41,10 @@ from app.services.partner_onboarding import (
     stage_partner_document,
     submit_for_review,
     unresolved_correction_issues,
+)
+from app.services.bank_accounts import (
+    bank_account_summary,
+    onboarding_bank_account_version,
 )
 from app.services.partner_product_categories import (
     PARTNER_PRODUCT_DRAFT_SESSION_KEY,
@@ -133,19 +138,30 @@ def _get_or_create_for_current_user():
 
 
 def _render_main(onboarding, *, step: int | None = None, errors=None, form=None, status_code=200):
-    form_values = form or {
+    bank_version = onboarding_bank_account_version(db.session, onboarding)
+    if form is not None:
+        form_values = {key: form.get(key, "") for key in (*STEPS[1].fields, *STEPS[2].fields, *STEPS[3].fields, "bank_account_owner", "bank_name", "bank_id_number", "bank_email", "bank_action")}
+        # The full account number is write-only and is never reflected into HTML.
+        form_values["bank_account_number"] = ""
+    else:
+        form_values = {
         "store_name": onboarding.store_name or "",
         "legal_id_number": onboarding.legal_id_number or "",
         "province": onboarding.province or "",
         "city": onboarding.city or "",
         "address": onboarding.address or "",
         "whatsapp_or_nickname": onboarding.whatsapp_or_nickname or "",
-        "bank_account_owner": onboarding.bank_account_owner or "",
-        "bank_account_number": onboarding.bank_account_number or "",
-        "bank_name": onboarding.bank_name or "",
-        "bank_id_number": onboarding.bank_id_number or "",
+        "bank_account_owner": "",
+        "bank_account_number": "",
+        "bank_name": "",
+        "bank_id_number": "",
         "bank_email": onboarding.bank_email or "",
-    }
+        "bank_action": "keep" if bank_version is not None else "replace",
+        }
+    replacement_required = bank_correction_requires_replacement(
+        onboarding,
+        bank_version,
+    )
     return render_template(
         "partners/onboarding.html",
         onboarding=onboarding,
@@ -153,12 +169,17 @@ def _render_main(onboarding, *, step: int | None = None, errors=None, form=None,
         step=step or onboarding.current_step,
         errors=errors or {},
         form=form_values,
+        bank_summary=bank_account_summary(bank_version),
+        bank_replacement_required=replacement_required,
         current_partner_tab="main",
         document_types=DOCUMENT_TYPES,
         correction_reason_labels=CORRECTION_REASON_LABELS,
         correction_documents={str(document.id): document for document in onboarding.documents},
         correction_review=latest_correction_review(onboarding),
-        pending_corrections=unresolved_correction_issues(onboarding),
+        pending_corrections=unresolved_correction_issues(
+            onboarding,
+            bank_version=bank_version,
+        ),
     ), status_code
 
 
@@ -277,6 +298,7 @@ def submit_review():
 @login_required
 def status():
     onboarding = _get_or_create_for_current_user()
+    bank_version = onboarding_bank_account_version(db.session, onboarding)
     return render_template(
         "partners/status.html",
         onboarding=onboarding,
@@ -284,7 +306,10 @@ def status():
         correction_reason_labels=CORRECTION_REASON_LABELS,
         correction_documents={str(document.id): document for document in onboarding.documents},
         correction_review=latest_correction_review(onboarding),
-        pending_corrections=unresolved_correction_issues(onboarding),
+        pending_corrections=unresolved_correction_issues(
+            onboarding,
+            bank_version=bank_version,
+        ),
         current_partner_tab="main",
     )
 

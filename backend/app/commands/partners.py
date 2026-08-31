@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models import StoreOnboarding, StoreVerificationReview, User
+from app.services.admin_permissions import user_has_permission
 from app.services.partner_onboarding import PartnerOnboardingError, review_onboarding
 
 
@@ -82,6 +83,16 @@ def review_store_onboarding_command(
     try:
         with db.session.begin():
             reviewer = db.session.scalar(select(User).where(User.email == reviewer_email))
+            if decision == "approve" and (
+                reviewer is None
+                or not user_has_permission(
+                    reviewer,
+                    "bank_accounts.sensitive.view",
+                )
+            ):
+                raise click.ClickException(
+                    "El reviewer no tiene permiso para aprobar la revisión bancaria."
+                )
             onboarding = review_onboarding(
                 session=db.session,
                 onboarding_id=onboarding_id,
