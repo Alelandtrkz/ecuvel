@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Numeric,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -458,6 +459,18 @@ class ProductMedia(
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    thumbnail_storage_key: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, unique=True
+    )
+    thumbnail_media_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    thumbnail_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thumbnail_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thumbnail_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    thumbnail_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    processing_version: Mapped[int | None] = mapped_column(
+        SmallInteger, nullable=True
+    )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     is_cover: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     variant_axis_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
@@ -472,5 +485,38 @@ class ProductMedia(
         CheckConstraint(
             "(variant_axis_key IS NULL) = (variant_value_key IS NULL)",
             name="product_media_variant_binding_complete",
+        ),
+        CheckConstraint(
+            "(content_sha256 IS NULL AND processing_version IS NULL "
+            "AND thumbnail_storage_key IS NULL AND thumbnail_media_type IS NULL "
+            "AND thumbnail_size_bytes IS NULL AND thumbnail_width IS NULL "
+            "AND thumbnail_height IS NULL AND thumbnail_sha256 IS NULL) OR "
+            "(content_sha256 IS NOT NULL AND processing_version IS NOT NULL "
+            "AND media_type = 'image/webp' AND width IS NOT NULL AND height IS NOT NULL "
+            "AND thumbnail_storage_key IS NOT NULL "
+            "AND thumbnail_media_type = 'image/webp' "
+            "AND thumbnail_size_bytes IS NOT NULL AND thumbnail_width IS NOT NULL "
+            "AND thumbnail_height IS NOT NULL AND thumbnail_sha256 IS NOT NULL)",
+            name="product_media_processed_state_complete",
+        ),
+        CheckConstraint(
+            "content_sha256 IS NULL OR content_sha256 ~ '^[0-9a-f]{64}$'",
+            name="product_media_content_sha256_format",
+        ),
+        CheckConstraint(
+            "thumbnail_sha256 IS NULL OR thumbnail_sha256 ~ '^[0-9a-f]{64}$'",
+            name="product_media_thumbnail_sha256_format",
+        ),
+        CheckConstraint(
+            "thumbnail_size_bytes IS NULL OR thumbnail_size_bytes > 0",
+            name="product_media_thumbnail_size_positive",
+        ),
+        CheckConstraint(
+            "thumbnail_width IS NULL OR (thumbnail_width > 0 AND thumbnail_height > 0)",
+            name="product_media_thumbnail_dimensions_positive",
+        ),
+        CheckConstraint(
+            "processing_version IS NULL OR processing_version > 0",
+            name="product_media_processing_version_positive",
         ),
     )

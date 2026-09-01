@@ -21,6 +21,38 @@ DISPLAYABLE_PRODUCT_MEDIA_TYPES = frozenset(
 )
 
 
+def has_complete_product_thumbnail(media: ProductMedia) -> bool:
+    return (
+        media.thumbnail_media_type == "image/webp"
+        and all(
+            value is not None
+            for value in (
+                media.thumbnail_storage_key,
+                media.thumbnail_size_bytes,
+                media.thumbnail_width,
+                media.thumbnail_height,
+                media.thumbnail_sha256,
+            )
+        )
+    )
+
+
+def product_thumbnail_file_exists(
+    media: ProductMedia,
+    *,
+    media_root: str | Path,
+) -> bool:
+    if not has_complete_product_thumbnail(media):
+        return False
+    try:
+        return private_file_path(
+            media_root,
+            str(media.thumbnail_storage_key),
+        ).is_file()
+    except (OSError, PrivateStorageError):
+        return False
+
+
 def variant_media_binding(
     configuration: dict[str, Any],
     attributes: dict[str, Any],

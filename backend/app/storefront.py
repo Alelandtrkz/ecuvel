@@ -124,8 +124,10 @@ from app.services.product_reviews import (
     stage_product_review_images,
 )
 from app.services.product_media import (
+    has_complete_product_thumbnail,
     load_product_card_media,
     ordered_product_media,
+    product_thumbnail_file_exists,
     variant_media_binding,
     variant_value_key,
 )
@@ -454,6 +456,30 @@ def _favorite_ids_for_product_ids(product_ids: set[uuid.UUID]) -> set[uuid.UUID]
     )
 
 
+def _card_media_url(
+    *,
+    product_slug: str,
+    media: ProductMedia | None,
+    placeholder_image: str,
+) -> str:
+    if media is None:
+        return placeholder_image
+    if product_thumbnail_file_exists(
+        media,
+        media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+    ):
+        return url_for(
+            "storefront.product_media_thumbnail",
+            product_slug=product_slug,
+            public_id=media.public_id,
+        )
+    return url_for(
+        "storefront.product_media",
+        product_slug=product_slug,
+        public_id=media.public_id,
+    )
+
+
 def _card_from_row(
     row: Any,
     placeholder_image: str,
@@ -469,14 +495,10 @@ def _card_from_row(
     )
     review_stats = (review_stats_by_product_id or {}).get(row.product_id)
     media = (media_by_variant_id or {}).get(row.variant_id)
-    image_url = (
-        url_for(
-            "storefront.product_media",
-            product_slug=row.product_slug,
-            public_id=media.public_id,
-        )
-        if media is not None
-        else placeholder_image
+    image_url = _card_media_url(
+        product_slug=row.product_slug,
+        media=media,
+        placeholder_image=placeholder_image,
     )
     return ProductCardViewModel(
         product_slug=row.product_slug,
@@ -575,14 +597,10 @@ def _card_from_favorite_item(
         if item.variant_id is not None
         else None
     )
-    image_url = (
-        url_for(
-            "storefront.product_media",
-            product_slug=item.product_slug,
-            public_id=media.public_id,
-        )
-        if media is not None
-        else placeholder_image
+    image_url = _card_media_url(
+        product_slug=item.product_slug,
+        media=media,
+        placeholder_image=placeholder_image,
     )
     return ProductCardViewModel(
         product_slug=item.product_slug,
@@ -933,14 +951,10 @@ def _rehydrate_cart() -> tuple[
         }
         compare_at_price = _visible_compare_at_price(row)
         media = media_by_variant_id.get(row.variant_id)
-        image_url = (
-            url_for(
-                "storefront.product_media",
-                product_slug=row.product_slug,
-                public_id=media.public_id,
-            )
-            if media is not None
-            else placeholder_image
+        image_url = _card_media_url(
+            product_slug=row.product_slug,
+            media=media,
+            placeholder_image=placeholder_image,
         )
         lines.append(
             CartLineViewModel(
@@ -2800,6 +2814,42 @@ def product_media(product_slug: str, public_id: str):
     if not path.is_file():
         abort(404)
     response = send_file(path, mimetype=media.media_type, conditional=True, max_age=31536000)
+    response.cache_control.public = True
+    response.cache_control.max_age = 31536000
+    return response
+
+
+@storefront.get(
+    "/productos/<string:product_slug>/media/<string:public_id>/thumbnail"
+)
+def product_media_thumbnail(product_slug: str, public_id: str):
+    media = db.session.scalar(
+        select(ProductMedia)
+        .join(Product, Product.id == ProductMedia.product_id)
+        .where(
+            Product.slug == product_slug,
+            Product.is_active.is_(True),
+            ProductMedia.public_id == public_id,
+            ProductMedia.is_active.is_(True),
+        )
+    )
+    if media is None or not has_complete_product_thumbnail(media):
+        abort(404)
+    try:
+        path = private_file_path(
+            current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+            str(media.thumbnail_storage_key),
+        )
+    except PrivateStorageError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
+    response = send_file(
+        path,
+        mimetype=media.thumbnail_media_type,
+        conditional=True,
+        max_age=31536000,
+    )
     response.cache_control.public = True
     response.cache_control.max_age = 31536000
     return response

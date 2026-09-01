@@ -172,6 +172,7 @@ from app.services.product_publication import (
     record_moderation_decision,
     remove_copied_publication_files,
 )
+from app.services.product_image_processing import product_image_processing_config
 from app.services.admin_permissions import (
     ROLE_PERMISSIONS,
     admin_permission_required,
@@ -2054,6 +2055,9 @@ def approve_product(draft_id: uuid.UUID):
             checklist=checklist,
             source_media_root=current_app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"],
             catalog_media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+            image_processing_config=product_image_processing_config(
+                current_app.config
+            ),
         )
         copied_files = result.copied_files
         db.session.commit()

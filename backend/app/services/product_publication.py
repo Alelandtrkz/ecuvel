@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import unicodedata
 import uuid
 from dataclasses import dataclass
@@ -29,7 +28,14 @@ from app.services.marketplace_policy import (
     commission_from_snapshot,
     ensure_store_inventory_location,
 )
-from app.services.private_storage import private_file_path, verify_private_file
+from app.services.private_storage import verify_private_file
+from app.services.product_image_processing import (
+    ProductImageProcessingConfig,
+    ProductImageProcessingError,
+    process_product_image,
+    product_derivative_storage_keys,
+    promote_processed_product_image,
+)
 from app.services.product_drafts import build_product_draft_view
 from app.services.product_variant_builder import (
     family_variants_enabled,
@@ -224,46 +230,69 @@ def _copy_catalog_media(
     destination_root: str | Path,
     family_enabled: bool,
     publication_media: list[dict],
+    image_processing_config: ProductImageProcessingConfig,
 ) -> tuple[list[ProductMedia], list[Path]]:
     view = build_product_draft_view(draft)
     allowed_storage_keys = {str(item["storage_key"]) for item in publication_media}
     media_rows: list[ProductMedia] = []
     copied: list[Path] = []
-    extension_by_type = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-    for source in view.image_files:
-        if source.storage_key not in allowed_storage_keys:
-            continue
-        source_path = verify_private_file(
-            root=source_root,
-            storage_key=source.storage_key,
-            size_bytes=source.size_bytes,
-            sha256=source.sha256,
-        )
-        public_id = uuid.uuid4().hex
-        extension = extension_by_type.get(source.media_type)
-        if extension is None:
-            raise ProductModerationValidationError("Una imagen tiene un formato no publicable.")
-        storage_key = f"products/{product.id}/{public_id}.{extension}"
-        destination = private_file_path(destination_root, storage_key)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        if destination.exists():
-            raise ProductModerationValidationError("No se pudo reservar una clave pública única.")
-        shutil.copy2(source_path, destination)
-        copied.append(destination)
-        media_rows.append(ProductMedia(
-            product_id=product.id,
-            public_id=public_id,
-            storage_key=storage_key,
-            media_type=source.media_type,
-            size_bytes=source.size_bytes,
-            width=source.width,
-            height=source.height,
-            position=source.position,
-            is_cover=source.is_cover,
-            variant_axis_key=source.variant_axis_key if family_enabled else None,
-            variant_value_key=source.variant_value_key if family_enabled else None,
-            is_active=True,
-        ))
+    try:
+        for source in view.image_files:
+            if source.storage_key not in allowed_storage_keys:
+                continue
+            source_path = verify_private_file(
+                root=source_root,
+                storage_key=source.storage_key,
+                size_bytes=source.size_bytes,
+                sha256=source.sha256,
+            )
+            public_id = uuid.uuid4().hex
+            master_key, thumbnail_key = product_derivative_storage_keys(
+                product.id,
+                public_id,
+            )
+            try:
+                staged = process_product_image(
+                    source_path,
+                    declared_media_type=source.media_type,
+                    staging_root=destination_root,
+                    config=image_processing_config,
+                )
+                processed = promote_processed_product_image(
+                    staged,
+                    media_root=destination_root,
+                    master_storage_key=master_key,
+                    thumbnail_storage_key=thumbnail_key,
+                )
+            except ProductImageProcessingError as exc:
+                raise ProductModerationValidationError(str(exc)) from exc
+            copied.extend((processed.master.path, processed.thumbnail.path))
+            media_rows.append(ProductMedia(
+                product_id=product.id,
+                public_id=public_id,
+                storage_key=master_key,
+                media_type=processed.master.media_type,
+                size_bytes=processed.master.size_bytes,
+                width=processed.master.width,
+                height=processed.master.height,
+                content_sha256=processed.master.sha256,
+                thumbnail_storage_key=thumbnail_key,
+                thumbnail_media_type=processed.thumbnail.media_type,
+                thumbnail_size_bytes=processed.thumbnail.size_bytes,
+                thumbnail_width=processed.thumbnail.width,
+                thumbnail_height=processed.thumbnail.height,
+                thumbnail_sha256=processed.thumbnail.sha256,
+                processing_version=processed.processing_version,
+                position=source.position,
+                is_cover=source.is_cover,
+                variant_axis_key=source.variant_axis_key if family_enabled else None,
+                variant_value_key=source.variant_value_key if family_enabled else None,
+                is_active=True,
+            ))
+    except Exception:
+        for path in copied:
+            path.unlink(missing_ok=True)
+        raise
     return media_rows, copied
 
 
@@ -275,6 +304,7 @@ def publish_product_draft(
     checklist: dict[str, bool],
     source_media_root: str | Path,
     catalog_media_root: str | Path,
+    image_processing_config: ProductImageProcessingConfig | None = None,
 ) -> PublicationResult:
     draft = get_locked_submitted_draft(session, draft_id)
     if draft.publication is not None:
@@ -369,6 +399,9 @@ def publish_product_draft(
             destination_root=catalog_media_root,
             family_enabled=family_enabled,
             publication_media=publication_payload["media"],
+            image_processing_config=(
+                image_processing_config or ProductImageProcessingConfig()
+            ),
         )
         session.add_all(media_rows)
         dimensions = draft.dimensions_data or {}

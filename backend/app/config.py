@@ -303,6 +303,54 @@ class Config:
         "PRODUCT_CATALOG_MEDIA_DIR",
         "/app/private/product-catalog-media",
     )
+    PRODUCT_IMAGE_MAX_BYTES = _environment_int_range(
+        "PRODUCT_IMAGE_MAX_BYTES",
+        5 * 1024 * 1024,
+        1024,
+        20 * 1024 * 1024,
+    )
+    PRODUCT_IMAGE_MAX_PIXELS = _environment_int_range(
+        "PRODUCT_IMAGE_MAX_PIXELS",
+        50_000_000,
+        1_000,
+        100_000_000,
+    )
+    PRODUCT_IMAGE_MAX_EDGE = _environment_int_range(
+        "PRODUCT_IMAGE_MAX_EDGE",
+        12_000,
+        640,
+        30_000,
+    )
+    PRODUCT_IMAGE_MASTER_MAX_EDGE = _environment_int_range(
+        "PRODUCT_IMAGE_MASTER_MAX_EDGE",
+        2_000,
+        256,
+        4_000,
+    )
+    PRODUCT_IMAGE_MASTER_QUALITY = _environment_int_range(
+        "PRODUCT_IMAGE_MASTER_QUALITY",
+        82,
+        1,
+        100,
+    )
+    PRODUCT_IMAGE_THUMBNAIL_MAX_EDGE = _environment_int_range(
+        "PRODUCT_IMAGE_THUMBNAIL_MAX_EDGE",
+        640,
+        64,
+        2_000,
+    )
+    PRODUCT_IMAGE_THUMBNAIL_QUALITY = _environment_int_range(
+        "PRODUCT_IMAGE_THUMBNAIL_QUALITY",
+        80,
+        1,
+        100,
+    )
+    PRODUCT_IMAGE_WEBP_METHOD = _environment_int_range(
+        "PRODUCT_IMAGE_WEBP_METHOD",
+        6,
+        0,
+        6,
+    )
     PARTNER_PRODUCT_IMAGE_MAX_BYTES = _environment_int_range(
         "PARTNER_PRODUCT_IMAGE_MAX_BYTES",
         5 * 1024 * 1024,

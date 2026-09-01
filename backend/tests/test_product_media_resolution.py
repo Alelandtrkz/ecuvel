@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import event
+from sqlalchemy import event, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -14,17 +15,21 @@ from app.extensions import db
 from app.models import (
     Category,
     Favorite,
+    OrderItem,
     Product,
     ProductMedia,
     ProductVariant,
     SellerOffer,
+    SellerOrder,
     Store,
 )
+from app.models.enums import PaymentMethod
 from app.services.product_media import (
     ordered_product_media,
     select_product_media,
     variant_media_binding,
 )
+from app.services.checkout import build_checkout_preview, create_checkout_order
 from tests.factories import BaseData, create_catalog_and_stock
 
 
@@ -224,6 +229,49 @@ def _add_media(
     return media
 
 
+def _add_processed_media(
+    session: Session,
+    root: Path,
+    product: Product,
+    *,
+    public_id: str,
+) -> ProductMedia:
+    master_payload = f"master-{public_id}".encode()
+    thumbnail_payload = f"thumbnail-{public_id}".encode()
+    master_key = f"products/{product.id}/{public_id}/master.webp"
+    thumbnail_key = f"products/{product.id}/{public_id}/thumbnail.webp"
+    for key, payload in (
+        (master_key, master_payload),
+        (thumbnail_key, thumbnail_payload),
+    ):
+        path = root / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    media = ProductMedia(
+        product_id=product.id,
+        public_id=public_id,
+        storage_key=master_key,
+        media_type="image/webp",
+        size_bytes=len(master_payload),
+        width=1200,
+        height=800,
+        content_sha256=hashlib.sha256(master_payload).hexdigest(),
+        thumbnail_storage_key=thumbnail_key,
+        thumbnail_media_type="image/webp",
+        thumbnail_size_bytes=len(thumbnail_payload),
+        thumbnail_width=640,
+        thumbnail_height=427,
+        thumbnail_sha256=hashlib.sha256(thumbnail_payload).hexdigest(),
+        processing_version=1,
+        position=0,
+        is_cover=True,
+        is_active=True,
+    )
+    session.add(media)
+    session.flush()
+    return media
+
+
 def _login_as(client, user_id: uuid.UUID) -> None:
     with client.session_transaction() as browser_session:
         browser_session["_user_id"] = str(user_id)
@@ -392,6 +440,121 @@ def test_missing_physical_file_falls_back_and_public_route_returns_404(
         client.get(f"/productos/{product.slug}/media/{missing.public_id}").status_code
         == 404
     )
+
+
+def test_processed_media_uses_thumbnail_on_lists_and_master_on_detail_checkout(
+    client, session: Session, catalog_media_root: Path
+):
+    primary_base = create_catalog_and_stock(session, stock=10)
+    recommendation_base = create_catalog_and_stock(session, stock=10)
+    primary, _variant, offer = _entities(session, primary_base)
+    primary.title = "Processed Primary"
+    recommendation, _rec_variant, _rec_offer = _align_with(
+        session,
+        recommendation_base,
+        primary,
+        primary_base.store_id,
+        title="Processed Recommendation",
+    )
+    primary_media = _add_processed_media(
+        session,
+        catalog_media_root,
+        primary,
+        public_id="processed-primary",
+    )
+    recommendation_media = _add_processed_media(
+        session,
+        catalog_media_root,
+        recommendation,
+        public_id="processed-recommendation",
+    )
+    session.add(
+        Favorite(user_id=primary_base.buyer_id, product_id=primary.id)
+    )
+    session.commit()
+
+    primary_master = f"/productos/{primary.slug}/media/{primary_media.public_id}"
+    primary_thumbnail = f"{primary_master}/thumbnail"
+    recommendation_master = (
+        f"/productos/{recommendation.slug}/media/{recommendation_media.public_id}"
+    )
+    recommendation_thumbnail = f"{recommendation_master}/thumbnail"
+    category = session.get(Category, primary.category_id)
+    store = session.get(Store, primary_base.store_id)
+    assert category is not None and store is not None
+
+    for response in (
+        client.get("/"),
+        client.get("/?q=Processed+Primary"),
+        client.get(f"/?category={category.slug}"),
+        client.get(f"/tiendas/{store.slug}"),
+    ):
+        assert response.status_code == 200
+        assert primary_thumbnail in response.get_data(as_text=True)
+
+    _login_as(client, primary_base.buyer_id)
+    favorites = client.get("/favoritos")
+    assert favorites.status_code == 200
+    assert primary_thumbnail in favorites.get_data(as_text=True)
+
+    _put_in_cart(client, offer.id)
+    cart = client.get("/carrito")
+    assert cart.status_code == 200
+    assert primary_thumbnail in cart.get_data(as_text=True)
+    assert recommendation_thumbnail in cart.get_data(as_text=True)
+
+    detail = client.get(f"/productos/{primary.slug}")
+    detail_body = detail.get_data(as_text=True)
+    assert detail.status_code == 200
+    assert primary_master in detail_body
+    assert recommendation_thumbnail in detail_body
+
+    preview = build_checkout_preview(
+        session=session,
+        cart_state={
+            "version": 1,
+            "items": {
+                str(offer.id): {"quantity": 1, "selected": True},
+            },
+        },
+    )
+    assert preview.lines[0].image_url == primary_master
+    checkout = create_checkout_order(
+        session=session,
+        buyer_id=primary_base.buyer_id,
+        cart_state={
+            "version": 1,
+            "items": {
+                str(offer.id): {"quantity": 1, "selected": True},
+            },
+        },
+        payment_method=PaymentMethod.BANK_TRANSFER,
+        idempotency_key="h2-master-snapshot",
+        reservation_expires_at=datetime.now(timezone.utc) + timedelta(minutes=20),
+    )
+    session.commit()
+    snapshot = session.scalar(
+        select(OrderItem.image_url_snapshot)
+        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .where(SellerOrder.order_id == checkout.order_id)
+    )
+    assert snapshot == primary_master
+
+    master_response = client.get(primary_master)
+    thumbnail_response = client.get(primary_thumbnail)
+    assert master_response.status_code == thumbnail_response.status_code == 200
+    assert master_response.mimetype == thumbnail_response.mimetype == "image/webp"
+    assert thumbnail_response.get_etag()[0]
+    assert client.get(
+        primary_thumbnail,
+        headers={"If-None-Match": thumbnail_response.headers["ETag"]},
+    ).status_code == 304
+
+    thumbnail_path = catalog_media_root / primary_media.thumbnail_storage_key
+    thumbnail_path.unlink()
+    assert client.get(primary_thumbnail).status_code == 404
+    fallback_home = client.get("/")
+    assert primary_master in fallback_home.get_data(as_text=True)
 
 
 def test_home_media_query_and_total_query_count_are_constant(

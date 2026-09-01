@@ -14,6 +14,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "a7b8c9d0e1f2"
 L2_HEAD = "b8c9d0e1f2a3"
+CURRENT_HEAD = "c9d0e1f2a3b4"
 
 
 def _migrations_dir(app) -> Path:
@@ -134,5 +135,7 @@ def test_l2_downgrade_blocks_duplicate_cancel_repayout_history(
     with pytest.raises(SystemExit) as blocked:
         _downgrade(app)
     assert blocked.value.code == 1
-    assert _version(engine) == L2_HEAD
+    # PostgreSQL rolls the multi-revision downgrade back as one transaction,
+    # so a fail-closed L2 downgrade preserves the repository's current head.
+    assert _version(engine) == CURRENT_HEAD
     assert "released_at" in _columns(engine, "seller_payout_items")

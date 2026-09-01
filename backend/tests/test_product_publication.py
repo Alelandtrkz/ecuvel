@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
+from PIL import Image
 from sqlalchemy import func, select
 
 from app.catalog.product_templates import PRODUCT_TEMPLATES
@@ -80,6 +83,50 @@ pytestmark = pytest.mark.integration
 
 def _checklist() -> dict[str, bool]:
     return normalize_moderation_checklist(list(MODERATION_CHECKS))
+
+
+def _rewrite_draft_images(
+    draft: ProductDraft,
+    source_root: Path,
+    *,
+    image_format: str,
+    media_type: str,
+    animated: bool = False,
+) -> tuple[Path, ...]:
+    paths = []
+    image_files = sorted(
+        (item for item in draft.files if item.kind.value == "IMAGE"),
+        key=lambda item: (item.position, item.id),
+    )
+    for index, item in enumerate(image_files):
+        path = source_root / item.storage_key
+        if animated:
+            frames = [
+                Image.new("RGB", (80, 60), (index * 20, 40, 80)),
+                Image.new("RGB", (80, 60), (80, index * 20, 40)),
+            ]
+            frames[0].save(
+                path,
+                format="WEBP",
+                save_all=True,
+                append_images=frames[1:],
+                duration=100,
+                loop=0,
+            )
+            for frame in frames:
+                frame.close()
+        else:
+            image = Image.new("RGB", (900, 600), (index * 30, 80, 140))
+            image.save(path, format=image_format)
+            image.close()
+        payload = path.read_bytes()
+        item.media_type = media_type
+        item.size_bytes = len(payload)
+        item.sha256 = hashlib.sha256(payload).hexdigest()
+        item.width = 80 if animated else 900
+        item.height = 60 if animated else 600
+        paths.append(path)
+    return tuple(paths)
 
 
 def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
@@ -498,6 +545,122 @@ def test_family_approval_preserves_enabled_variants_skus_and_color_media(
     assert {item.variant_value_key for item in media} == {"negro", "azul"}
     assert sum(1 for item in media if item.variant_value_key == "negro") == 2
     assert sum(1 for item in media if item.variant_value_key == "azul") == 1
+
+
+@pytest.mark.parametrize(
+    ("image_format", "media_type"),
+    [
+        ("JPEG", "image/jpeg"),
+        ("PNG", "image/png"),
+        ("WEBP", "image/webp"),
+    ],
+)
+def test_publication_normalizes_supported_inputs_to_master_and_thumbnail_webp(
+    session, tmp_path, image_format, media_type
+):
+    seller = create_user(session)
+    moderator = create_user(session, staff=True)
+    store = create_store(session)
+    parent, child = create_phone_categories(session)
+    create_seller_location(session, store)
+    create_commission_rule(session, rate="8.00", category=parent)
+    source_root = tmp_path / "drafts"
+    catalog_root = tmp_path / "catalog"
+    draft = create_complete_simple_draft(
+        session,
+        seller=seller,
+        store=store,
+        category=parent,
+        subcategory=child,
+        media_root=source_root,
+    )
+    draft_sources = _rewrite_draft_images(
+        draft,
+        source_root,
+        image_format=image_format,
+        media_type=media_type,
+    )
+    capture_submission_commission_snapshots(session, draft)
+    session.commit()
+
+    result = publish_product_draft(
+        session,
+        draft_id=draft.id,
+        actor_user_id=moderator.id,
+        checklist=_checklist(),
+        source_media_root=source_root,
+        catalog_media_root=catalog_root,
+    )
+    session.commit()
+
+    media_rows = session.scalars(
+        select(ProductMedia)
+        .where(ProductMedia.product_id == result.product.id)
+        .order_by(ProductMedia.position)
+    ).all()
+    assert len(media_rows) == 3
+    assert len(result.copied_files) == 6
+    assert all(path.is_file() for path in result.copied_files)
+    assert all(path.is_file() for path in draft_sources)
+    assert all(media.media_type == "image/webp" for media in media_rows)
+    assert all(media.storage_key.endswith("/master.webp") for media in media_rows)
+    assert all(
+        media.thumbnail_storage_key.endswith("/thumbnail.webp")
+        for media in media_rows
+    )
+    assert all(len(media.content_sha256) == 64 for media in media_rows)
+    assert all(len(media.thumbnail_sha256) == 64 for media in media_rows)
+    assert not any(
+        path.suffix.lower() in {".jpg", ".jpeg", ".png"}
+        for path in catalog_root.rglob("*")
+        if path.is_file()
+    )
+
+
+def test_publication_rejects_animated_webp_without_catalog_or_db_mutation(
+    session, tmp_path
+):
+    seller = create_user(session)
+    moderator = create_user(session, staff=True)
+    store = create_store(session)
+    parent, child = create_phone_categories(session)
+    create_seller_location(session, store)
+    create_commission_rule(session, rate="8.00", category=parent)
+    source_root = tmp_path / "drafts"
+    catalog_root = tmp_path / "catalog"
+    draft = create_complete_simple_draft(
+        session,
+        seller=seller,
+        store=store,
+        category=parent,
+        subcategory=child,
+        media_root=source_root,
+    )
+    sources = _rewrite_draft_images(
+        draft,
+        source_root,
+        image_format="WEBP",
+        media_type="image/webp",
+        animated=True,
+    )
+    capture_submission_commission_snapshots(session, draft)
+    session.commit()
+
+    with pytest.raises(ProductModerationValidationError):
+        publish_product_draft(
+            session,
+            draft_id=draft.id,
+            actor_user_id=moderator.id,
+            checklist=_checklist(),
+            source_media_root=source_root,
+            catalog_media_root=catalog_root,
+        )
+    session.rollback()
+
+    assert all(path.is_file() for path in sources)
+    assert session.scalar(select(func.count(ProductMedia.id))) == 0
+    assert session.scalar(select(func.count(Product.id))) == 0
+    assert not [path for path in catalog_root.rglob("*") if path.is_file()]
 
 
 def test_family_publication_uses_frozen_mixed_commissions(session, tmp_path):

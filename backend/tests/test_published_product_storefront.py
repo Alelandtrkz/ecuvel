@@ -78,9 +78,15 @@ def test_simple_approval_is_visible_on_home_detail_and_public_media(
     media = product.media[0]
     image = client.get(f"/productos/{product.slug}/media/{media.public_id}")
     assert image.status_code == 200
-    assert image.mimetype == "image/png"
+    assert image.mimetype == "image/webp"
     assert image.cache_control.public is True
     assert image.cache_control.max_age == 31536000
+    thumbnail_url = f"/productos/{product.slug}/media/{media.public_id}/thumbnail"
+    thumbnail = client.get(thumbnail_url)
+    assert thumbnail.status_code == 200
+    assert thumbnail.mimetype == "image/webp"
+    assert thumbnail.cache_control.public is True
+    assert thumbnail_url in home.get_data(as_text=True)
 
 
 def test_family_detail_exposes_only_active_variants_and_switches_by_sku(
