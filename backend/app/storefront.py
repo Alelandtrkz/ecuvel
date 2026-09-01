@@ -123,6 +123,12 @@ from app.services.product_reviews import (
     resubmit_product_review,
     stage_product_review_images,
 )
+from app.services.product_media import (
+    load_product_card_media,
+    ordered_product_media,
+    variant_media_binding,
+    variant_value_key,
+)
 from app.services.payment_precheck import (
     PaymentPrecheckConfig,
     analyze_payment_proof,
@@ -454,6 +460,7 @@ def _card_from_row(
     favorite_product_ids: set[uuid.UUID] | None = None,
     availability_by_offer_id: dict[uuid.UUID, int] | None = None,
     review_stats_by_product_id: dict[uuid.UUID, Any] | None = None,
+    media_by_variant_id: dict[uuid.UUID, ProductMedia] | None = None,
 ) -> ProductCardViewModel:
     is_available = (
         True
@@ -461,6 +468,16 @@ def _card_from_row(
         else max(0, availability_by_offer_id.get(row.offer_id, 0)) > 0
     )
     review_stats = (review_stats_by_product_id or {}).get(row.product_id)
+    media = (media_by_variant_id or {}).get(row.variant_id)
+    image_url = (
+        url_for(
+            "storefront.product_media",
+            product_slug=row.product_slug,
+            public_id=media.public_id,
+        )
+        if media is not None
+        else placeholder_image
+    )
     return ProductCardViewModel(
         product_slug=row.product_slug,
         offer_id=row.offer_id,
@@ -468,7 +485,7 @@ def _card_from_row(
             "storefront.product_detail",
             product_slug=row.product_slug,
         ),
-        image_url=placeholder_image,
+        image_url=image_url,
         title=row.product_title,
         current_price=_format_price(row.price, row.currency) or "",
         compare_at_price=_format_price(
@@ -503,8 +520,20 @@ def _cards_from_rows(
         db.session,
         {row.product_id for row in rows},
     )
+    media_by_variant_id = load_product_card_media(
+        db.session,
+        {(row.product_id, row.variant_id) for row in rows},
+        media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+    )
     return [
-        _card_from_row(row, placeholder_image, favorite_ids, availability, review_stats)
+        _card_from_row(
+            row,
+            placeholder_image,
+            favorite_ids,
+            availability,
+            review_stats,
+            media_by_variant_id,
+        )
         for row in rows
     ]
 
@@ -531,6 +560,7 @@ def _card_from_favorite_item(
     item: FavoriteListItem,
     placeholder_image: str,
     review_stats_by_product_id: dict[uuid.UUID, Any] | None = None,
+    media_by_variant_id: dict[uuid.UUID, ProductMedia] | None = None,
 ) -> ProductCardViewModel:
     visible_compare_at = (
         item.compare_at_price
@@ -540,6 +570,20 @@ def _card_from_favorite_item(
         else None
     )
     review_stats = (review_stats_by_product_id or {}).get(item.product_id)
+    media = (
+        (media_by_variant_id or {}).get(item.variant_id)
+        if item.variant_id is not None
+        else None
+    )
+    image_url = (
+        url_for(
+            "storefront.product_media",
+            product_slug=item.product_slug,
+            public_id=media.public_id,
+        )
+        if media is not None
+        else placeholder_image
+    )
     return ProductCardViewModel(
         product_slug=item.product_slug,
         offer_id=item.offer_id if item.is_available else None,
@@ -551,7 +595,7 @@ def _card_from_favorite_item(
             if item.is_catalog_visible
             else None
         ),
-        image_url=placeholder_image,
+        image_url=image_url,
         title=item.product_title,
         current_price=(
             _format_price(item.price, item.currency or "USD")
@@ -621,17 +665,12 @@ def _build_product_gallery_images(
     return tuple(images)
 
 
-def _variant_value_key(configuration: dict[str, Any], attributes: dict[str, Any], axis_key: str) -> str | None:
-    raw = attributes.get(axis_key)
-    if raw is None:
-        return None
-    for axis in configuration.get("axes") or []:
-        if axis.get("key") != axis_key:
-            continue
-        for value in axis.get("values") or []:
-            if raw in {value.get("key"), value.get("label")}:
-                return str(value.get("key"))
-    return str(raw)
+def _variant_value_key(
+    configuration: dict[str, Any],
+    attributes: dict[str, Any],
+    axis_key: str,
+) -> str | None:
+    return variant_value_key(configuration, attributes, axis_key)
 
 
 def _media_urls_for_variant(
@@ -639,23 +678,15 @@ def _media_urls_for_variant(
     product: Product,
     attributes: dict[str, Any],
 ) -> tuple[str, ...]:
-    configuration = product.variant_configuration or {}
-    visual_key = configuration.get("visual_axis_key")
-    value_key = _variant_value_key(configuration, attributes or {}, str(visual_key)) if visual_key else None
-    selected = [
-        media
-        for media in product.media
-        if media.is_active
-        and media.variant_axis_key == visual_key
-        and media.variant_value_key == value_key
-    ] if value_key else []
-    if not selected:
-        selected = [
-            media
-            for media in product.media
-            if media.is_active and media.variant_axis_key is None
-        ]
-    selected.sort(key=lambda media: (not media.is_cover, media.position, media.created_at, media.id))
+    visual_key, value_key = variant_media_binding(
+        product.variant_configuration or {},
+        attributes or {},
+    )
+    selected = ordered_product_media(
+        product.media,
+        variant_axis_key=visual_key,
+        variant_value_key=value_key,
+    )
     return tuple(
         url_for(
             "storefront.product_media",
@@ -794,6 +825,7 @@ def _cart_offer_rows(offer_ids: set[uuid.UUID]):
             SellerOffer.compare_at_price.label("compare_at_price"),
             SellerOffer.currency.label("currency"),
             SellerOffer.status.label("offer_status"),
+            ProductVariant.id.label("variant_id"),
             ProductVariant.title.label("variant_title"),
             ProductVariant.is_active.label("variant_is_active"),
             Product.id.label("product_id"),
@@ -838,6 +870,14 @@ def _rehydrate_cart() -> tuple[
     )
     favorite_product_ids = _favorite_ids_for_product_ids(
         {row.product_id for row in rows_by_offer_id.values()}
+    )
+    media_by_variant_id = load_product_card_media(
+        db.session,
+        {
+            (row.product_id, row.variant_id)
+            for row in rows_by_offer_id.values()
+        },
+        media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
     )
 
     lines: list[CartLineViewModel] = []
@@ -892,6 +932,16 @@ def _rehydrate_cart() -> tuple[
             "selected": selected,
         }
         compare_at_price = _visible_compare_at_price(row)
+        media = media_by_variant_id.get(row.variant_id)
+        image_url = (
+            url_for(
+                "storefront.product_media",
+                product_slug=row.product_slug,
+                public_id=media.public_id,
+            )
+            if media is not None
+            else placeholder_image
+        )
         lines.append(
             CartLineViewModel(
                 offer_id=offer_id,
@@ -904,7 +954,7 @@ def _rehydrate_cart() -> tuple[
                 product_name=row.product_title,
                 variant_name=row.variant_title,
                 store_name=row.store_name,
-                image_url=placeholder_image,
+                image_url=image_url,
                 quantity=quantity,
                 selected=selected,
                 unit_price=row.price,
@@ -1459,8 +1509,22 @@ def favorites() -> str:
         db.session,
         {item.product_id for item in favorites_page.items},
     )
+    media_by_variant_id = load_product_card_media(
+        db.session,
+        {
+            (item.product_id, item.variant_id)
+            for item in favorites_page.items
+            if item.variant_id is not None
+        },
+        media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+    )
     products = [
-        _card_from_favorite_item(item, placeholder_image, review_stats)
+        _card_from_favorite_item(
+            item,
+            placeholder_image,
+            review_stats,
+            media_by_variant_id,
+        )
         for item in favorites_page.items
     ]
     return render_template(
@@ -2726,7 +2790,15 @@ def product_media(product_slug: str, public_id: str):
     )
     if media is None:
         abort(404)
-    path = private_file_path(current_app.config["PRODUCT_CATALOG_MEDIA_DIR"], media.storage_key)
+    try:
+        path = private_file_path(
+            current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+            media.storage_key,
+        )
+    except PrivateStorageError:
+        abort(404)
+    if not path.is_file():
+        abort(404)
     response = send_file(path, mimetype=media.media_type, conditional=True, max_age=31536000)
     response.cache_control.public = True
     response.cache_control.max_age = 31536000

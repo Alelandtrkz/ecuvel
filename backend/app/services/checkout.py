@@ -38,6 +38,10 @@ from app.services.inventory import (
     get_sellable_quantities_by_warehouse_for_offers,
     reserve_inventory,
 )
+from app.services.product_media import (
+    select_product_media,
+    variant_media_binding,
+)
 from app.services.financial_reconciliation import reconcile_seller_order
 
 
@@ -148,49 +152,22 @@ class _CheckoutRow:
     issue: str | None
 
 
-def _variant_value_key(
-    configuration: dict[str, Any], attributes: dict[str, Any], axis_key: str,
-) -> str | None:
-    raw = attributes.get(axis_key)
-    if raw is None:
-        return None
-    for axis in configuration.get("axes") or []:
-        if not isinstance(axis, dict) or axis.get("key") != axis_key:
-            continue
-        for value in axis.get("values") or []:
-            if isinstance(value, dict) and raw in {value.get("key"), value.get("label")}:
-                return str(value.get("key"))
-    return str(raw)
-
-
 def _checkout_image_url(
     product: Product,
     variant: ProductVariant,
     media: list[ProductMedia],
 ) -> str | None:
-    configuration = product.variant_configuration or {}
-    visual_key = configuration.get("visual_axis_key")
-    visual_value = (
-        _variant_value_key(configuration, variant.attributes or {}, str(visual_key))
-        if visual_key else None
+    visual_key, visual_value = variant_media_binding(
+        product.variant_configuration or {},
+        variant.attributes or {},
     )
-    candidates = [
-        item for item in media
-        if item.is_active
-        and item.variant_axis_key == visual_key
-        and item.variant_value_key == visual_value
-    ] if visual_key and visual_value else []
-    if not candidates:
-        candidates = [
-            item for item in media
-            if item.is_active and item.variant_axis_key is None
-        ]
-    if not candidates:
+    selected = select_product_media(
+        media,
+        variant_axis_key=visual_key,
+        variant_value_key=visual_value,
+    )
+    if selected is None:
         return None
-    selected = min(
-        candidates,
-        key=lambda item: (not item.is_cover, item.position, item.created_at, item.id),
-    )
     return f"/productos/{product.slug}/media/{selected.public_id}"
 
 

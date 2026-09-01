@@ -2,7 +2,7 @@
 <article class="product-card" data-product-card="{{ product_slug or '' }}">
   <div class="product-card__media">
     {% if product_url %}<a href="{{ product_url }}" aria-label="Ver {{ title }}">{% endif %}
-      <img src="{{ image_url }}" alt="Imagen provisional de {{ title }}" loading="lazy" width="320" height="320">
+      <img src="{{ image_url }}" alt="{{ 'Imagen provisional de ' if 'product-placeholder.svg' in image_url else '' }}{{ title }}" loading="lazy" width="320" height="320">
     {% if product_url %}</a>{% endif %}
 
     {% if product_slug %}

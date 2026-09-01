@@ -17,7 +17,7 @@
   </form>
 
   <a class="cart-item__image" href="{{ item.product_url }}" aria-label="Ver {{ item.product_name }}">
-    <img src="{{ item.image_url }}" alt="Imagen provisional de {{ item.product_name }}" width="112" height="112" loading="lazy">
+    <img src="{{ item.image_url }}" alt="{{ 'Imagen provisional de ' if 'product-placeholder.svg' in item.image_url else '' }}{{ item.product_name }}" width="112" height="112" loading="lazy">
   </a>
 
   <div class="cart-item__information">

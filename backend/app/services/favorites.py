@@ -42,6 +42,7 @@ class FavoriteListItem:
     category_is_active: bool
     created_at: Any
     offer_id: uuid.UUID | None
+    variant_id: uuid.UUID | None
     price: Decimal | None
     compare_at_price: Decimal | None
     currency: str | None
@@ -94,6 +95,7 @@ def _canonical_offers_subquery():
         select(
             Product.id.label("product_id"),
             SellerOffer.id.label("offer_id"),
+            ProductVariant.id.label("variant_id"),
             SellerOffer.currency.label("currency"),
             SellerOffer.price.label("price"),
             SellerOffer.compare_at_price.label("compare_at_price"),
@@ -268,6 +270,7 @@ def get_favorites_page(
             Product.is_active.label("product_is_active"),
             Category.is_active.label("category_is_active"),
             canonical_offers.c.offer_id,
+            canonical_offers.c.variant_id,
             canonical_offers.c.price,
             canonical_offers.c.compare_at_price,
             canonical_offers.c.currency,
@@ -301,6 +304,7 @@ def get_favorites_page(
             category_is_active=row.category_is_active,
             created_at=row.created_at,
             offer_id=row.offer_id,
+            variant_id=row.variant_id,
             price=row.price,
             compare_at_price=row.compare_at_price,
             currency=row.currency,
