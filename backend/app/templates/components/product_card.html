@@ -1,8 +1,8 @@
-{% macro product_card(product_url, image_url, title, current_price, compare_at_price, rating, review_count, is_favorite, delivery_label, product_slug=None, offer_id=None, is_available=True, listing_label=None, listing_key=None, ranking_context=None) -%}
+{% macro product_card(product_url, image_url, title, current_price, compare_at_price, rating, review_count, is_favorite, delivery_label, product_slug=None, offer_id=None, is_available=True, listing_label=None, listing_key=None, ranking_context=None, image_srcset=None, image_sizes=None, image_width=320, image_height=320, image_alt=None, next_url=None) -%}
 <article class="product-card" data-product-card="{{ product_slug or '' }}"{% if listing_key %} data-listing-key="{{ listing_key }}"{% endif %}{% if ranking_context %} data-ranking-context="{{ ranking_context }}"{% endif %}>
   <div class="product-card__media">
     {% if product_url %}<a href="{{ product_url }}" aria-label="Ver {{ title }}">{% endif %}
-      <img src="{{ image_url }}" alt="{{ 'Imagen provisional de ' if 'product-placeholder.svg' in image_url else '' }}{{ title }}" loading="lazy" width="320" height="320">
+      <img src="{{ image_url }}"{% if image_srcset %} srcset="{{ image_srcset }}"{% endif %}{% if image_sizes %} sizes="{{ image_sizes }}"{% endif %} alt="{{ image_alt or title }}" loading="lazy" decoding="async" width="{{ image_width }}" height="{{ image_height }}">
     {% if product_url %}</a>{% endif %}
 
     {% if product_slug %}
@@ -15,7 +15,7 @@
       >
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         {% if ranking_context %}<input type="hidden" name="ranking_context" value="{{ ranking_context }}">{% endif %}
-        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+        <input type="hidden" name="next" value="{{ next_url or (request.full_path if request.query_string else request.path) }}">
         <button
           class="product-card__favorite{{ ' is-active' if is_favorite }}"
           type="submit"
@@ -34,13 +34,13 @@
       {% if compare_at_price %}<del>{{ compare_at_price }}</del>{% endif %}
     </div>
     <h3 class="product-card__title">
-      {% if product_url %}<a href="{{ product_url }}">{{ title }}</a>{% else %}{{ title }}{% endif %}
+      {% if product_url %}<a href="{{ product_url }}" title="{{ title }}">{{ title }}</a>{% else %}{{ title }}{% endif %}
     </h3>
     {% if listing_label %}<p class="product-card__variant">{{ listing_label }}</p>{% endif %}
     <div class="product-card__reviews">
       {% if rating is not none and review_count is not none %}
         <i data-lucide="star" aria-hidden="true"></i>
-        <span>{{ rating }} · {{ review_count }} comentarios</span>
+        <span>{{ rating }} · {{ review_count }} reseña{{ '' if review_count == 1 else 's' }}</span>
       {% else %}
         <i data-lucide="message-circle" aria-hidden="true"></i>
         <span>Sin reseñas</span>
@@ -53,7 +53,7 @@
         {% if ranking_context %}<input type="hidden" name="ranking_context" value="{{ ranking_context }}">{% endif %}
         <input type="hidden" name="offer_id" value="{{ offer_id }}">
         <input type="hidden" name="quantity" value="1">
-        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+        <input type="hidden" name="next" value="{{ next_url or (request.full_path if request.query_string else request.path) }}">
         <button class="product-card__cart-button" type="submit">
           <i data-lucide="shopping-basket" aria-hidden="true"></i>
           <span>{{ delivery_label }}</span>

@@ -107,6 +107,12 @@ class Config:
     CATALOG_RANKING_CONTEXT_TTL_SECONDS = _environment_int_range(
         "CATALOG_RANKING_CONTEXT_TTL_SECONDS", 3600, 300, 86400
     )
+    CATALOG_FEED_BATCH_SIZE = _environment_int_range(
+        "CATALOG_FEED_BATCH_SIZE", 20, 1, 100
+    )
+    CATALOG_FEED_CURSOR_TTL_SECONDS = _environment_int_range(
+        "CATALOG_FEED_CURSOR_TTL_SECONDS", 3600, 300, 86400
+    )
 
     # Secretos bancarios lazy: la aplicación puede iniciar sin ellos, pero toda
     # operación de cifrado/descifrado falla cerrada hasta configurarlos.

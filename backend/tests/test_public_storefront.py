@@ -167,7 +167,7 @@ def test_home_and_store_use_compact_eta_without_changing_delivery_cta(
 
     offer.preparation_time_days = None
     session.commit()
-    assert "Información de entrega próximamente" in client.get(
+    assert "Entrega próximamente" in client.get(
         "/"
     ).get_data(as_text=True)
     assert "Catálogo de la tienda" in html
@@ -268,7 +268,7 @@ def test_store_product_count_is_unique_and_only_public_visible(client, session):
     assert "Other store product" not in page
 
 
-def test_store_catalog_paginates_and_keeps_current_prices(client, session):
+def test_store_catalog_uses_cursor_feed_and_keeps_current_prices(client, session):
     _base, store, _product = _base_store(session)
     for index in range(21):
         _create_store_product(
@@ -280,14 +280,16 @@ def test_store_catalog_paginates_and_keeps_current_prices(client, session):
     session.commit()
 
     first = client.get(f"/tiendas/{store.slug}")
-    second = client.get(f"/tiendas/{store.slug}?page=2")
-
     first_html = first.get_data(as_text=True)
-    second_html = second.get_data(as_text=True)
-    assert "Página 1 de 2" in first_html
-    assert "Siguiente" in first_html
-    assert "Página 2 de 2" in second_html
-    assert "Anterior" in second_html
+    cursor = re.search(r'data-feed-cursor="([^"]+)"', first_html).group(1)
+    second = client.get(
+        "/catalogo/feed",
+        query_string={"cursor": cursor, "store": store.slug},
+    )
+    second_html = second.get_json()["html"]
+    assert "Página 1 de 2" not in first_html
+    assert second.status_code == 200
+    assert second.get_json()["has_more"] is False
     first_cards = set(re.findall(r'data-product-card="([^"]+)"', first_html))
     second_cards = set(re.findall(r'data-product-card="([^"]+)"', second_html))
     assert first_cards.isdisjoint(second_cards)

@@ -1,0 +1,31 @@
+{% set _section = current_section|default('') %}
+{% if not _section %}
+  {% if request.endpoint == 'storefront.home' %}
+    {% set _section = 'catalog' if request.args.get('q') or request.args.get('category') else 'home' %}
+  {% elif request.endpoint in ('storefront.store_page', 'storefront.product_detail') %}
+    {% set _section = 'catalog' %}
+  {% elif request.endpoint == 'storefront.favorites' %}
+    {% set _section = 'favorites' %}
+  {% elif request.endpoint == 'storefront.cart' %}
+    {% set _section = 'cart' %}
+  {% else %}
+    {% set _section = 'account' %}
+  {% endif %}
+{% endif %}
+<nav class="mobile-bottom-nav" aria-label="Navegación principal móvil">
+  <a class="mobile-bottom-nav__item{% if _section == 'home' %} is-active{% endif %}" href="{{ url_for('storefront.home') }}"{% if _section == 'home' %} aria-current="page"{% endif %}>
+    <i data-lucide="house" aria-hidden="true"></i><span>Inicio</span>
+  </a>
+  <button class="mobile-bottom-nav__item{% if _section == 'catalog' %} is-active{% endif %}" type="button" data-category-modal-open aria-haspopup="dialog" aria-controls="category-modal"{% if _section == 'catalog' %} aria-current="page"{% endif %}>
+    <i data-lucide="layout-grid" aria-hidden="true"></i><span>Catálogo</span>
+  </button>
+  <a class="mobile-bottom-nav__item{% if _section == 'favorites' %} is-active{% endif %}" href="{{ url_for('storefront.favorites') if current_user.is_authenticated else url_for('auth.login_form', next=url_for('storefront.favorites')) }}"{% if _section == 'favorites' %} aria-current="page"{% endif %}>
+    <span class="mobile-bottom-nav__icon"><i data-lucide="heart" aria-hidden="true"></i>{% if header_favorite_count %}<strong class="mobile-bottom-nav__badge" data-favorite-count>{{ '99+' if header_favorite_count > 99 else header_favorite_count }}</strong>{% endif %}</span><span>Favoritos</span>
+  </a>
+  <a class="mobile-bottom-nav__item{% if _section == 'cart' %} is-active{% endif %}" href="{{ url_for('storefront.cart') }}"{% if _section == 'cart' %} aria-current="page"{% endif %}>
+    <span class="mobile-bottom-nav__icon"><i data-lucide="shopping-cart" aria-hidden="true"></i>{% if header_cart_count %}<strong class="mobile-bottom-nav__badge" data-cart-count>{{ '99+' if header_cart_count > 99 else header_cart_count }}</strong>{% endif %}</span><span>Carrito</span>
+  </a>
+  <a class="mobile-bottom-nav__item{% if _section in ('account', 'profile', 'orders') %} is-active{% endif %}" href="{{ url_for('account.profile') if current_user.is_authenticated else url_for('auth.login_form', next=url_for('account.profile')) }}"{% if _section in ('account', 'profile', 'orders') %} aria-current="page"{% endif %}>
+    <i data-lucide="user-round" aria-hidden="true"></i><span>Mi Ecuvel</span>
+  </a>
+</nav>

@@ -475,6 +475,10 @@ def test_processed_media_uses_thumbnail_on_lists_and_master_on_detail_checkout(
 
     primary_master = f"/productos/{primary.slug}/media/{primary_media.public_id}"
     primary_thumbnail = f"{primary_master}/thumbnail"
+    versioned_primary_master = f"{primary_master}?v={primary_media.content_sha256}"
+    versioned_primary_thumbnail = (
+        f"{primary_thumbnail}?v={primary_media.thumbnail_sha256}"
+    )
     recommendation_master = (
         f"/productos/{recommendation.slug}/media/{recommendation_media.public_id}"
     )
@@ -508,6 +512,15 @@ def test_processed_media_uses_thumbnail_on_lists_and_master_on_detail_checkout(
     assert detail.status_code == 200
     assert primary_master in detail_body
     assert recommendation_thumbnail in detail_body
+    assert versioned_primary_master.replace("&", "&amp;") in detail_body
+
+    home_body = client.get("/").get_data(as_text=True)
+    assert versioned_primary_thumbnail.replace("&", "&amp;") in home_body
+    assert versioned_primary_master.replace("&", "&amp;") in home_body
+    assert f"{primary_media.thumbnail_width}w" in home_body
+    assert f"{primary_media.width}w" in home_body
+    assert "sizes=\"(max-width: 359px)" in home_body
+    assert 'decoding="async"' in home_body
 
     preview = build_checkout_preview(
         session=session,
@@ -548,6 +561,19 @@ def test_processed_media_uses_thumbnail_on_lists_and_master_on_detail_checkout(
     assert client.get(
         primary_thumbnail,
         headers={"If-None-Match": thumbnail_response.headers["ETag"]},
+    ).status_code == 304
+    assert master_response.cache_control.immutable is False
+    assert thumbnail_response.cache_control.immutable is False
+
+    versioned_master_response = client.get(versioned_primary_master)
+    versioned_thumbnail_response = client.get(versioned_primary_thumbnail)
+    assert versioned_master_response.cache_control.immutable is True
+    assert versioned_thumbnail_response.cache_control.immutable is True
+    assert client.get(f"{primary_master}?v=wrong-hash").status_code == 404
+    assert client.get(f"{primary_thumbnail}?v=wrong-hash").status_code == 404
+    assert client.get(
+        versioned_primary_thumbnail,
+        headers={"If-None-Match": versioned_thumbnail_response.headers["ETag"]},
     ).status_code == 304
 
     thumbnail_path = catalog_media_root / primary_media.thumbnail_storage_key

@@ -1,24 +1,30 @@
 {% extends "base.html" %}
 {% from "components/product_card.html" import product_card %}
 
-{% block title %}{{ store_page.store.display_name }} | Ecuvel{% endblock %}
+{% block title %}{{ store.display_name }} | Ecuvel{% endblock %}
 {% block styles %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/store-public.css') }}">
 {% endblock %}
 
 {% block content %}
-<div class="store-public content-container">
+<div class="store-public content-container" data-catalog-feed
+     data-feed-endpoint="{{ url_for('storefront.catalog_feed') }}"
+     data-feed-cursor="{{ feed_next_cursor or '' }}"
+     data-feed-context="{{ feed_context_hash }}"
+     data-feed-loaded-count="{{ feed_loaded_count }}"
+     data-feed-target="#catalog-feed-grid"
+     data-feed-store="{{ store.slug }}">
   <section class="store-hero" aria-labelledby="store-title">
-    <div class="store-hero__logo" aria-hidden="true">{{ store_page.store.logo_initial }}</div>
+    <div class="store-hero__logo" aria-hidden="true">{{ store.logo_initial }}</div>
     <div class="store-hero__body">
-      <h1 id="store-title">{{ store_page.store.display_name }}</h1>
+      <h1 id="store-title">{{ store.display_name }}</h1>
       <div class="store-chips" aria-label="Información pública de la tienda">
         <a
           class="store-chip"
-          href="{{ url_for('storefront.store_information', store_slug=store_page.store.slug) }}"
+          href="{{ url_for('storefront.store_information', store_slug=store.slug) }}"
           data-store-dialog-trigger
-          data-dialog-url="{{ url_for('storefront.store_information', store_slug=store_page.store.slug, modal=1) }}"
+          data-dialog-url="{{ url_for('storefront.store_information', store_slug=store.slug, modal=1) }}"
           aria-haspopup="dialog"
         >
           <i data-lucide="store" aria-hidden="true"></i>
@@ -26,19 +32,19 @@
         </a>
         <a
           class="store-chip"
-          href="{{ url_for('storefront.store_rating', store_slug=store_page.store.slug) }}"
+          href="{{ url_for('storefront.store_rating', store_slug=store.slug) }}"
           data-store-dialog-trigger
-          data-dialog-url="{{ url_for('storefront.store_rating', store_slug=store_page.store.slug, modal=1) }}"
+          data-dialog-url="{{ url_for('storefront.store_rating', store_slug=store.slug, modal=1) }}"
           aria-haspopup="dialog"
         >
           <i data-lucide="star" aria-hidden="true"></i>
-          <span>{% if store_page.store.rating_average is not none %}{{ "%.1f"|format(store_page.store.rating_average) }}{% else %}Sin calificación{% endif %}</span>
+          <span>{% if store.rating_average is not none %}{{ "%.1f"|format(store.rating_average) }}{% else %}Sin calificación{% endif %}</span>
         </a>
         <a
           class="store-chip"
-          href="{{ url_for('storefront.store_products_summary', store_slug=store_page.store.slug) }}"
+          href="{{ url_for('storefront.store_products_summary', store_slug=store.slug) }}"
           data-store-dialog-trigger
-          data-dialog-url="{{ url_for('storefront.store_products_summary', store_slug=store_page.store.slug, modal=1) }}"
+          data-dialog-url="{{ url_for('storefront.store_products_summary', store_slug=store.slug, modal=1) }}"
           aria-haspopup="dialog"
         >
           <i data-lucide="package" aria-hidden="true"></i>
@@ -54,14 +60,19 @@
         <span class="section-heading__eyebrow">Tienda Ecuvel</span>
         <h2 id="store-catalog-title">Catálogo de la tienda</h2>
       </div>
-      <p>{{ store_page.total_items }} producto{{ '' if store_page.total_items == 1 else 's' }} visible{{ '' if store_page.total_items == 1 else 's' }}</p>
+      <p>{{ total_results }} producto{{ '' if total_results == 1 else 's' }} visible{{ '' if total_results == 1 else 's' }}</p>
     </div>
 
     {% if products %}
-      <div class="product-grid store-catalog__grid">
+      <div class="product-grid store-catalog__grid" id="catalog-feed-grid">
         {% for product in products %}
-          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context) }}
+          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context, product.image_srcset, product.image_sizes, product.image_width, product.image_height, product.image_alt) }}
         {% endfor %}
+      </div>
+      <div class="catalog-feed-controls" data-feed-controls>
+        <p class="catalog-feed-status" role="status" aria-live="polite" data-feed-status{% if not feed_has_more %} data-feed-complete="true"{% endif %}>{% if feed_has_more %}Hay más productos por descubrir.{% else %}Has llegado al final del catálogo.{% endif %}</p>
+        <button class="button button--secondary catalog-feed-load" type="button" data-feed-load{% if not feed_has_more %} hidden{% endif %}>Cargar más productos</button>
+        <span class="catalog-feed-sentinel" aria-hidden="true" data-feed-sentinel></span>
       </div>
     {% else %}
       <section class="store-empty" aria-labelledby="store-empty-title">
@@ -72,17 +83,6 @@
       </section>
     {% endif %}
 
-    {% if store_page.total_pages > 1 %}
-      <nav class="store-pagination" aria-label="Paginación del catálogo de tienda">
-        {% if store_page.has_previous %}
-          <a class="button button--secondary" href="{{ url_for('storefront.store_page', store_slug=store_page.store.slug, page=store_page.previous_page) }}">Anterior</a>
-        {% endif %}
-        <span>Página {{ store_page.page }} de {{ store_page.total_pages }}</span>
-        {% if store_page.has_next %}
-          <a class="button button--secondary" href="{{ url_for('storefront.store_page', store_slug=store_page.store.slug, page=store_page.next_page) }}">Siguiente</a>
-        {% endif %}
-      </nav>
-    {% endif %}
   </section>
 </div>
 
@@ -101,4 +101,5 @@
 {% block scripts %}
   <script src="{{ url_for('static', filename='js/cart.js') }}" defer></script>
   <script src="{{ url_for('static', filename='js/store-public.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/catalog-feed.js') }}" defer></script>
 {% endblock %}

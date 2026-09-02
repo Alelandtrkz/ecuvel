@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile-navigation.css') }}">
   {% block styles %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -22,11 +23,12 @@
     {% block content %}{% endblock %}
   </main>
   {% block footer %}{% include "components/footer.html" %}{% endblock %}
+  {% block mobile_navigation %}{% include "components/mobile_bottom_nav.html" %}{% endblock %}
   <div class="category-modal" id="category-modal" hidden
-       role="dialog" aria-modal="true" aria-label="Seleccionar categoría">
+       role="dialog" aria-modal="true" aria-labelledby="category-modal-title">
     <div class="category-modal__card">
       <div class="category-modal__header">
-        <span class="category-modal__title">Categorías</span>
+        <span class="category-modal__title" id="category-modal-title">Categorías</span>
         <button class="category-modal__close" id="close-category-modal" aria-label="Cerrar">
           <i data-lucide="x" aria-hidden="true"></i>
         </button>

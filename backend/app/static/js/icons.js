@@ -3,10 +3,12 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
-  window.lucide.createIcons({
-    attrs: {
-      "aria-hidden": "true",
-      "stroke-width": "1.8",
-    },
-  });
+  const refresh = () => window.lucide.createIcons({
+      attrs: {
+        "aria-hidden": "true",
+        "stroke-width": "1.8",
+      },
+    });
+  window.EcuvelIcons = { refresh };
+  refresh();
 });

@@ -64,7 +64,7 @@
         {% if cat.slug == (selected_category|default('')) %}{% set _ns.cat_name = cat.name %}{% endif %}
       {% endfor %}
       <button type="button" class="search-bar__category-btn" id="search-category-btn"
-              aria-haspopup="dialog" aria-controls="category-modal">
+              data-category-modal-open aria-haspopup="dialog" aria-controls="category-modal">
         <span id="search-category-label">{{ _ns.cat_name }}</span>
         <i data-lucide="chevron-down" aria-hidden="true"></i>
       </button>

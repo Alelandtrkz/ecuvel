@@ -1,73 +1,96 @@
 (function () {
-  'use strict';
+  "use strict";
 
-  /* ── Catalog dropdown (two-panel hover menu) ── */
-  var catalogMenu = document.getElementById('catalog-menu');
+  const catalogMenu = document.getElementById("catalog-menu");
   if (catalogMenu) {
-    var mainCats  = catalogMenu.querySelectorAll('.catalog-dropdown__main-cat');
-    var subPanels = catalogMenu.querySelectorAll('.catalog-dropdown__sub-panel');
-
-    function showPanel(index) {
-      mainCats.forEach(function (btn) { btn.classList.remove('is-active'); });
-      subPanels.forEach(function (panel) { panel.classList.remove('is-visible'); });
-      var activeBtn   = catalogMenu.querySelector('[data-cat-index="' + index + '"]');
-      var activePanel = catalogMenu.querySelector('[data-panel-index="' + index + '"]');
-      if (activeBtn)   activeBtn.classList.add('is-active');
-      if (activePanel) activePanel.classList.add('is-visible');
-    }
-
-    mainCats.forEach(function (btn) {
-      btn.addEventListener('mouseenter', function () { showPanel(btn.dataset.catIndex); });
+    const mainCats = catalogMenu.querySelectorAll(".catalog-dropdown__main-cat");
+    const subPanels = catalogMenu.querySelectorAll(".catalog-dropdown__sub-panel");
+    const showPanel = (index) => {
+      mainCats.forEach((button) => button.classList.remove("is-active"));
+      subPanels.forEach((panel) => panel.classList.remove("is-visible"));
+      catalogMenu.querySelector(`[data-cat-index="${index}"]`)?.classList.add("is-active");
+      catalogMenu.querySelector(`[data-panel-index="${index}"]`)?.classList.add("is-visible");
+    };
+    mainCats.forEach((button) => {
+      button.addEventListener("mouseenter", () => showPanel(button.dataset.catIndex));
     });
-
-    document.addEventListener('click', function (e) {
-      if (catalogMenu.open && !catalogMenu.contains(e.target)) {
-        catalogMenu.removeAttribute('open');
+    document.addEventListener("click", (event) => {
+      if (catalogMenu.open && !catalogMenu.contains(event.target)) {
+        catalogMenu.removeAttribute("open");
       }
     });
   }
 
-  /* ── Category modal (search bar filter) ── */
-  var modal     = document.getElementById('category-modal');
+  const modal = document.getElementById("category-modal");
   if (!modal) return;
 
-  var valueInput = document.getElementById('search-category-value');
-  var labelSpan  = document.getElementById('search-category-label');
-  var closeBtn   = document.getElementById('close-category-modal');
-  var searchBtn  = document.getElementById('search-category-btn');
-  var items      = modal.querySelectorAll('.category-modal__item');
+  const valueInput = document.getElementById("search-category-value");
+  const labelSpan = document.getElementById("search-category-label");
+  const closeButton = document.getElementById("close-category-modal");
+  const items = Array.from(modal.querySelectorAll(".category-modal__item"));
+  const openers = Array.from(document.querySelectorAll("[data-category-modal-open]"));
+  let activeOpener = null;
 
-  function openModal() {
+  const focusable = () => Array.from(
+    modal.querySelectorAll("button:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])"),
+  ).filter((element) => !element.hidden);
+
+  const openModal = (opener) => {
+    activeOpener = opener;
     modal.hidden = false;
-    document.body.style.overflow = 'hidden';
-    var current = valueInput ? valueInput.value : '';
-    items.forEach(function (item) {
-      item.classList.toggle('is-selected', item.dataset.slug === current);
+    document.body.classList.add("category-modal-open");
+    const current = valueInput?.value || "";
+    items.forEach((item) => {
+      item.classList.toggle("is-selected", item.dataset.slug === current);
     });
-    if (closeBtn) closeBtn.focus();
-  }
+    closeButton?.focus();
+  };
 
-  function closeModal() {
+  const closeModal = ({ restoreFocus = true } = {}) => {
     modal.hidden = true;
-    document.body.style.overflow = '';
-  }
+    document.body.classList.remove("category-modal-open");
+    if (restoreFocus) activeOpener?.focus();
+  };
 
-  if (searchBtn) searchBtn.addEventListener('click', openModal);
-  if (closeBtn)  closeBtn.addEventListener('click',  closeModal);
+  openers.forEach((opener) => opener.addEventListener("click", () => openModal(opener)));
+  closeButton?.addEventListener("click", () => closeModal());
 
-  items.forEach(function (item) {
-    item.addEventListener('click', function () {
-      if (valueInput) valueInput.value = item.dataset.slug;
-      if (labelSpan)  labelSpan.textContent = item.dataset.name;
-      closeModal();
+  items.forEach((item) => {
+    item.addEventListener("click", () => {
+      if (activeOpener?.id === "search-category-btn" && valueInput) {
+        valueInput.value = item.dataset.slug || "";
+        if (labelSpan) labelSpan.textContent = item.dataset.name || "Todos";
+        closeModal();
+        return;
+      }
+      const href = item.dataset.href;
+      closeModal({ restoreFocus: false });
+      if (href) window.location.assign(href);
     });
   });
 
-  modal.addEventListener('click', function (e) {
-    if (e.target === modal) closeModal();
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) closeModal();
   });
 
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !modal.hidden) closeModal();
+  document.addEventListener("keydown", (event) => {
+    if (modal.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const elements = focusable();
+    if (!elements.length) return;
+    const first = elements[0];
+    const last = elements[elements.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   });
 })();

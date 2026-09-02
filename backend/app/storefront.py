@@ -8,7 +8,7 @@ import secrets
 import uuid
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlsplit
@@ -86,9 +86,19 @@ from app.services.catalog_ranking import (
     SURFACE_HOME,
     SURFACE_RECOMMENDATIONS,
     SURFACE_SEARCH,
+    SURFACE_STORE,
     apply_soft_diversity,
     private_search_context,
+    ranking_day,
     rank_listings_v1,
+)
+from app.services.catalog_feed import (
+    CATALOG_FEED_CURSOR_VERSION,
+    CatalogFeedCursor,
+    InvalidCatalogFeedCursorError,
+    catalog_feed_context_hash,
+    load_catalog_feed_cursor,
+    sign_catalog_feed_cursor,
 )
 from app.services.catalog_shadow_ranking import (
     load_listing_event_aggregates,
@@ -130,8 +140,8 @@ from app.services.pending_payments import (
     expire_pending_bank_transfer_payment,
 )
 from app.services.public_stores import (
+    get_public_store_catalog,
     get_public_store_information,
-    get_public_store_products_page,
     get_public_store_products_summary,
     get_public_store_rating_summary,
 )
@@ -180,9 +190,7 @@ logger = logging.getLogger(__name__)
 
 MAX_SEARCH_LENGTH = 100
 MAX_CATEGORY_LENGTH = 140
-MAX_HOME_OFFERS = 20
 MAX_RECOMMENDATIONS = 10
-STORE_PUBLIC_PRODUCTS_PER_PAGE = 20
 CART_SESSION_KEY = "cart"
 CHECKOUT_DRAFT_SESSION_KEY = "checkout_draft"
 CHECKOUT_ORDERS_SESSION_KEY = "checkout_order_ids"
@@ -197,6 +205,11 @@ class ProductCardViewModel:
     offer_id: uuid.UUID | None
     product_url: str | None
     image_url: str
+    image_srcset: str | None
+    image_sizes: str | None
+    image_width: int
+    image_height: int
+    image_alt: str
     title: str
     current_price: str
     compare_at_price: str | None
@@ -425,12 +438,20 @@ def _visible_compare_at_price(row: Any) -> Decimal | None:
 
 
 DELIVERY_INFORMATION_FALLBACK = "Información de entrega próximamente"
+CARD_DELIVERY_INFORMATION_FALLBACK = "Entrega próximamente"
+PRODUCT_CARD_IMAGE_SIZES = (
+    "(max-width: 359px) calc(100vw - 64px), "
+    "(max-width: 767px) calc((100vw - 76px) / 2), "
+    "(max-width: 1023px) calc((100vw - 112px) / 3), "
+    "(max-width: 1199px) calc((100vw - 160px) / 4), "
+    "calc((min(100vw, 1440px) - 192px) / 5)"
+)
 
 
 def _compact_delivery_label(preparation_time_days: int | None) -> str:
     return (
         delivery_eta_compact_label(preparation_time_days)
-        or DELIVERY_INFORMATION_FALLBACK
+        or CARD_DELIVERY_INFORMATION_FALLBACK
     )
 
 
@@ -451,28 +472,92 @@ def _favorite_ids_for_product_ids(product_ids: set[uuid.UUID]) -> set[uuid.UUID]
     )
 
 
+def _versioned_media_url(
+    endpoint: str,
+    *,
+    product_slug: str,
+    media: ProductMedia,
+    version: str | None,
+) -> str:
+    values: dict[str, str] = {
+        "product_slug": product_slug,
+        "public_id": media.public_id,
+    }
+    if version:
+        values["v"] = version
+    return url_for(endpoint, **values)
+
+
+def _card_media_presentation(
+    *,
+    product_slug: str,
+    media: ProductMedia | None,
+    placeholder_image: str,
+    title: str,
+    listing_label: str | None,
+) -> tuple[str, str | None, str | None, int, int, str]:
+    alt = f"{title}, {listing_label}" if listing_label else title
+    if media is None:
+        return (
+            placeholder_image,
+            None,
+            None,
+            320,
+            320,
+            f"Imagen provisional de {alt}",
+        )
+
+    master_url = _versioned_media_url(
+        "storefront.product_media",
+        product_slug=product_slug,
+        media=media,
+        version=media.content_sha256,
+    )
+    has_thumbnail = product_thumbnail_file_exists(
+        media,
+        media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+    )
+    if has_thumbnail:
+        thumbnail_url = _versioned_media_url(
+            "storefront.product_media_thumbnail",
+            product_slug=product_slug,
+            media=media,
+            version=media.thumbnail_sha256,
+        )
+        srcset_entries = [f"{thumbnail_url} {media.thumbnail_width}w"]
+        if media.width and media.width != media.thumbnail_width:
+            srcset_entries.append(f"{master_url} {media.width}w")
+        return (
+            thumbnail_url,
+            ", ".join(srcset_entries),
+            PRODUCT_CARD_IMAGE_SIZES,
+            int(media.thumbnail_width or 320),
+            int(media.thumbnail_height or 320),
+            alt,
+        )
+    return (
+        master_url,
+        None,
+        None,
+        int(media.width or 320),
+        int(media.height or 320),
+        alt,
+    )
+
+
 def _card_media_url(
     *,
     product_slug: str,
     media: ProductMedia | None,
     placeholder_image: str,
 ) -> str:
-    if media is None:
-        return placeholder_image
-    if product_thumbnail_file_exists(
-        media,
-        media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
-    ):
-        return url_for(
-            "storefront.product_media_thumbnail",
-            product_slug=product_slug,
-            public_id=media.public_id,
-        )
-    return url_for(
-        "storefront.product_media",
+    return _card_media_presentation(
         product_slug=product_slug,
-        public_id=media.public_id,
-    )
+        media=media,
+        placeholder_image=placeholder_image,
+        title="Producto",
+        listing_label=None,
+    )[0]
 
 
 def _card_from_row(
@@ -492,10 +577,19 @@ def _card_from_row(
         )
     review_stats = (review_stats_by_product_id or {}).get(row.product_id)
     media = (media_by_variant_id or {}).get(row.variant_id)
-    image_url = _card_media_url(
+    (
+        image_url,
+        image_srcset,
+        image_sizes,
+        image_width,
+        image_height,
+        image_alt,
+    ) = _card_media_presentation(
         product_slug=row.product_slug,
         media=media,
         placeholder_image=placeholder_image,
+        title=row.product_title,
+        listing_label=getattr(row, "listing_label", None),
     )
     return ProductCardViewModel(
         product_slug=row.product_slug,
@@ -506,6 +600,11 @@ def _card_from_row(
             variant=row.catalog_sku,
         ),
         image_url=image_url,
+        image_srcset=image_srcset,
+        image_sizes=image_sizes,
+        image_width=image_width,
+        image_height=image_height,
+        image_alt=image_alt,
         title=row.product_title,
         current_price=_format_price(row.price, row.currency) or "",
         compare_at_price=_format_price(
@@ -572,20 +671,24 @@ def _cards_with_ranking_context(
     listings: list[Any],
     *,
     surface: str,
+    ranking_request_id: uuid.UUID | None = None,
+    position_offset: int = 0,
+    shadow_listings: list[Any] | None = None,
 ) -> list[ProductCardViewModel]:
     if not cards:
         return cards
-    ranking_request_id = uuid.uuid4()
+    ranking_request_id = ranking_request_id or uuid.uuid4()
+    shadow_candidates = shadow_listings if shadow_listings is not None else listings
     shadow_by_listing: dict[str, Any] = {}
     if current_app.config["CATALOG_SHADOW_RANKING_ENABLED"]:
         try:
             aggregates = load_listing_event_aggregates(
                 db.session,
-                {listing.listing_key for listing in listings},
+                {listing.listing_key for listing in shadow_candidates},
             )
             shadow_by_listing = {
                 result.listing_key: result
-                for result in shadow_rank_listings(listings, aggregates)
+                for result in shadow_rank_listings(shadow_candidates, aggregates)
             }
         except Exception:
             logger.warning("Catalog shadow ranking failed", exc_info=True)
@@ -593,7 +696,7 @@ def _cards_with_ranking_context(
     enriched: list[ProductCardViewModel] = []
     for position, (card, listing) in enumerate(
         zip(cards, listings, strict=True),
-        start=1,
+        start=position_offset + 1,
     ):
         shadow = shadow_by_listing.get(listing.listing_key)
         context = RankingContext(
@@ -700,10 +803,19 @@ def _card_from_favorite_item(
         if item.variant_id is not None
         else None
     )
-    image_url = _card_media_url(
+    (
+        image_url,
+        image_srcset,
+        image_sizes,
+        image_width,
+        image_height,
+        image_alt,
+    ) = _card_media_presentation(
         product_slug=item.product_slug,
         media=media,
         placeholder_image=placeholder_image,
+        title=item.product_title,
+        listing_label=item.listing_label,
     )
     return ProductCardViewModel(
         product_slug=item.product_slug,
@@ -718,6 +830,11 @@ def _card_from_favorite_item(
             else None
         ),
         image_url=image_url,
+        image_srcset=image_srcset,
+        image_sizes=image_sizes,
+        image_width=image_width,
+        image_height=image_height,
+        image_alt=image_alt,
         title=item.product_title,
         current_price=(
             _format_price(item.price, item.currency or "USD")
@@ -812,10 +929,11 @@ def _media_urls_for_variant(
         variant_value_key=value_key,
     )
     return tuple(
-        url_for(
+        _versioned_media_url(
             "storefront.product_media",
             product_slug=product.slug,
-            public_id=media.public_id,
+            media=media,
+            version=media.content_sha256,
         )
         for media in selected
     )
@@ -1531,6 +1649,81 @@ def _session_order_items(order_ids: set[uuid.UUID]) -> dict[uuid.UUID, tuple[Ses
     return {order_id: tuple(items) for order_id, items in grouped.items()}
 
 
+def _home_catalog_sequence(
+    *,
+    query_text: str,
+    selected_category: str,
+    day: date,
+) -> tuple[str, str, str, list[Any]]:
+    listings = load_public_listings(
+        db.session,
+        category_slug=selected_category or None,
+    )
+    if query_text:
+        surface = SURFACE_SEARCH
+        ranking_context = private_search_context(query_text)
+    elif selected_category:
+        surface = SURFACE_CATEGORY
+        ranking_context = selected_category
+    else:
+        surface = SURFACE_HOME
+        ranking_context = ""
+    ranked = rank_listings_v1(
+        listings,
+        surface=surface,
+        context=ranking_context,
+        query=query_text or None,
+        day=day,
+    )
+    sequence = apply_soft_diversity(
+        ranked,
+        limit=len(ranked),
+        max_per_product=current_app.config["HOME_MAX_LISTINGS_PER_PRODUCT"],
+        max_per_store=current_app.config["HOME_MAX_LISTINGS_PER_STORE"],
+    )
+    context_hash = catalog_feed_context_hash(
+        surface=surface,
+        query=query_text,
+        category_slug=selected_category,
+    )
+    return surface, ranking_context, context_hash, sequence
+
+
+def _signed_feed_cursor(
+    *,
+    day: date,
+    surface: str,
+    context_hash: str,
+    category_slug: str | None,
+    store_slug: str | None,
+    next_position: int,
+    ranking_request_id: uuid.UUID,
+    batch_size: int,
+) -> str:
+    return sign_catalog_feed_cursor(
+        current_app.config["SECRET_KEY"],
+        CatalogFeedCursor(
+            version=CATALOG_FEED_CURSOR_VERSION,
+            ranking_day=day,
+            surface=surface,
+            context_hash=context_hash,
+            category_slug=category_slug or None,
+            store_slug=store_slug or None,
+            next_position=next_position,
+            ranking_request_id=ranking_request_id,
+            batch_size=batch_size,
+        ),
+    )
+
+
+def _invalid_feed_cursor_response(message: str):
+    return jsonify(
+        ok=False,
+        error="invalid_cursor",
+        message=message,
+    ), 400
+
+
 @storefront.get("/")
 def home() -> str:
     query_text = _normalize_query_parameter(
@@ -1542,31 +1735,15 @@ def home() -> str:
         MAX_CATEGORY_LENGTH,
     )
 
-    listings = load_public_listings(
-        db.session,
-        category_slug=selected_category or None,
+    feed_day = ranking_day()
+    surface, _context, context_hash, sequence = _home_catalog_sequence(
+        query_text=query_text,
+        selected_category=selected_category,
+        day=feed_day,
     )
-    if query_text:
-        surface = SURFACE_SEARCH
-        context = private_search_context(query_text)
-    elif selected_category:
-        surface = SURFACE_CATEGORY
-        context = selected_category
-    else:
-        surface = SURFACE_HOME
-        context = ""
-    ranked = rank_listings_v1(
-        listings,
-        surface=surface,
-        context=context,
-        query=query_text or None,
-    )
-    rows = apply_soft_diversity(
-        ranked,
-        limit=MAX_HOME_OFFERS,
-        max_per_product=current_app.config["HOME_MAX_LISTINGS_PER_PRODUCT"],
-        max_per_store=current_app.config["HOME_MAX_LISTINGS_PER_STORE"],
-    )
+    batch_size = current_app.config["CATALOG_FEED_BATCH_SIZE"]
+    rows = sequence[:batch_size]
+    ranking_request_id = uuid.uuid4()
     placeholder_image = url_for(
         "static",
         filename="images/placeholders/product-placeholder.svg",
@@ -1576,6 +1753,22 @@ def home() -> str:
         products,
         rows,
         surface=surface,
+        ranking_request_id=ranking_request_id,
+        shadow_listings=sequence,
+    )
+    next_cursor = (
+        _signed_feed_cursor(
+            day=feed_day,
+            surface=surface,
+            context_hash=context_hash,
+            category_slug=selected_category or None,
+            store_slug=None,
+            next_position=len(rows),
+            ranking_request_id=ranking_request_id,
+            batch_size=batch_size,
+        )
+        if len(rows) < len(sequence)
+        else None
     )
 
     return render_template(
@@ -1585,6 +1778,144 @@ def home() -> str:
         query_text=query_text,
         selected_category=selected_category,
         placeholder_count=max(0, 5 - len(products)),
+        total_results=len(sequence),
+        feed_surface=surface,
+        feed_context_hash=context_hash,
+        feed_next_cursor=next_cursor,
+        feed_has_more=next_cursor is not None,
+        feed_loaded_count=len(rows),
+        current_section=(
+            "catalog" if query_text or selected_category else "home"
+        ),
+    )
+
+
+@storefront.get("/catalogo/feed")
+def catalog_feed():
+    token = (request.args.get("cursor") or "").strip()
+    if not token:
+        return _invalid_feed_cursor_response(
+            "Se requiere un cursor para continuar el catálogo."
+        )
+    try:
+        cursor = load_catalog_feed_cursor(
+            current_app.config["SECRET_KEY"],
+            token,
+            max_age_seconds=current_app.config[
+                "CATALOG_FEED_CURSOR_TTL_SECONDS"
+            ],
+        )
+    except InvalidCatalogFeedCursorError as exc:
+        return _invalid_feed_cursor_response(str(exc))
+
+    query_text = _normalize_query_parameter(
+        request.args.get("q"),
+        MAX_SEARCH_LENGTH,
+    )
+    selected_category = _normalize_query_parameter(
+        request.args.get("category"),
+        MAX_CATEGORY_LENGTH,
+    )
+    store_slug = _normalize_query_parameter(
+        request.args.get("store"),
+        MAX_CATEGORY_LENGTH,
+    )
+
+    if cursor.surface == SURFACE_STORE:
+        expected_hash = catalog_feed_context_hash(
+            surface=SURFACE_STORE,
+            store_slug=store_slug,
+        )
+        if (
+            not store_slug
+            or store_slug != cursor.store_slug
+            or selected_category
+            or query_text
+            or expected_hash != cursor.context_hash
+        ):
+            return _invalid_feed_cursor_response(
+                "El cursor no corresponde a esta tienda."
+            )
+        catalog = get_public_store_catalog(
+            db.session,
+            store_slug=store_slug,
+            day=cursor.ranking_day,
+        )
+        if catalog is None:
+            abort(404)
+        sequence = list(catalog.rows)
+    else:
+        if store_slug:
+            return _invalid_feed_cursor_response(
+                "El cursor no corresponde a esta superficie."
+            )
+        surface, _context, expected_hash, sequence = _home_catalog_sequence(
+            query_text=query_text,
+            selected_category=selected_category,
+            day=cursor.ranking_day,
+        )
+        if (
+            surface != cursor.surface
+            or (selected_category or None) != cursor.category_slug
+            or expected_hash != cursor.context_hash
+        ):
+            return _invalid_feed_cursor_response(
+                "El cursor no corresponde a estos filtros."
+            )
+
+    start = min(cursor.next_position, len(sequence))
+    end = min(start + cursor.batch_size, len(sequence))
+    rows = sequence[start:end]
+    placeholder_image = url_for(
+        "static",
+        filename="images/placeholders/product-placeholder.svg",
+    )
+    products = _cards_from_rows(rows, placeholder_image)
+    products = _cards_with_ranking_context(
+        products,
+        rows,
+        surface=cursor.surface,
+        ranking_request_id=cursor.ranking_request_id,
+        position_offset=start,
+        shadow_listings=sequence,
+    )
+    if cursor.surface == SURFACE_STORE:
+        card_next_url = url_for(
+            "storefront.store_page",
+            store_slug=cursor.store_slug,
+        )
+    else:
+        next_values: dict[str, str] = {}
+        if query_text:
+            next_values["q"] = query_text
+        if selected_category:
+            next_values["category"] = selected_category
+        card_next_url = url_for("storefront.home", **next_values)
+    has_more = end < len(sequence)
+    next_cursor = (
+        _signed_feed_cursor(
+            day=cursor.ranking_day,
+            surface=cursor.surface,
+            context_hash=cursor.context_hash,
+            category_slug=cursor.category_slug,
+            store_slug=cursor.store_slug,
+            next_position=end,
+            ranking_request_id=cursor.ranking_request_id,
+            batch_size=cursor.batch_size,
+        )
+        if has_more
+        else None
+    )
+    return jsonify(
+        ok=True,
+        html=render_template(
+            "components/product_cards_fragment.html",
+            products=products,
+            card_next_url=card_next_url,
+        ),
+        next_cursor=next_cursor,
+        has_more=has_more,
+        loaded_count=end,
     )
 
 
@@ -1601,6 +1932,7 @@ def cart() -> str:
         categories=_load_categories(),
         query_text="",
         selected_category="",
+        current_section="cart",
     )
 
 
@@ -2693,32 +3025,63 @@ def remove_favorite(product_slug: str):
 
 @storefront.get("/tiendas/<string:store_slug>")
 def store_page(store_slug: str) -> str:
-    products_page = get_public_store_products_page(
+    feed_day = ranking_day()
+    catalog = get_public_store_catalog(
         db.session,
         store_slug=store_slug,
-        page=request.args.get("page"),
-        page_size=STORE_PUBLIC_PRODUCTS_PER_PAGE,
+        day=feed_day,
     )
-    if products_page is None:
+    if catalog is None:
         abort(404)
 
+    batch_size = current_app.config["CATALOG_FEED_BATCH_SIZE"]
+    sequence = list(catalog.rows)
+    rows = sequence[:batch_size]
+    ranking_request_id = uuid.uuid4()
+    context_hash = catalog_feed_context_hash(
+        surface=SURFACE_STORE,
+        store_slug=catalog.store.slug,
+    )
     placeholder_image = url_for(
         "static",
         filename="images/placeholders/product-placeholder.svg",
     )
-    products = _cards_from_rows(list(products_page.rows), placeholder_image)
+    products = _cards_from_rows(rows, placeholder_image)
     products = _cards_with_ranking_context(
         products,
-        list(products_page.rows),
-        surface="STORE",
+        rows,
+        surface=SURFACE_STORE,
+        ranking_request_id=ranking_request_id,
+        shadow_listings=sequence,
+    )
+    next_cursor = (
+        _signed_feed_cursor(
+            day=feed_day,
+            surface=SURFACE_STORE,
+            context_hash=context_hash,
+            category_slug=None,
+            store_slug=catalog.store.slug,
+            next_position=len(rows),
+            ranking_request_id=ranking_request_id,
+            batch_size=batch_size,
+        )
+        if len(rows) < len(sequence)
+        else None
     )
     return render_template(
         "storefront/store.html",
-        store_page=products_page,
+        store=catalog.store,
         products=products,
+        total_results=len(sequence),
+        feed_surface=SURFACE_STORE,
+        feed_context_hash=context_hash,
+        feed_next_cursor=next_cursor,
+        feed_has_more=next_cursor is not None,
+        feed_loaded_count=len(rows),
         categories=_load_categories(),
         query_text="",
         selected_category="",
+        current_section="catalog",
     )
 
 
@@ -2952,6 +3315,7 @@ def product_detail(product_slug: str) -> str:
         categories=_load_categories(),
         query_text="",
         selected_category="",
+        current_section="catalog",
     )
 
 
@@ -2969,6 +3333,9 @@ def product_media(product_slug: str, public_id: str):
     )
     if media is None:
         abort(404)
+    requested_version = (request.args.get("v") or "").strip()
+    if requested_version and requested_version != media.content_sha256:
+        abort(404)
     try:
         path = private_file_path(
             current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
@@ -2981,6 +3348,9 @@ def product_media(product_slug: str, public_id: str):
     response = send_file(path, mimetype=media.media_type, conditional=True, max_age=31536000)
     response.cache_control.public = True
     response.cache_control.max_age = 31536000
+    response.cache_control.immutable = bool(
+        requested_version and requested_version == media.content_sha256
+    )
     return response
 
 
@@ -3000,6 +3370,9 @@ def product_media_thumbnail(product_slug: str, public_id: str):
     )
     if media is None or not has_complete_product_thumbnail(media):
         abort(404)
+    requested_version = (request.args.get("v") or "").strip()
+    if requested_version and requested_version != media.thumbnail_sha256:
+        abort(404)
     try:
         path = private_file_path(
             current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
@@ -3017,6 +3390,9 @@ def product_media_thumbnail(product_slug: str, public_id: str):
     )
     response.cache_control.public = True
     response.cache_control.max_age = 31536000
+    response.cache_control.immutable = bool(
+        requested_version and requested_version == media.thumbnail_sha256
+    )
     return response
 
 

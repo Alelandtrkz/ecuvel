@@ -5,20 +5,16 @@
 {% block styles %}<link rel="stylesheet" href="{{ url_for('static', filename='css/home.css') }}">{% endblock %}
 
 {% block content %}
-<div class="home-page content-container">
-  <section class="hero" aria-labelledby="hero-title">
-    <div class="hero__content">
-      <span class="hero__eyebrow">Marketplace ecuatoriano</span>
-      <h1 id="hero-title">Encuentra lo que necesitas, cerca de ti</h1>
-      <p>Esta es la primera versión de Ecuvel. Estamos preparando más productos, categorías y formas de comprar.</p>
-      <a class="button button--hero" href="#productos">Explorar productos</a>
-    </div>
-    <div class="hero__art" aria-hidden="true">
-      <span class="hero__orb hero__orb--large"></span>
-      <span class="hero__orb hero__orb--small"></span>
-      <i data-lucide="shopping-bag"></i>
-    </div>
-  </section>
+<div class="home-page content-container" data-catalog-feed
+     data-feed-endpoint="{{ url_for('storefront.catalog_feed') }}"
+     data-feed-cursor="{{ feed_next_cursor or '' }}"
+     data-feed-context="{{ feed_context_hash }}"
+     data-feed-loaded-count="{{ feed_loaded_count }}"
+     data-feed-target="#catalog-feed-grid"
+     data-feed-leading-target="#catalog-feed-leading-grid"
+     data-feed-query="{{ query_text }}"
+     data-feed-category="{{ selected_category }}">
+  {% include "components/home_hero.html" %}
 
   <section id="productos" class="product-section" aria-labelledby="products-title">
     <div class="section-heading">
@@ -26,7 +22,7 @@
         <span class="section-heading__eyebrow">Catálogo Ecuvel</span>
         <h2 id="products-title">Productos para descubrir</h2>
       </div>
-      <p>{{ products|length }} oferta{{ '' if products|length == 1 else 's' }} activa{{ '' if products|length == 1 else 's' }}</p>
+      <p>{{ total_results }} oferta{{ '' if total_results == 1 else 's' }} activa{{ '' if total_results == 1 else 's' }}</p>
     </div>
 
     {% if query_text or selected_category %}
@@ -44,9 +40,9 @@
       </div>
     {% endif %}
 
-    <div class="product-grid">
+    <div class="product-grid" id="catalog-feed-leading-grid">
       {% for product in products[:5] %}
-        {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context) }}
+        {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context, product.image_srcset, product.image_sizes, product.image_width, product.image_height, product.image_alt) }}
       {% endfor %}
       {% for _ in range(placeholder_count) %}
         <article class="catalog-placeholder" aria-label="Espacio reservado para un producto próximo">
@@ -65,15 +61,22 @@
     <div><i data-lucide="sparkles" aria-hidden="true"></i><span><strong>Más novedades pronto</strong>Nuevas categorías y vendedores en camino.</span></div>
   </aside>
 
-  {% if products|length > 5 %}
+  {% if products|length > 5 or feed_has_more %}
     <section class="product-section" aria-labelledby="more-products-title">
       <div class="section-heading"><div><span class="section-heading__eyebrow">Más para ti</span><h2 id="more-products-title">Sigue explorando</h2></div></div>
-      <div class="product-grid">
+      <div class="product-grid" id="catalog-feed-grid">
         {% for product in products[5:] %}
-          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context) }}
+          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context, product.image_srcset, product.image_sizes, product.image_width, product.image_height, product.image_alt) }}
         {% endfor %}
+      </div>
+      <div class="catalog-feed-controls" data-feed-controls>
+        <p class="catalog-feed-status" role="status" aria-live="polite" data-feed-status{% if not feed_has_more %} data-feed-complete="true"{% endif %}>{% if feed_has_more %}Hay más productos por descubrir.{% else %}Has llegado al final del catálogo.{% endif %}</p>
+        <button class="button button--secondary catalog-feed-load" type="button" data-feed-load{% if not feed_has_more %} hidden{% endif %}>Cargar más productos</button>
+        <span class="catalog-feed-sentinel" aria-hidden="true" data-feed-sentinel></span>
       </div>
     </section>
   {% endif %}
 </div>
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/catalog-feed.js') }}" defer></script>{% endblock %}

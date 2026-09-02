@@ -7,11 +7,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const updateFavoriteBadges = (count) => {
     let badges = Array.from(document.querySelectorAll("[data-favorite-count]"));
     if (!badges.length && count > 0) {
-      document.querySelectorAll(".header-action--favorites").forEach((link) => {
+      document.querySelectorAll(".header-action--favorites, .mobile-bottom-nav__item[href*='favoritos'] .mobile-bottom-nav__icon").forEach((container) => {
         const badge = document.createElement("strong");
-        badge.className = "header-favorite-badge";
+        badge.className = container.classList.contains("mobile-bottom-nav__icon")
+          ? "mobile-bottom-nav__badge"
+          : "header-favorite-badge";
         badge.dataset.favoriteCount = "";
-        link.append(badge);
+        container.append(badge);
         badges.push(badge);
       });
     }
@@ -47,47 +49,39 @@ document.addEventListener("DOMContentLoaded", () => {
       });
   };
 
-  document.querySelectorAll("[data-favorite-form]").forEach((form) => {
-    form.addEventListener("submit", async (event) => {
-      if (!window.fetch || !window.FormData) return;
-      event.preventDefault();
-      const submitter = event.submitter || form.querySelector("button[type='submit']");
-      const productSlug = form.dataset.productSlug;
-      submitter?.setAttribute("aria-busy", "true");
-      submitter?.setAttribute("disabled", "");
-      try {
-        const response = await fetch(form.action, {
-          method: "POST",
-          body: new FormData(form),
-          headers: {
-            Accept: "application/json",
-          },
-          credentials: "same-origin",
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || !payload.ok) {
-          if (payload.login_url) {
-            window.location.assign(payload.login_url);
-            return;
-          }
-          throw new Error(payload.message || "No pudimos actualizar favoritos.");
+  document.addEventListener("submit", async (event) => {
+    const form = event.target.closest?.("[data-favorite-form]");
+    if (!form || !window.fetch || !window.FormData) return;
+    event.preventDefault();
+    const submitter = event.submitter || form.querySelector("button[type='submit']");
+    const productSlug = form.dataset.productSlug;
+    submitter?.setAttribute("aria-busy", "true");
+    submitter?.setAttribute("disabled", "");
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new FormData(form),
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        if (payload.login_url) {
+          window.location.assign(payload.login_url);
+          return;
         }
-        liveRegion.textContent = payload.message || "Favoritos actualizados.";
-        updateFavoriteBadges(Number(payload.favorite_count) || 0);
-        syncMatchingForms(productSlug || payload.product_slug, Boolean(payload.is_favorite));
-        if (!payload.is_favorite) {
-          const shell = form.closest("[data-favorite-card]");
-          if (shell) {
-            shell.remove();
-          }
-        }
-        window.lucide?.createIcons?.();
-      } catch (error) {
-        liveRegion.textContent = error.message || "No pudimos actualizar favoritos.";
-      } finally {
-        submitter?.removeAttribute("aria-busy");
-        submitter?.removeAttribute("disabled");
+        throw new Error(payload.message || "No pudimos actualizar favoritos.");
       }
-    });
+      liveRegion.textContent = payload.message || "Favoritos actualizados.";
+      updateFavoriteBadges(Number(payload.favorite_count) || 0);
+      syncMatchingForms(productSlug || payload.product_slug, Boolean(payload.is_favorite));
+      if (!payload.is_favorite) form.closest("[data-favorite-card]")?.remove();
+      window.EcuvelIcons?.refresh();
+    } catch (error) {
+      liveRegion.textContent = error.message || "No pudimos actualizar favoritos.";
+    } finally {
+      submitter?.removeAttribute("aria-busy");
+      submitter?.removeAttribute("disabled");
+    }
   });
 });

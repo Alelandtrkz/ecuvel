@@ -129,7 +129,7 @@ def test_family_detail_exposes_only_active_variants_and_switches_by_sku(
                 product=product,
                 attributes=variant.attributes or {},
             )
-            public_ids = {url.rsplit("/", 1)[-1] for url in urls}
+            public_ids = {url.rsplit("/", 1)[-1].split("?", 1)[0] for url in urls}
             assert public_ids == by_color[color]
             assert public_ids.isdisjoint(
                 set().union(

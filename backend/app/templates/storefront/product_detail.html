@@ -26,7 +26,7 @@
     </div>
     <div class="product-grid">
       {% for recommendation in recommendations %}
-        {{ product_card(recommendation.product_url, recommendation.image_url, recommendation.title, recommendation.current_price, recommendation.compare_at_price, recommendation.rating, recommendation.review_count, recommendation.is_favorite, recommendation.delivery_label, recommendation.product_slug, recommendation.offer_id, recommendation.is_available, recommendation.listing_label, recommendation.listing_key, recommendation.ranking_context) }}
+        {{ product_card(recommendation.product_url, recommendation.image_url, recommendation.title, recommendation.current_price, recommendation.compare_at_price, recommendation.rating, recommendation.review_count, recommendation.is_favorite, recommendation.delivery_label, recommendation.product_slug, recommendation.offer_id, recommendation.is_available, recommendation.listing_label, recommendation.listing_key, recommendation.ranking_context, recommendation.image_srcset, recommendation.image_sizes, recommendation.image_width, recommendation.image_height, recommendation.image_alt) }}
       {% endfor %}
       {% for _ in range(recommendation_placeholder_count) %}
         <article class="catalog-placeholder" aria-label="Espacio reservado para una recomendación futura">

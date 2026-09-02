@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -64,6 +65,12 @@ class PublicStoreProductsPage:
     next_page: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class PublicStoreCatalog:
+    store: PublicStoreView
+    rows: tuple[PublicListing, ...]
+
+
 STORE_RATING_SOURCE_PRODUCT_REVIEWS = "PUBLISHED_PRODUCT_REVIEWS"
 STORE_RATING_SOURCE_NO_RATINGS = "NO_RATINGS"
 
@@ -99,30 +106,26 @@ def get_public_store_products_page(
     store_slug: str,
     page: int | str | None,
     page_size: int,
+    day: datetime | date | None = None,
 ) -> PublicStoreProductsPage | None:
-    store = _active_store_by_slug(session, store_slug)
-    if store is None:
+    catalog = get_public_store_catalog(
+        session,
+        store_slug=store_slug,
+        day=day,
+    )
+    if catalog is None:
         return None
 
     normalized_page = normalize_store_page(page)
-    listings = rank_listings_v1(
-        load_public_listings(session, store_id=store.id),
-        surface=SURFACE_STORE,
-        context=store.slug,
-    )
+    listings = list(catalog.rows)
     total_items = len(listings)
     total_pages = max(1, math.ceil(total_items / page_size))
     normalized_page = min(normalized_page, total_pages)
 
     start = (normalized_page - 1) * page_size
     rows = listings[start : start + page_size]
-    rating = _rating_summary_for_store(session, store.id)
     return PublicStoreProductsPage(
-        store=_public_store_view(
-            store=store,
-            product_count=total_items,
-            rating=rating,
-        ),
+        store=catalog.store,
         rows=tuple(rows),
         page=normalized_page,
         page_size=page_size,
@@ -132,6 +135,32 @@ def get_public_store_products_page(
         has_next=normalized_page < total_pages,
         previous_page=normalized_page - 1 if normalized_page > 1 else None,
         next_page=normalized_page + 1 if normalized_page < total_pages else None,
+    )
+
+
+def get_public_store_catalog(
+    session: Session,
+    *,
+    store_slug: str,
+    day: datetime | date | None = None,
+) -> PublicStoreCatalog | None:
+    store = _active_store_by_slug(session, store_slug)
+    if store is None:
+        return None
+    listings = rank_listings_v1(
+        load_public_listings(session, store_id=store.id),
+        surface=SURFACE_STORE,
+        context=store.slug,
+        day=day,
+    )
+    rating = _rating_summary_for_store(session, store.id)
+    return PublicStoreCatalog(
+        store=_public_store_view(
+            store=store,
+            product_count=len(listings),
+            rating=rating,
+        ),
+        rows=tuple(listings),
     )
 
 
