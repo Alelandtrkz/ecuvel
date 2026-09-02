@@ -92,6 +92,22 @@ class Config:
     RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://")
     RATELIMIT_ENABLED = not TESTING
 
+    HOME_MAX_LISTINGS_PER_PRODUCT = _environment_int_range(
+        "HOME_MAX_LISTINGS_PER_PRODUCT", 2, 1, 20
+    )
+    HOME_MAX_LISTINGS_PER_STORE = _environment_int_range(
+        "HOME_MAX_LISTINGS_PER_STORE", 6, 1, 100
+    )
+    CATALOG_SHADOW_RANKING_ENABLED = _environment_bool(
+        "CATALOG_SHADOW_RANKING_ENABLED", True
+    )
+    CATALOG_LIVE_RANKER = _environment_choice(
+        "CATALOG_LIVE_RANKER", "v1", {"v1"}
+    )
+    CATALOG_RANKING_CONTEXT_TTL_SECONDS = _environment_int_range(
+        "CATALOG_RANKING_CONTEXT_TTL_SECONDS", 3600, 300, 86400
+    )
+
     # Secretos bancarios lazy: la aplicación puede iniciar sin ellos, pero toda
     # operación de cifrado/descifrado falla cerrada hasta configurarlos.
     BANK_ACCOUNT_ENCRYPTION_KEY = os.getenv("BANK_ACCOUNT_ENCRYPTION_KEY")

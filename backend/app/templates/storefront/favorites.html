@@ -29,7 +29,7 @@
         <div class="favorites-grid" data-favorites-grid>
           {% for product in products %}
             <div class="favorite-card-shell" data-favorite-card="{{ product.product_slug }}">
-              {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available) }}
+              {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context) }}
             </div>
           {% endfor %}
         </div>

@@ -259,6 +259,19 @@
   -webkit-line-clamp: 2;
 }
 
+.product-card__variant {
+  min-height: 1.25rem;
+  margin: -.15rem 0 .2rem;
+  color: var(--color-text-muted);
+  font-size: .8rem;
+  line-height: 1.25;
+}
+
+.product-card__cart-button:disabled {
+  cursor: not-allowed;
+  opacity: .72;
+}
+
 .product-card__title a:hover {
   color: var(--color-primary);
 }

@@ -34,6 +34,22 @@ def test_phone_variant_axis_matrix(product_type, expected):
     assert {axis.key for axis in variant_axes_for_product_type(TEMPLATE, product_type)} == expected
 
 
+def test_listing_axis_policy_distinguishes_phone_and_shoe_detail_axes():
+    phone_axes = {axis.key: axis for axis in TEMPLATE.variant_axes}
+    shoe_axes = {
+        axis.key: axis
+        for axis in PRODUCT_TEMPLATES["fashion_shoes"].variant_axes
+    }
+
+    assert phone_axes["color_principal"].is_listing_axis is True
+    assert phone_axes["ram_gb"].is_listing_axis is True
+    assert phone_axes["almacenamiento_gb"].is_listing_axis is True
+    assert phone_axes["pantalla_pulgadas"].is_listing_axis is False
+    assert shoe_axes["color"].is_visual is True
+    assert shoe_axes["color"].is_listing_axis is True
+    assert shoe_axes["talla"].is_listing_axis is False
+
+
 def _configuration(*axis_keys, default_id=None):
     return {
         "version": 3,
@@ -125,6 +141,12 @@ def test_manual_rows_do_not_create_cartesian_combinations():
     assert config["version"] == 4
     assert config["mode"] == "family"
     assert config["enabled"] is True
+    assert config["listing_axis_keys"] == [
+        "color_principal",
+        "ram_gb",
+        "almacenamiento_gb",
+    ]
+    assert all(axis["is_listing_axis"] for axis in config["axes"])
 
 
 def test_empty_family_can_autosave_but_not_finish_without_variants():

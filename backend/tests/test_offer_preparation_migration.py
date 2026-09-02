@@ -16,6 +16,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "c9d0e1f2a3b4"
 H3_HEAD = "da1b2c3d4e5f"
+CURRENT_HEAD = "6499defb2c52"
 COLUMN = "preparation_time_days"
 
 
@@ -80,7 +81,7 @@ def test_h3_upgrade_preserves_legacy_offer_with_null_preparation(
             ).scalar_one()
         assert value is None
     finally:
-        if _version(engine) != H3_HEAD:
+        if _version(engine) != CURRENT_HEAD:
             _migrate(app, "head")
 
 
@@ -124,7 +125,7 @@ def test_h3_downgrade_fails_closed_for_populated_offer(
     with pytest.raises(SystemExit) as blocked:
         _migrate(app, PREVIOUS_HEAD, down=True)
     assert blocked.value.code == 1
-    assert _version(engine) == H3_HEAD
+    assert _version(engine) == CURRENT_HEAD
     assert COLUMN in _columns(engine)
 
 
@@ -138,8 +139,8 @@ def test_fresh_database_upgrades_from_base_to_h3_head(
             tables = set(inspect(connection).get_table_names())
         assert "seller_offers" not in tables
         _migrate(app, "head")
-        assert _version(engine) == H3_HEAD
+        assert _version(engine) == CURRENT_HEAD
         assert COLUMN in _columns(engine)
     finally:
-        if _version(engine) != H3_HEAD:
+        if _version(engine) != CURRENT_HEAD:
             _migrate(app, "head")

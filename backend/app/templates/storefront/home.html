@@ -46,7 +46,7 @@
 
     <div class="product-grid">
       {% for product in products[:5] %}
-        {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available) }}
+        {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context) }}
       {% endfor %}
       {% for _ in range(placeholder_count) %}
         <article class="catalog-placeholder" aria-label="Espacio reservado para un producto próximo">
@@ -70,7 +70,7 @@
       <div class="section-heading"><div><span class="section-heading__eyebrow">Más para ti</span><h2 id="more-products-title">Sigue explorando</h2></div></div>
       <div class="product-grid">
         {% for product in products[5:] %}
-          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available) }}
+          {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context) }}
         {% endfor %}
       </div>
     </section>

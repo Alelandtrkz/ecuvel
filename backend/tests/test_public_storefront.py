@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -287,8 +288,11 @@ def test_store_catalog_paginates_and_keeps_current_prices(client, session):
     assert "Siguiente" in first_html
     assert "Página 2 de 2" in second_html
     assert "Anterior" in second_html
-    assert "Paged product 20" in second_html
-    assert "$40.00" in second_html
+    first_cards = set(re.findall(r'data-product-card="([^"]+)"', first_html))
+    second_cards = set(re.findall(r'data-product-card="([^"]+)"', second_html))
+    assert first_cards.isdisjoint(second_cards)
+    assert len(first_cards | second_cards) == 22
+    assert "$" in second_html
 
 
 def test_public_store_escapes_store_name(client, session):

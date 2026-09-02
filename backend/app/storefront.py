@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import hashlib
 import hmac
+import logging
 import secrets
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -26,7 +27,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required
-from sqlalchemy import func, or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.extensions import db, limiter
@@ -76,6 +77,31 @@ from app.services.customer_orders import (
     get_customer_orders_page,
     normalize_orders_filter,
     normalize_page,
+)
+from app.services.catalog_listings import load_public_listings
+from app.services.catalog_ranking import (
+    LIVE_RANKER_VERSION,
+    SHADOW_RANKER_VERSION,
+    SURFACE_CATEGORY,
+    SURFACE_HOME,
+    SURFACE_RECOMMENDATIONS,
+    SURFACE_SEARCH,
+    apply_soft_diversity,
+    private_search_context,
+    rank_listings_v1,
+)
+from app.services.catalog_shadow_ranking import (
+    load_listing_event_aggregates,
+    shadow_rank_listings,
+)
+from app.services.catalog_telemetry import (
+    CLIENT_EVENT_TYPES,
+    InvalidRankingContextError,
+    RankingContext,
+    anonymous_session_id,
+    load_ranking_context,
+    record_context_event_best_effort,
+    sign_ranking_context,
 )
 from app.services.delivery_eta import (
     delivery_eta_compact_label,
@@ -150,6 +176,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 
 storefront = Blueprint("storefront", __name__)
+logger = logging.getLogger(__name__)
 
 MAX_SEARCH_LENGTH = 100
 MAX_CATEGORY_LENGTH = 140
@@ -178,6 +205,9 @@ class ProductCardViewModel:
     is_favorite: bool
     delivery_label: str
     is_available: bool
+    listing_key: str | None
+    listing_label: str | None
+    ranking_context: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,66 +399,6 @@ def cart_header_context() -> dict[str, int]:
     }
 
 
-def _canonical_offers_subquery():
-    return (
-        select(
-            Product.id.label("product_id"),
-            Product.slug.label("product_slug"),
-            Product.title.label("product_title"),
-            Product.description.label("product_description"),
-            Product.brand.label("product_brand"),
-            Product.model_number.label("product_model_number"),
-            Category.id.label("category_id"),
-            Category.name.label("category_name"),
-            Category.slug.label("category_slug"),
-            ProductVariant.id.label("variant_id"),
-            ProductVariant.title.label("variant_title"),
-            ProductVariant.catalog_sku.label("catalog_sku"),
-            ProductVariant.manufacturer_barcode.label(
-                "manufacturer_barcode"
-            ),
-            ProductVariant.attributes.label("variant_attributes"),
-            ProductVariant.combination_key.label("combination_key"),
-            ProductVariant.weight_grams.label("weight_grams"),
-            ProductVariant.length_mm.label("length_mm"),
-            ProductVariant.width_mm.label("width_mm"),
-            ProductVariant.height_mm.label("height_mm"),
-            SellerOffer.id.label("offer_id"),
-            SellerOffer.seller_sku.label("seller_sku"),
-            SellerOffer.currency.label("currency"),
-            SellerOffer.price.label("price"),
-            SellerOffer.compare_at_price.label("compare_at_price"),
-            SellerOffer.preparation_time_days.label(
-                "preparation_time_days"
-            ),
-            SellerOffer.status.label("offer_status"),
-            Store.id.label("store_id"),
-            Store.name.label("store_name"),
-            Store.slug.label("store_slug"),
-            Store.is_verified.label("store_is_verified"),
-            func.row_number()
-            .over(
-                partition_by=Product.id,
-                order_by=(SellerOffer.price, SellerOffer.id),
-            )
-            .label("offer_rank"),
-        )
-        .select_from(SellerOffer)
-        .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
-        .join(Product, Product.id == ProductVariant.product_id)
-        .join(Category, Category.id == Product.category_id)
-        .join(Store, Store.id == SellerOffer.store_id)
-        .where(
-            SellerOffer.status == OfferStatus.ACTIVE,
-            ProductVariant.is_active.is_(True),
-            Product.is_active.is_(True),
-            Category.is_active.is_(True),
-            Store.status == StoreStatus.ACTIVE,
-        )
-        .subquery()
-    )
-
-
 def _load_categories():
     return db.session.execute(
         select(Category.name, Category.slug)
@@ -513,11 +483,13 @@ def _card_from_row(
     review_stats_by_product_id: dict[uuid.UUID, Any] | None = None,
     media_by_variant_id: dict[uuid.UUID, ProductMedia] | None = None,
 ) -> ProductCardViewModel:
-    is_available = (
-        True
-        if availability_by_offer_id is None
-        else max(0, availability_by_offer_id.get(row.offer_id, 0)) > 0
-    )
+    is_available = getattr(row, "is_available", None)
+    if is_available is None:
+        is_available = (
+            True
+            if availability_by_offer_id is None
+            else max(0, availability_by_offer_id.get(row.offer_id, 0)) > 0
+        )
     review_stats = (review_stats_by_product_id or {}).get(row.product_id)
     media = (media_by_variant_id or {}).get(row.variant_id)
     image_url = _card_media_url(
@@ -531,6 +503,7 @@ def _card_from_row(
         product_url=url_for(
             "storefront.product_detail",
             product_slug=row.product_slug,
+            variant=row.catalog_sku,
         ),
         image_url=image_url,
         title=row.product_title,
@@ -551,9 +524,11 @@ def _card_from_row(
                 getattr(row, "preparation_time_days", None)
             )
             if is_available
-            else "Producto agotado"
+            else "Agotado"
         ),
         is_available=is_available,
+        listing_key=getattr(row, "listing_key", None),
+        listing_label=getattr(row, "listing_label", None),
     )
 
 
@@ -564,7 +539,12 @@ def _cards_from_rows(
     favorite_ids = _favorite_ids_for_product_ids(
         {row.product_id for row in rows}
     )
-    availability = _availability_by_offer_ids({row.offer_id for row in rows})
+    if all(hasattr(row, "available_quantity") for row in rows):
+        availability = {
+            row.offer_id: max(0, row.available_quantity) for row in rows
+        }
+    else:
+        availability = _availability_by_offer_ids({row.offer_id for row in rows})
     review_stats = review_stats_for_product_ids(
         db.session,
         {row.product_id for row in rows},
@@ -585,6 +565,102 @@ def _cards_from_rows(
         )
         for row in rows
     ]
+
+
+def _cards_with_ranking_context(
+    cards: list[ProductCardViewModel],
+    listings: list[Any],
+    *,
+    surface: str,
+) -> list[ProductCardViewModel]:
+    if not cards:
+        return cards
+    ranking_request_id = uuid.uuid4()
+    shadow_by_listing: dict[str, Any] = {}
+    if current_app.config["CATALOG_SHADOW_RANKING_ENABLED"]:
+        try:
+            aggregates = load_listing_event_aggregates(
+                db.session,
+                {listing.listing_key for listing in listings},
+            )
+            shadow_by_listing = {
+                result.listing_key: result
+                for result in shadow_rank_listings(listings, aggregates)
+            }
+        except Exception:
+            logger.warning("Catalog shadow ranking failed", exc_info=True)
+
+    enriched: list[ProductCardViewModel] = []
+    for position, (card, listing) in enumerate(
+        zip(cards, listings, strict=True),
+        start=1,
+    ):
+        shadow = shadow_by_listing.get(listing.listing_key)
+        context = RankingContext(
+            ranking_request_id=ranking_request_id,
+            surface=surface,
+            listing_key=listing.listing_key,
+            product_id=listing.product_id,
+            variant_id=listing.variant_id,
+            offer_id=listing.offer_id,
+            served_ranker=LIVE_RANKER_VERSION,
+            served_position=position,
+            shadow_ranker=SHADOW_RANKER_VERSION if shadow else None,
+            shadow_position=shadow.position if shadow else None,
+            shadow_score=(
+                Decimal(str(round(shadow.score, 8))) if shadow else None
+            ),
+        )
+        enriched.append(
+            replace(
+                card,
+                ranking_context=sign_ranking_context(
+                    current_app.config["SECRET_KEY"],
+                    context,
+                ),
+            )
+        )
+    return enriched
+
+
+def _submitted_ranking_context() -> RankingContext | None:
+    token = _request_value("ranking_context")
+    if not token:
+        return None
+    try:
+        return load_ranking_context(
+            current_app.config["SECRET_KEY"],
+            token,
+            max_age_seconds=current_app.config[
+                "CATALOG_RANKING_CONTEXT_TTL_SECONDS"
+            ],
+        )
+    except InvalidRankingContextError:
+        return None
+
+
+def _record_server_action_event(
+    event_type: str,
+    context: RankingContext | None,
+) -> None:
+    if context is None:
+        return
+    actor_id = current_user.id if current_user.is_authenticated else None
+    anonymous_id = (
+        None
+        if current_user.is_authenticated
+        else anonymous_session_id(flask_session)
+    )
+    try:
+        record_context_event_best_effort(
+            db.session,
+            event_type=event_type,
+            context=context,
+            actor_user_id=actor_id,
+            anonymous_id=anonymous_id,
+        )
+    except Exception:
+        logger.warning("Catalog action telemetry failed", exc_info=True)
 
 
 def _store_modal_context(template_name: str, **context: Any) -> str:
@@ -636,6 +712,7 @@ def _card_from_favorite_item(
             url_for(
                 "storefront.product_detail",
                 product_slug=item.product_slug,
+                variant=item.catalog_sku,
             )
             if item.is_catalog_visible
             else None
@@ -665,6 +742,8 @@ def _card_from_favorite_item(
             else "Producto no disponible"
         ),
         is_available=item.is_available,
+        listing_key=item.listing_key,
+        listing_label=item.listing_label,
     )
 
 
@@ -884,6 +963,7 @@ def _cart_offer_rows(offer_ids: set[uuid.UUID]):
             Category.is_active.label("category_is_active"),
             Store.name.label("store_name"),
             Store.status.label("store_status"),
+            Store.is_verified.label("store_is_verified"),
         )
         .select_from(SellerOffer)
         .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
@@ -1064,30 +1144,29 @@ def _cart_recommendations(
     category_ids: set[uuid.UUID],
     product_ids: set[uuid.UUID],
 ) -> list[ProductCardViewModel]:
-    canonical_offers = _canonical_offers_subquery()
-    statement = select(canonical_offers).where(
-        canonical_offers.c.offer_rank == 1
+    listings = load_public_listings(
+        db.session,
+        exclude_product_ids=product_ids,
     )
     if category_ids:
-        statement = statement.where(
-            canonical_offers.c.category_id.in_(category_ids)
-        )
-    if product_ids:
-        statement = statement.where(
-            canonical_offers.c.product_id.not_in(product_ids)
-        )
-
-    rows = db.session.execute(
-        statement.order_by(
-            canonical_offers.c.product_title,
-            canonical_offers.c.product_id,
-        ).limit(MAX_RECOMMENDATIONS)
-    ).all()
+        listings = [
+            listing for listing in listings
+            if listing.category_id in category_ids
+        ]
+    rows = rank_listings_v1(
+        listings,
+        surface=SURFACE_RECOMMENDATIONS,
+        context="cart",
+    )[:MAX_RECOMMENDATIONS]
     placeholder_image = url_for(
         "static",
         filename="images/placeholders/product-placeholder.svg",
     )
-    return _cards_from_rows(list(rows), placeholder_image)
+    return _cards_with_ranking_context(
+        _cards_from_rows(rows, placeholder_image),
+        rows,
+        surface=SURFACE_RECOMMENDATIONS,
+    )
 
 
 def _parse_quantity(value: str | None) -> int:
@@ -1463,51 +1542,41 @@ def home() -> str:
         MAX_CATEGORY_LENGTH,
     )
 
-    canonical_offers = _canonical_offers_subquery()
-    statement = select(canonical_offers).where(
-        canonical_offers.c.offer_rank == 1
+    listings = load_public_listings(
+        db.session,
+        category_slug=selected_category or None,
     )
-
     if query_text:
-        escaped_query = (
-            query_text.replace("\\", "\\\\")
-            .replace("%", "\\%")
-            .replace("_", "\\_")
-        )
-        pattern = f"%{escaped_query}%"
-        statement = statement.where(
-            or_(
-                canonical_offers.c.product_title.ilike(
-                    pattern,
-                    escape="\\",
-                ),
-                canonical_offers.c.variant_title.ilike(
-                    pattern,
-                    escape="\\",
-                ),
-                canonical_offers.c.seller_sku.ilike(
-                    pattern,
-                    escape="\\",
-                ),
-            )
-        )
-
-    if selected_category:
-        statement = statement.where(
-            canonical_offers.c.category_slug == selected_category
-        )
-
-    rows = db.session.execute(
-        statement.order_by(
-            canonical_offers.c.product_title,
-            canonical_offers.c.product_id,
-        ).limit(MAX_HOME_OFFERS)
-    ).all()
+        surface = SURFACE_SEARCH
+        context = private_search_context(query_text)
+    elif selected_category:
+        surface = SURFACE_CATEGORY
+        context = selected_category
+    else:
+        surface = SURFACE_HOME
+        context = ""
+    ranked = rank_listings_v1(
+        listings,
+        surface=surface,
+        context=context,
+        query=query_text or None,
+    )
+    rows = apply_soft_diversity(
+        ranked,
+        limit=MAX_HOME_OFFERS,
+        max_per_product=current_app.config["HOME_MAX_LISTINGS_PER_PRODUCT"],
+        max_per_store=current_app.config["HOME_MAX_LISTINGS_PER_STORE"],
+    )
     placeholder_image = url_for(
         "static",
         filename="images/placeholders/product-placeholder.svg",
     )
-    products = _cards_from_rows(list(rows), placeholder_image)
+    products = _cards_from_rows(rows, placeholder_image)
+    products = _cards_with_ranking_context(
+        products,
+        rows,
+        surface=surface,
+    )
 
     return render_template(
         "storefront/home.html",
@@ -2318,6 +2387,7 @@ def add_to_cart():
             row.product_is_active,
             row.category_is_active,
             row.store_status == StoreStatus.ACTIVE,
+            row.store_is_verified,
         )
     )
     if not is_visible:
@@ -2376,6 +2446,9 @@ def add_to_cart():
         )
 
     _save_cart_state(state)
+    ranking_context = _submitted_ranking_context()
+    if ranking_context is not None and ranking_context.offer_id == offer_id:
+        _record_server_action_event("ADD_TO_CART", ranking_context)
     return _cart_success_response(
         message="Producto añadido al carrito.",
         redirect_url=next_url,
@@ -2420,6 +2493,7 @@ def update_cart_quantity(offer_id: uuid.UUID):
             row.product_is_active,
             row.category_is_active,
             row.store_status == StoreStatus.ACTIVE,
+            row.store_is_verified,
         )
     )
     if not is_visible:
@@ -2515,6 +2589,44 @@ def delete_selected_cart_items():
     return redirect(url_for("storefront.cart"))
 
 
+@storefront.post("/catalogo/interacciones")
+@limiter.limit("120 per minute")
+def catalog_interaction():
+    event_type = (_request_value("event_type") or "").strip().upper()
+    token = _request_value("ranking_context") or ""
+    if event_type not in CLIENT_EVENT_TYPES:
+        return jsonify(ok=False, error="event_not_allowed"), 422
+    try:
+        context = load_ranking_context(
+            current_app.config["SECRET_KEY"],
+            token,
+            max_age_seconds=current_app.config[
+                "CATALOG_RANKING_CONTEXT_TTL_SECONDS"
+            ],
+        )
+    except InvalidRankingContextError:
+        return jsonify(ok=False, error="invalid_context"), 400
+
+    actor_id = current_user.id if current_user.is_authenticated else None
+    anonymous_id = (
+        None
+        if current_user.is_authenticated
+        else anonymous_session_id(flask_session)
+    )
+    try:
+        recorded = record_context_event_best_effort(
+            db.session,
+            event_type=event_type,
+            context=context,
+            actor_user_id=actor_id,
+            anonymous_id=anonymous_id,
+        )
+    except Exception:
+        logger.warning("Catalog client telemetry failed", exc_info=True)
+        recorded = False
+    return jsonify(ok=True, recorded=recorded), 202
+
+
 @storefront.post("/favoritos/productos/<string:product_slug>/agregar")
 def add_favorite(product_slug: str):
     redirect_url = _favorite_redirect_url(product_slug)
@@ -2537,6 +2649,10 @@ def add_favorite(product_slug: str):
             ), 404
         flash(str(exc), "error")
         return redirect(redirect_url)
+
+    ranking_context = _submitted_ranking_context()
+    if ranking_context is not None and ranking_context.product_id == result.product_id:
+        _record_server_action_event("FAVORITE", ranking_context)
 
     return _favorite_response(
         result=result,
@@ -2591,6 +2707,11 @@ def store_page(store_slug: str) -> str:
         filename="images/placeholders/product-placeholder.svg",
     )
     products = _cards_from_rows(list(products_page.rows), placeholder_image)
+    products = _cards_with_ranking_context(
+        products,
+        list(products_page.rows),
+        surface="STORE",
+    )
     return render_template(
         "storefront/store.html",
         store_page=products_page,
@@ -2648,37 +2769,49 @@ def store_products_summary(store_slug: str) -> str:
 
 @storefront.get("/productos/<string:product_slug>")
 def product_detail(product_slug: str) -> str:
-    canonical_offers = _canonical_offers_subquery()
-    row = db.session.execute(
-        select(canonical_offers).where(
-            canonical_offers.c.offer_rank == 1,
-            canonical_offers.c.product_slug == product_slug,
-        )
-    ).one_or_none()
-
-    if row is None:
-        abort(404)
-
     product_record = db.session.scalar(
         select(Product)
         .options(selectinload(Product.media))
-        .where(Product.id == row.product_id)
+        .where(
+            Product.slug == product_slug,
+            Product.is_active.is_(True),
+        )
     )
     if product_record is None:
         abort(404)
 
-    variant_rows = list(
-        db.session.execute(
-            select(canonical_offers).where(
-                canonical_offers.c.product_id == row.product_id,
-                canonical_offers.c.store_id == row.store_id,
-            )
-        ).all()
+    product_listings = load_public_listings(
+        db.session,
+        product_id=product_record.id,
     )
-    availability_by_offer = _availability_by_offer_ids(
-        {item.offer_id for item in variant_rows}
-    )
+    if not product_listings:
+        abort(404)
+    all_members = [
+        member
+        for listing in product_listings
+        for member in listing.members
+    ]
     requested_sku = (request.args.get("variant") or "").strip()
+    requested_member = next(
+        (member for member in all_members if member.catalog_sku == requested_sku),
+        None,
+    )
+    selected_store_id = (
+        requested_member.store_id
+        if requested_member is not None
+        else product_listings[0].store_id
+    )
+    variant_rows = sorted(
+        (member for member in all_members if member.store_id == selected_store_id),
+        key=lambda item: (
+            item.combination_key or "",
+            item.catalog_sku,
+            str(item.offer_id),
+        ),
+    )
+    availability_by_offer = {
+        item.offer_id: item.available_quantity for item in variant_rows
+    }
     default_key = (product_record.variant_configuration or {}).get(
         "default_combination_key"
     )
@@ -2703,7 +2836,7 @@ def product_detail(product_slug: str) -> str:
                 for item in variant_rows
                 if availability_by_offer.get(item.offer_id, 0) > 0
             ),
-            variant_rows[0] if variant_rows else row,
+            variant_rows[0],
         )
     row = selected_row
 
@@ -2788,22 +2921,23 @@ def product_detail(product_slug: str) -> str:
         ),
     )
 
-    recommendation_rows = db.session.execute(
-        select(canonical_offers)
-        .where(
-            canonical_offers.c.offer_rank == 1,
-            canonical_offers.c.category_id == row.category_id,
-            canonical_offers.c.product_id != row.product_id,
-        )
-        .order_by(
-            canonical_offers.c.product_title,
-            canonical_offers.c.product_id,
-        )
-        .limit(MAX_RECOMMENDATIONS)
-    ).all()
+    recommendation_rows = rank_listings_v1(
+        load_public_listings(
+            db.session,
+            category_id=row.category_id,
+            exclude_product_ids={row.product_id},
+        ),
+        surface=SURFACE_RECOMMENDATIONS,
+        context=str(row.category_id),
+    )[:MAX_RECOMMENDATIONS]
     recommendations = _cards_from_rows(
-        list(recommendation_rows),
+        recommendation_rows,
         placeholder_image,
+    )
+    recommendations = _cards_with_ranking_context(
+        recommendations,
+        recommendation_rows,
+        surface=SURFACE_RECOMMENDATIONS,
     )
 
     return render_template(

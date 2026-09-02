@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "b8c9d0e1f2a3"
 H2_HEAD = "c9d0e1f2a3b4"
-CURRENT_HEAD = "da1b2c3d4e5f"
+CURRENT_HEAD = "6499defb2c52"
 H2_COLUMNS = {
     "content_sha256",
     "thumbnail_storage_key",

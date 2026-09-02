@@ -59,6 +59,7 @@ class VariantAxis:
     value_type: str = "text"
     default_for: tuple[str, ...] = ()
     is_visual: bool = False
+    is_listing_axis: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +277,7 @@ def axis_def(
     value_type: str = "text",
     default_for: Iterable[str] = (),
     is_visual: bool = False,
+    is_listing_axis: bool = False,
 ) -> VariantAxis:
     return VariantAxis(
         key=key,
@@ -287,6 +289,7 @@ def axis_def(
         value_type=value_type,
         default_for=tuple(default_for),
         is_visual=is_visual,
+        is_listing_axis=is_listing_axis,
     )
 
 
@@ -619,17 +622,20 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
             condition={"field": "tipo_producto", "values": ["Smartphone", "Teléfono básico", "Cargador", "Cable", "Protector", "Soporte", "Repuesto", "Otro"]},
             default_for=("Smartphone", "Teléfono básico", "Cargador", "Cable", "Protector", "Soporte", "Otro"),
             is_visual=True,
+            is_listing_axis=True,
         ),
         axis_def(
             "almacenamiento_gb", "Almacenamiento", unit="GB", value_type="integer",
             suggestions=("64", "128", "256", "512", "1024"),
             condition={"field": "tipo_producto", "values": ["Smartphone", "Teléfono básico"]},
             default_for=("Smartphone", "Teléfono básico"),
+            is_listing_axis=True,
         ),
         axis_def(
             "ram_gb", "RAM", unit="GB", value_type="integer",
             suggestions=("4", "6", "8", "12", "16"),
             condition={"field": "tipo_producto", "values": ["Smartphone"]},
+            is_listing_axis=True,
         ),
         axis_def(
             "pantalla_pulgadas", "Tamaño de pantalla", unit="in", value_type="decimal",
@@ -681,19 +687,68 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
         ),
     ),
     "electronics_computers": (
-        axis_def("color", "Color", source_field="color_principal", suggestions=("Negro", "Plata", "Gris")),
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            suggestions=("Negro", "Plata", "Gris"), is_visual=True,
+            is_listing_axis=True,
+        ),
         axis_def("ram", "RAM", unit="GB", source_field="ram_gb", value_type="integer", suggestions=("8", "16", "32"),
-                 condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]}),
+                 condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]},
+                 is_listing_axis=True),
         axis_def("almacenamiento", "Almacenamiento", unit="GB", source_field="almacenamiento_gb", value_type="integer", suggestions=("256", "512", "1024"),
-                 condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]}),
+                 condition={"field": "tipo_equipo", "values": ["Laptop", "Desktop", "Tablet"]},
+                 is_listing_axis=True),
         axis_def("tamano", "Tamaño", unit="in", source_field="pantalla_pulgadas", value_type="decimal", suggestions=("24", "27", "32"),
                  condition={"field": "tipo_equipo", "values": ["Monitor"]}),
     ),
     "electronics_headphones": (
-        axis_def("color", "Color", source_field="color_principal", suggestions=("Negro", "Blanco", "Azul", "Rojo")),
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            suggestions=("Negro", "Blanco", "Azul", "Rojo"),
+            is_visual=True, is_listing_axis=True,
+        ),
     ),
     "electronics_cameras": (
-        axis_def("color", "Color", source_field="color_principal", suggestions=("Negro", "Blanco", "Gris")),
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            suggestions=("Negro", "Blanco", "Gris"),
+            is_visual=True, is_listing_axis=True,
+        ),
+    ),
+    "fashion_men": (
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            is_visual=True, is_listing_axis=True,
+        ),
+        axis_def("talla", "Talla"),
+    ),
+    "fashion_women": (
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            is_visual=True, is_listing_axis=True,
+        ),
+        axis_def("talla", "Talla"),
+    ),
+    "fashion_shoes": (
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            is_visual=True, is_listing_axis=True,
+        ),
+        axis_def("talla", "Talla"),
+    ),
+    "fashion_accessories": (
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            is_visual=True, is_listing_axis=True,
+        ),
+        axis_def("talla", "Talla"),
+    ),
+    "babies_clothing": (
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            is_visual=True, is_listing_axis=True,
+        ),
+        axis_def("talla", "Talla"),
     ),
 }
 

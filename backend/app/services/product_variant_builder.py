@@ -75,6 +75,7 @@ def _axis_public_data(axis: VariantAxis, *, is_default: bool) -> dict[str, Any]:
         "value_type": axis.value_type,
         "source_field": axis.source_field,
         "is_visual": axis.is_visual,
+        "is_listing_axis": axis.is_listing_axis,
         "is_default": is_default,
         "default_for": list(axis.default_for),
         "allowed_product_types": list((axis.condition or {}).get("values", ())),
@@ -239,6 +240,7 @@ def build_variant_state(
             "enabled": False,
             "mode": "single",
             "axes": list(previous.get("axes") or []),
+            "listing_axis_keys": list(previous.get("listing_axis_keys") or []),
             "visual_axis_key": previous.get("visual_axis_key"),
             "default_variant_id": previous.get("default_variant_id"),
             "default_combination_key": previous.get("default_combination_key"),
@@ -293,6 +295,7 @@ def build_variant_state(
             "value_type": axis.value_type,
             "source_field": axis.source_field,
             "is_visual": axis.is_visual,
+            "is_listing_axis": axis.is_listing_axis,
             "values": [],
         })
     if errors:
@@ -306,6 +309,9 @@ def build_variant_state(
             "enabled": True,
             "mode": "family",
             "axes": axes,
+            "listing_axis_keys": [
+                axis["key"] for axis in axes if axis["is_listing_axis"]
+            ],
             "visual_axis_key": visual_axis["key"] if visual_axis else None,
             "default_variant_id": None,
             "default_combination_key": None,
@@ -506,6 +512,9 @@ def build_variant_state(
         "enabled": True,
         "mode": "family",
         "axes": axes,
+        "listing_axis_keys": [
+            axis["key"] for axis in axes if axis["is_listing_axis"]
+        ],
         "visual_axis_key": visual_axis["key"] if visual_axis else None,
         "default_variant_id": requested_default_id or None,
         "default_combination_key": default_variant["combination_key"] if default_variant else None,

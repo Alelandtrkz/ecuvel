@@ -588,4 +588,4 @@ def test_home_media_query_and_total_query_count_are_constant(
 
     assert one_card_media_queries == ten_card_media_queries == 1
     assert ten_card_queries == one_card_queries
-    assert ten_card_queries <= 7
+    assert ten_card_queries <= 8

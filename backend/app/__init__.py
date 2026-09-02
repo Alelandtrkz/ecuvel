@@ -67,6 +67,7 @@ def create_app() -> Flask:
     from app.commands.payment_notifications import payment_notifications_command
     from app.commands.product_media import product_media_command
     from app.commands.product_offers import product_offers_command
+    from app.commands.catalog_ranking import catalog_ranking_command
     from app.blueprints.auth import auth
     from app.blueprints.account import account
     from app.blueprints.partners import partners
@@ -122,6 +123,7 @@ def create_app() -> Flask:
     app.cli.add_command(payment_notifications_command)
     app.cli.add_command(product_media_command)
     app.cli.add_command(product_offers_command)
+    app.cli.add_command(catalog_ranking_command)
 
     app.register_blueprint(auth)
     app.register_blueprint(account)

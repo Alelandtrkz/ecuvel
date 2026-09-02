@@ -10,9 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Category, Favorite, Product, ProductVariant, SellerOffer, Store
-from app.models.enums import OfferStatus, StoreStatus
-from app.services.inventory import get_sellable_quantities_for_offers
+from app.models import Category, Favorite, Product
+from app.services.catalog_listings import PublicListing, load_public_listings
 
 
 class FavoriteServiceError(Exception):
@@ -43,6 +42,9 @@ class FavoriteListItem:
     created_at: Any
     offer_id: uuid.UUID | None
     variant_id: uuid.UUID | None
+    catalog_sku: str | None
+    listing_key: str | None
+    listing_label: str | None
     price: Decimal | None
     compare_at_price: Decimal | None
     currency: str | None
@@ -91,55 +93,13 @@ def normalize_favorites_page(value: str | None) -> int:
     return max(1, page)
 
 
-def _canonical_offers_subquery():
-    return (
-        select(
-            Product.id.label("product_id"),
-            SellerOffer.id.label("offer_id"),
-            ProductVariant.id.label("variant_id"),
-            SellerOffer.currency.label("currency"),
-            SellerOffer.price.label("price"),
-            SellerOffer.compare_at_price.label("compare_at_price"),
-            SellerOffer.preparation_time_days.label(
-                "preparation_time_days"
-            ),
-            func.row_number()
-            .over(
-                partition_by=Product.id,
-                order_by=(SellerOffer.price, SellerOffer.id),
-            )
-            .label("offer_rank"),
-        )
-        .select_from(SellerOffer)
-        .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
-        .join(Product, Product.id == ProductVariant.product_id)
-        .join(Category, Category.id == Product.category_id)
-        .join(Store, Store.id == SellerOffer.store_id)
-        .where(
-            SellerOffer.status == OfferStatus.ACTIVE,
-            SellerOffer.currency == "USD",
-            ProductVariant.is_active.is_(True),
-            Product.is_active.is_(True),
-            Category.is_active.is_(True),
-            Store.status == StoreStatus.ACTIVE,
-        )
-        .subquery()
-    )
-
-
 def _public_product_by_slug(session: Session, product_slug: str) -> Product | None:
-    canonical_offers = _canonical_offers_subquery()
-    return session.scalar(
-        select(Product)
-        .join(
-            canonical_offers,
-            canonical_offers.c.product_id == Product.id,
-        )
-        .where(
-            Product.slug == product_slug,
-            canonical_offers.c.offer_rank == 1,
-        )
+    product = session.scalar(
+        select(Product).where(Product.slug == product_slug)
     )
+    if product is None:
+        return None
+    return product if load_public_listings(session, product_id=product.id) else None
 
 
 def favorite_count_for_user(session: Session, user_id: uuid.UUID) -> int:
@@ -263,7 +223,6 @@ def get_favorites_page(
     total_pages = max(1, ceil(total_items / page_size))
     page = min(page, total_pages)
 
-    canonical_offers = _canonical_offers_subquery()
     rows = session.execute(
         select(
             Favorite.id.label("favorite_id"),
@@ -273,52 +232,25 @@ def get_favorites_page(
             Product.title.label("product_title"),
             Product.is_active.label("product_is_active"),
             Category.is_active.label("category_is_active"),
-            canonical_offers.c.offer_id,
-            canonical_offers.c.variant_id,
-            canonical_offers.c.price,
-            canonical_offers.c.compare_at_price,
-            canonical_offers.c.currency,
-            canonical_offers.c.preparation_time_days,
         )
         .select_from(Favorite)
         .join(Product, Product.id == Favorite.product_id)
         .join(Category, Category.id == Product.category_id)
-        .outerjoin(
-            canonical_offers,
-            (canonical_offers.c.product_id == Product.id)
-            & (canonical_offers.c.offer_rank == 1),
-        )
         .where(Favorite.user_id == user_id)
         .order_by(Favorite.created_at.desc(), Favorite.id.desc())
         .limit(page_size)
         .offset((page - 1) * page_size)
     ).all()
-
-    offer_ids = {row.offer_id for row in rows if row.offer_id is not None}
-    availability = get_sellable_quantities_for_offers(
-        session=session,
-        offer_ids=offer_ids,
-    )
+    listings_by_product: dict[uuid.UUID, list[PublicListing]] = {}
+    for listing in load_public_listings(
+        session,
+        product_ids={row.product_id for row in rows},
+    ):
+        listings_by_product.setdefault(listing.product_id, []).append(listing)
     items = tuple(
-        FavoriteListItem(
-            favorite_id=row.favorite_id,
-            product_id=row.product_id,
-            product_slug=row.product_slug,
-            product_title=row.product_title,
-            product_is_active=row.product_is_active,
-            category_is_active=row.category_is_active,
-            created_at=row.created_at,
-            offer_id=row.offer_id,
-            variant_id=row.variant_id,
-            price=row.price,
-            compare_at_price=row.compare_at_price,
-            currency=row.currency,
-            preparation_time_days=row.preparation_time_days,
-            available_quantity=(
-                max(0, availability.get(row.offer_id, 0))
-                if row.offer_id is not None
-                else 0
-            ),
+        _favorite_item_from_row(
+            row,
+            _favorite_representative(listings_by_product.get(row.product_id, [])),
         )
         for row in rows
     )
@@ -328,4 +260,48 @@ def get_favorites_page(
         page_size=page_size,
         total_items=total_items,
         total_pages=total_pages,
+    )
+
+
+def _favorite_representative(
+    listings: list[PublicListing],
+) -> PublicListing | None:
+    if not listings:
+        return None
+    available = [listing for listing in listings if listing.is_available]
+    pool = available or listings
+    default_key = str(
+        (listings[0].variant_configuration or {}).get("default_combination_key")
+        or ""
+    )
+    if default_key:
+        default_groups = [
+            listing
+            for listing in pool
+            if any(member.combination_key == default_key for member in listing.members)
+        ]
+        if default_groups:
+            return min(default_groups, key=lambda listing: listing.listing_key)
+    return min(pool, key=lambda listing: listing.listing_key)
+
+
+def _favorite_item_from_row(row, listing: PublicListing | None) -> FavoriteListItem:
+    return FavoriteListItem(
+        favorite_id=row.favorite_id,
+        product_id=row.product_id,
+        product_slug=row.product_slug,
+        product_title=row.product_title,
+        product_is_active=row.product_is_active,
+        category_is_active=row.category_is_active,
+        created_at=row.created_at,
+        offer_id=listing.offer_id if listing else None,
+        variant_id=listing.variant_id if listing else None,
+        catalog_sku=listing.catalog_sku if listing else None,
+        listing_key=listing.listing_key if listing else None,
+        listing_label=listing.listing_label if listing else None,
+        price=listing.price if listing else None,
+        compare_at_price=listing.compare_at_price if listing else None,
+        currency=listing.currency if listing else None,
+        preparation_time_days=(listing.preparation_time_days if listing else None),
+        available_quantity=(listing.available_quantity if listing else 0),
     )

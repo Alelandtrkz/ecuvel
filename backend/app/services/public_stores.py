@@ -4,13 +4,13 @@ import math
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
-
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Category, Product, ProductVariant, SellerOffer, Store
-from app.models.enums import OfferStatus, StoreStatus
+from app.models import Store
+from app.models.enums import StoreStatus
+from app.services.catalog_listings import PublicListing, load_public_listings
+from app.services.catalog_ranking import SURFACE_STORE, rank_listings_v1
 from app.services.public_identifiers import format_store_code
 from app.services.product_reviews import review_stats_for_store_ids
 
@@ -51,28 +51,9 @@ class StoreProductsSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class StoreProductRow:
-    product_id: uuid.UUID
-    product_slug: str
-    product_title: str
-    variant_id: uuid.UUID
-    variant_title: str | None
-    seller_sku: str
-    offer_id: uuid.UUID
-    currency: str
-    price: Decimal
-    compare_at_price: Decimal | None
-    preparation_time_days: int | None
-    store_id: uuid.UUID
-    store_name: str
-    store_slug: str
-    store_is_verified: bool
-
-
-@dataclass(frozen=True, slots=True)
 class PublicStoreProductsPage:
     store: PublicStoreView
-    rows: tuple[StoreProductRow, ...]
+    rows: tuple[PublicListing, ...]
     page: int
     page_size: int
     total_items: int
@@ -124,25 +105,17 @@ def get_public_store_products_page(
         return None
 
     normalized_page = normalize_store_page(page)
-    products_subquery = _store_canonical_products_subquery(store.id)
-    total_items = session.scalar(
-        select(func.count()).select_from(products_subquery).where(
-            products_subquery.c.offer_rank == 1
-        )
-    ) or 0
+    listings = rank_listings_v1(
+        load_public_listings(session, store_id=store.id),
+        surface=SURFACE_STORE,
+        context=store.slug,
+    )
+    total_items = len(listings)
     total_pages = max(1, math.ceil(total_items / page_size))
     normalized_page = min(normalized_page, total_pages)
 
-    rows = session.execute(
-        select(products_subquery)
-        .where(products_subquery.c.offer_rank == 1)
-        .order_by(
-            products_subquery.c.product_title,
-            products_subquery.c.product_id,
-        )
-        .offset((normalized_page - 1) * page_size)
-        .limit(page_size)
-    ).all()
+    start = (normalized_page - 1) * page_size
+    rows = listings[start : start + page_size]
     rating = _rating_summary_for_store(session, store.id)
     return PublicStoreProductsPage(
         store=_public_store_view(
@@ -150,7 +123,7 @@ def get_public_store_products_page(
             product_count=total_items,
             rating=rating,
         ),
-        rows=tuple(_row_from_sql(row) for row in rows),
+        rows=tuple(rows),
         page=normalized_page,
         page_size=page_size,
         total_items=total_items,
@@ -219,6 +192,7 @@ def _active_store_by_slug(session: Session, store_slug: str) -> Store | None:
         select(Store).where(
             Store.slug == store_slug,
             Store.status == StoreStatus.ACTIVE,
+            Store.is_verified.is_(True),
         )
     )
 
@@ -268,76 +242,7 @@ def _rating_summary_for_store(
 
 
 def _public_product_count(session: Session, store_id: uuid.UUID) -> int:
-    products_subquery = _store_canonical_products_subquery(store_id)
-    return session.scalar(
-        select(func.count()).select_from(products_subquery).where(
-            products_subquery.c.offer_rank == 1
-        )
-    ) or 0
-
-
-def _store_canonical_products_subquery(store_id: uuid.UUID):
-    return (
-        select(
-            Product.id.label("product_id"),
-            Product.slug.label("product_slug"),
-            Product.title.label("product_title"),
-            ProductVariant.id.label("variant_id"),
-            ProductVariant.title.label("variant_title"),
-            SellerOffer.seller_sku.label("seller_sku"),
-            SellerOffer.id.label("offer_id"),
-            SellerOffer.currency.label("currency"),
-            SellerOffer.price.label("price"),
-            SellerOffer.compare_at_price.label("compare_at_price"),
-            SellerOffer.preparation_time_days.label(
-                "preparation_time_days"
-            ),
-            Store.id.label("store_id"),
-            Store.name.label("store_name"),
-            Store.slug.label("store_slug"),
-            Store.is_verified.label("store_is_verified"),
-            func.row_number()
-            .over(
-                partition_by=Product.id,
-                order_by=(SellerOffer.price, SellerOffer.id),
-            )
-            .label("offer_rank"),
-        )
-        .select_from(SellerOffer)
-        .join(Store, Store.id == SellerOffer.store_id)
-        .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
-        .join(Product, Product.id == ProductVariant.product_id)
-        .join(Category, Category.id == Product.category_id)
-        .where(
-            Store.id == store_id,
-            Store.status == StoreStatus.ACTIVE,
-            SellerOffer.status == OfferStatus.ACTIVE,
-            ProductVariant.is_active.is_(True),
-            Product.is_active.is_(True),
-            Category.is_active.is_(True),
-        )
-        .subquery()
-    )
-
-
-def _row_from_sql(row: Any) -> StoreProductRow:
-    return StoreProductRow(
-        product_id=row.product_id,
-        product_slug=row.product_slug,
-        product_title=row.product_title,
-        variant_id=row.variant_id,
-        variant_title=row.variant_title,
-        seller_sku=row.seller_sku,
-        offer_id=row.offer_id,
-        currency=row.currency,
-        price=row.price,
-        compare_at_price=row.compare_at_price,
-        preparation_time_days=row.preparation_time_days,
-        store_id=row.store_id,
-        store_name=row.store_name,
-        store_slug=row.store_slug,
-        store_is_verified=row.store_is_verified,
-    )
+    return len(load_public_listings(session, store_id=store_id))
 
 
 def _logo_initial(name: str) -> str:
