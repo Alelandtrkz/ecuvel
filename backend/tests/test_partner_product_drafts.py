@@ -345,6 +345,72 @@ def test_product_draft_form_removes_highlights_and_package_content_section(clien
     assert "Capacidad de batería en miliamperios-hora." in html
 
 
+def test_preparation_time_input_preserves_h3_number_contract(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    html = client.get(f"/partners/products/drafts/{draft.id}").get_data(
+        as_text=True
+    )
+    assert 'name="preparation_time_days" type="number"' in html
+    assert 'min="1" max="2" step="1"' in html
+    assert "1 o 2 días" in html
+
+
+@pytest.mark.parametrize("value", ("1", "2"))
+def test_draft_save_normalizes_valid_preparation_time_to_integer(
+    client, session, value
+):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={"preparation_time_days": value},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    session.expire_all()
+    stored = session.get(ProductDraft, draft.id).inventory_data[
+        "preparation_time_days"
+    ]
+    assert stored == int(value)
+    assert isinstance(stored, int)
+
+
+@pytest.mark.parametrize("value", ("0", "3", "-1", "1.5", "abc", " 1 "))
+def test_draft_save_rejects_invalid_preparation_time(
+    client, session, value
+):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={"preparation_time_days": value},
+    )
+    assert response.status_code == 400
+    assert "Selecciona un tiempo de preparación de 1 o 2 días" in (
+        response.get_data(as_text=True)
+    )
+
+
+def test_incomplete_draft_can_save_missing_preparation_time(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={"preparation_time_days": ""},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    session.expire_all()
+    assert session.get(ProductDraft, draft.id).inventory_data[
+        "preparation_time_days"
+    ] is None
+
+
 def test_family_variants_do_not_write_default_values_or_inventory_to_mother(client, session):
     user = _user(session)
     _enabled_store(session, user)
@@ -584,6 +650,7 @@ def test_create_and_save_draft_without_public_product_rows(client, session):
             "attributes[resolucion_mp]": "4",
             "price": "45.00",
             "stock_quantity": "5",
+            "preparation_time_days": "1",
             "product_weight_kg": "0.5",
         },
         follow_redirects=False,
@@ -623,6 +690,7 @@ def test_removed_fields_are_ignored_and_legacy_values_are_preserved(client, sess
             "attributes[resolucion_mp]": "4",
             "price": "45.00",
             "stock_quantity": "5",
+            "preparation_time_days": "2",
             "product_weight_kg": "0.5",
             "highlights[]": ["Valor manipulado"],
             "package_quantity[]": ["1"],
@@ -652,6 +720,9 @@ def test_submit_incomplete_draft_is_rejected(client, session):
 
     assert response.status_code == 400
     assert "Carga al menos 3" in response.get_data(as_text=True)
+    assert "Selecciona un tiempo de preparación de 1 o 2 días" in (
+        response.get_data(as_text=True)
+    )
     session.expire_all()
     assert session.get(ProductDraft, draft.id).status != ProductDraftStatus.SUBMITTED
 
@@ -682,6 +753,7 @@ def test_valid_draft_submits_without_highlights_or_package_contents(client, sess
             "attributes[resolucion_mp]": "4",
             "price": "45.00",
             "stock_quantity": "5",
+            "preparation_time_days": "1",
             "product_weight_kg": "0.5",
         },
         follow_redirects=False,
@@ -731,11 +803,20 @@ def test_saved_draft_can_be_submitted_from_summary_without_creating_catalog_rows
             "attributes[resolucion_mp]": "4",
             "price": "45.00",
             "stock_quantity": "5",
+            "preparation_time_days": "2",
             "product_weight_kg": "0.5",
         },
         follow_redirects=False,
     )
     assert saved.status_code == 302
+
+    session.expire_all()
+    persisted = session.get(ProductDraft, draft.id)
+    persisted.inventory_data = {
+        **persisted.inventory_data,
+        "preparation_time_days": "2",
+    }
+    session.commit()
 
     summary = client.get(f"/partners/products/drafts/{draft.id}/preview")
     summary_html = summary.get_data(as_text=True)
@@ -752,6 +833,8 @@ def test_saved_draft_can_be_submitted_from_summary_without_creating_catalog_rows
     session.expire_all()
     submitted = session.get(ProductDraft, draft.id)
     assert submitted.status == ProductDraftStatus.SUBMITTED
+    assert submitted.inventory_data["preparation_time_days"] == 2
+    assert isinstance(submitted.inventory_data["preparation_time_days"], int)
     assert submitted.completion_percentage == 100
     assert session.scalar(select(func.count()).select_from(Product)) == 0
     assert session.scalar(select(func.count()).select_from(ProductVariant)) == 0

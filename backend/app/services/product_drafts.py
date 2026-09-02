@@ -47,6 +47,11 @@ from app.services.marketplace_policy import (
     ResolvedSellerCommission,
     resolve_marketplace_commission,
 )
+from app.services.offer_preparation import (
+    OfferPreparationValidationError,
+    normalize_preparation_time_days,
+    preparation_time_from_inventory,
+)
 from app.services.product_variant_builder import (
     available_variant_axes,
     build_variant_state,
@@ -863,6 +868,13 @@ def calculate_checklist(
     attrs_complete = all(not _is_empty(draft.attributes.get(item.key)) for item in required_attrs)
     price = _decimal_or_none(draft.pricing_data.get("price"))
     stock = _int_or_none(draft.inventory_data.get("stock_quantity"))
+    try:
+        preparation_time = preparation_time_from_inventory(
+            draft.inventory_data,
+            required=False,
+        )
+    except OfferPreparationValidationError:
+        preparation_time = None
     required_docs_complete = all(
         any(item.document_type == doc for item in document_files)
         for doc in template.required_documents
@@ -877,6 +889,7 @@ def calculate_checklist(
         ChecklistItem("variants", "Variantes", _variants_complete(draft), "Configura variantes o usa la oferta única."),
         ChecklistItem("price", "Precio", _variants_complete(draft) if family_enabled else price is not None and price > 0, "Define precios vÃ¡lidos."),
         ChecklistItem("stock", "Stock", _variants_complete(draft) if family_enabled else stock is not None and stock >= 0, "Define stock inicial."),
+        ChecklistItem("preparation_time", "Preparación", preparation_time is not None, "Selecciona 1 o 2 días."),
         ChecklistItem("dimensions", "Dimensiones", bool(draft.dimensions_data.get("product_weight_kg")), "Agrega peso y dimensiones básicas."),
         ChecklistItem("documents", "Documentación", required_docs_complete, "Agrega documentos requeridos.", optional=not template.required_documents),
     )
@@ -917,11 +930,19 @@ def _apply_form_to_draft(draft: ProductDraft, template: ProductTemplate, form: M
         "compare_at_price": _clean_text(form.get("compare_at_price"), 40),
         "currency": "USD",
     }
+    try:
+        preparation_time_days = normalize_preparation_time_days(
+            form.get("preparation_time_days"),
+            required=final,
+        )
+    except OfferPreparationValidationError as exc:
+        preparation_time_days = None
+        errors["preparation_time_days"] = str(exc)
     draft.inventory_data = {
         "stock_quantity": _clean_text(form.get("stock_quantity"), 20),
         "stock_minimum": _clean_text(form.get("stock_minimum"), 20),
         "max_per_buyer": _clean_text(form.get("max_per_buyer"), 20),
-        "preparation_time_days": _clean_text(form.get("preparation_time_days"), 20),
+        "preparation_time_days": preparation_time_days,
         "availability_mode": _clean_text(form.get("availability_mode"), 40) or "immediate",
     }
     draft.dimensions_data = {
@@ -1031,6 +1052,17 @@ def _validate_final_requirements(draft: ProductDraft, template: ProductTemplate)
         errors["price"] = MINIMUM_PRICE_MESSAGE
     if not family_enabled and (stock is None or stock < 0):
         errors["stock_quantity"] = "El stock debe ser un entero no negativo."
+    try:
+        preparation_time_days = preparation_time_from_inventory(
+            draft.inventory_data,
+            required=True,
+        )
+    except OfferPreparationValidationError as exc:
+        errors["preparation_time_days"] = str(exc)
+    else:
+        inventory_data = dict(draft.inventory_data or {})
+        inventory_data["preparation_time_days"] = preparation_time_days
+        draft.inventory_data = inventory_data
     if not draft.dimensions_data.get("product_weight_kg"):
         errors["product_weight_kg"] = "El peso del producto es obligatorio."
     for required_doc in template.required_documents:

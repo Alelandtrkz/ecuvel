@@ -8,7 +8,7 @@
     <strong data-variant-price>{{ "Precio pendiente" if product.price_pending|default(false) else product.current_price|money(product.currency) }}</strong>
     <del data-variant-compare-price {% if not product.compare_at_price %}hidden{% endif %}>{{ product.compare_at_price|money(product.currency) if product.compare_at_price else '' }}</del>
   </div>
-  <p class="purchase-card__delivery"><i data-lucide="truck" aria-hidden="true"></i> Información de entrega próximamente</p>
+  <p class="purchase-card__delivery"><i data-lucide="truck" aria-hidden="true"></i> <span data-variant-delivery-label>{{ product.delivery_label }}</span></p>
 
   {% if preview_mode %}
   <div class="purchase-card__cart-form" data-cart-add-form data-max-quantity="{{ product.max_quantity }}">

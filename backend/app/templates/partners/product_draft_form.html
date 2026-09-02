@@ -442,7 +442,9 @@
           </label>
           <label class="partner-draft-field">
             <span>Preparación (días)</span>
-            <input form="partner-product-draft-form" name="preparation_time_days" value="{{ inventory.get('preparation_time_days', '') }}" placeholder="1">
+            <input form="partner-product-draft-form" name="preparation_time_days" type="number" min="1" max="2" step="1" value="{{ inventory.get('preparation_time_days', '') if inventory.get('preparation_time_days') is not none else '' }}" placeholder="1">
+            <small>1 o 2 días</small>
+            {% if errors.preparation_time_days %}<em class="partner-error">{{ errors.preparation_time_days }}</em>{% endif %}
           </label>
         </div>
       </section>

@@ -577,6 +577,11 @@ def publication_payload_from_draft(draft: Any) -> dict[str, Any]:
             "description": draft.description,
             "variant_configuration": configuration,
         },
+        "offer": {
+            "preparation_time_days": (getattr(draft, "inventory_data", None) or {}).get(
+                "preparation_time_days"
+            ),
+        },
         "variants": [
             dict(row) for row in (draft.variants or []) if row.get("enabled", True)
         ] if family_enabled else [],

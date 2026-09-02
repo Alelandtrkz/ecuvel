@@ -77,6 +77,10 @@ from app.services.customer_orders import (
     normalize_orders_filter,
     normalize_page,
 )
+from app.services.delivery_eta import (
+    delivery_eta_compact_label,
+    delivery_eta_full_label,
+)
 from app.services.favorites import (
     FavoriteListItem,
     FavoriteProductNotFoundError,
@@ -226,6 +230,7 @@ class ProductDetailViewModel:
     quantity_limit_reached: bool
     low_stock: bool
     availability_message: str
+    delivery_label: str
     is_favorite: bool
     variant_payload: dict[str, Any]
 
@@ -393,6 +398,9 @@ def _canonical_offers_subquery():
             SellerOffer.currency.label("currency"),
             SellerOffer.price.label("price"),
             SellerOffer.compare_at_price.label("compare_at_price"),
+            SellerOffer.preparation_time_days.label(
+                "preparation_time_days"
+            ),
             SellerOffer.status.label("offer_status"),
             Store.id.label("store_id"),
             Store.name.label("store_name"),
@@ -444,6 +452,23 @@ def _visible_compare_at_price(row: Any) -> Decimal | None:
     if compare_at_price is None or compare_at_price <= row.price:
         return None
     return compare_at_price
+
+
+DELIVERY_INFORMATION_FALLBACK = "Información de entrega próximamente"
+
+
+def _compact_delivery_label(preparation_time_days: int | None) -> str:
+    return (
+        delivery_eta_compact_label(preparation_time_days)
+        or DELIVERY_INFORMATION_FALLBACK
+    )
+
+
+def _full_delivery_label(preparation_time_days: int | None) -> str:
+    return (
+        delivery_eta_full_label(preparation_time_days)
+        or DELIVERY_INFORMATION_FALLBACK
+    )
 
 
 def _favorite_ids_for_product_ids(product_ids: set[uuid.UUID]) -> set[uuid.UUID]:
@@ -522,7 +547,9 @@ def _card_from_row(
         review_count=review_stats.count if review_stats else None,
         is_favorite=row.product_id in (favorite_product_ids or set()),
         delivery_label=(
-            "Información de entrega próximamente"
+            _compact_delivery_label(
+                getattr(row, "preparation_time_days", None)
+            )
             if is_available
             else "Producto agotado"
         ),
@@ -633,7 +660,7 @@ def _card_from_favorite_item(
         review_count=review_stats.count if review_stats else None,
         is_favorite=True,
         delivery_label=(
-            "Información de entrega próximamente"
+            _compact_delivery_label(item.preparation_time_days)
             if item.is_available
             else "Producto no disponible"
         ),
@@ -742,6 +769,9 @@ def _build_variant_payload(
             "low_stock": low_stock,
             "availability_label": availability_label,
             "availability_message": availability_message,
+            "delivery_label": _full_delivery_label(
+                row.preparation_time_days
+            ),
             "images": list(_media_urls_for_variant(product=product, attributes=row.variant_attributes or {})),
         })
     return {
@@ -2748,6 +2778,7 @@ def product_detail(product_slug: str) -> str:
         quantity_limit_reached=(is_available and max_quantity == 1),
         low_stock=low_stock,
         availability_message=availability_message,
+        delivery_label=_full_delivery_label(row.preparation_time_days),
         is_favorite=row.product_id in favorite_ids,
         variant_payload=_build_variant_payload(
             product=product_record,

@@ -138,6 +138,37 @@ def test_public_store_page_renders_active_store_and_dialog_chips(client, session
     assert f'href="/tiendas/{store.slug}/calificacion"' in html
     assert f'href="/tiendas/{store.slug}/productos/resumen"' in html
     assert html.count("data-store-dialog") >= 1
+
+
+def test_home_and_store_use_compact_eta_without_changing_delivery_cta(
+    client, session
+):
+    base, store, product = _base_store(session)
+    offer = session.get(SellerOffer, base.offer_id)
+    offer.preparation_time_days = 1
+    session.commit()
+
+    for response in (client.get("/"), client.get(f"/tiendas/{store.slug}")):
+        html = response.get_data(as_text=True)
+        assert response.status_code == 200
+        assert product.title in html
+        assert "Mañana" in html
+        assert "Entrega estimada mañana" not in html
+        assert 'class="product-card__cart-form"' in html
+        assert 'method="post"' in html
+        assert 'data-cart-add-form' in html
+        assert 'class="product-card__cart-button"' in html
+        assert 'data-lucide="shopping-basket"' in html
+
+    offer.preparation_time_days = 2
+    session.commit()
+    assert "Pasado mañana" in client.get("/").get_data(as_text=True)
+
+    offer.preparation_time_days = None
+    session.commit()
+    assert "Información de entrega próximamente" in client.get(
+        "/"
+    ).get_data(as_text=True)
     assert "Catálogo de la tienda" in html
     assert "Product Test" in html
 

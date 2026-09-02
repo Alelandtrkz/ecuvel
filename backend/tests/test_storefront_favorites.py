@@ -165,6 +165,7 @@ def test_favorites_require_login_for_page_and_mutation(client, session):
 def test_routes_add_remove_json_and_render_page(client, session):
     base = create_catalog_and_stock(session)
     product = _product(session, base)
+    session.get(SellerOffer, base.offer_id).preparation_time_days = 2
     _user(session)
     session.commit()
     assert _login(client).status_code == 302
@@ -185,6 +186,7 @@ def test_routes_add_remove_json_and_render_page(client, session):
     html = page.get_data(as_text=True)
     assert product.title in html
     assert "Mis favoritos" in html
+    assert "Pasado mañana" in html
     assert "preparación" not in html
 
     response = client.post(

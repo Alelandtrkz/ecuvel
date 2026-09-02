@@ -345,6 +345,11 @@ class SellerOffer(
         nullable=True,
     )
 
+    preparation_time_days: Mapped[int | None] = mapped_column(
+        SmallInteger,
+        nullable=True,
+    )
+
     commission_rate: Mapped[Decimal] = mapped_column(
         Numeric(5, 2),
         nullable=False,
@@ -430,6 +435,11 @@ class SellerOffer(
         CheckConstraint(
             "commission_currency = 'USD'",
             name="seller_offer_commission_currency_valid",
+        ),
+        CheckConstraint(
+            "preparation_time_days IS NULL "
+            "OR preparation_time_days BETWEEN 1 AND 2",
+            name="seller_offer_preparation_time_valid",
         ),
     )
 

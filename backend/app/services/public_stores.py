@@ -62,6 +62,7 @@ class StoreProductRow:
     currency: str
     price: Decimal
     compare_at_price: Decimal | None
+    preparation_time_days: int | None
     store_id: uuid.UUID
     store_name: str
     store_slug: str
@@ -288,6 +289,9 @@ def _store_canonical_products_subquery(store_id: uuid.UUID):
             SellerOffer.currency.label("currency"),
             SellerOffer.price.label("price"),
             SellerOffer.compare_at_price.label("compare_at_price"),
+            SellerOffer.preparation_time_days.label(
+                "preparation_time_days"
+            ),
             Store.id.label("store_id"),
             Store.name.label("store_name"),
             Store.slug.label("store_slug"),
@@ -328,6 +332,7 @@ def _row_from_sql(row: Any) -> StoreProductRow:
         currency=row.currency,
         price=row.price,
         compare_at_price=row.compare_at_price,
+        preparation_time_days=row.preparation_time_days,
         store_id=row.store_id,
         store_name=row.store_name,
         store_slug=row.store_slug,

@@ -9,6 +9,11 @@ from flask import url_for
 
 from app.models import ProductDraft, ProductDraftFile
 from app.services.cart import CART_LOW_STOCK_THRESHOLD, MAX_CART_QUANTITY
+from app.services.delivery_eta import delivery_eta_full_label
+from app.services.offer_preparation import (
+    OfferPreparationValidationError,
+    preparation_time_from_inventory,
+)
 from app.services.product_drafts import ChecklistItem, ProductDraftView
 from app.services.product_variant_builder import family_variants_enabled
 
@@ -63,6 +68,7 @@ class DraftPreviewProduct:
     quantity_limit_reached: bool
     low_stock: bool
     availability_message: str
+    delivery_label: str
     is_favorite: bool
     variant_payload: dict[str, Any]
     price_pending: bool
@@ -104,6 +110,20 @@ def _integer(value: Any) -> int | None:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return None
+
+
+def _draft_delivery_label(draft: ProductDraft) -> str:
+    try:
+        preparation_time = preparation_time_from_inventory(
+            draft.inventory_data,
+            required=False,
+        )
+    except OfferPreparationValidationError:
+        preparation_time = None
+    return (
+        delivery_eta_full_label(preparation_time)
+        or "Información de entrega próximamente"
+    )
 
 
 def _availability(stock: int | None) -> tuple[int, bool, str, str, bool]:
@@ -261,6 +281,7 @@ def _variant_payload(
     media_endpoint: str,
 ) -> dict[str, Any]:
     variants: list[dict[str, Any]] = []
+    delivery_label = _draft_delivery_label(view.draft)
     for row in rows:
         stock = _integer(row.get("stock"))
         maximum, low_stock, label, message, stock_pending = _availability(stock)
@@ -286,6 +307,7 @@ def _variant_payload(
             "low_stock": low_stock,
             "availability_label": label,
             "availability_message": message,
+            "delivery_label": delivery_label,
             "stock_pending": stock_pending,
             "images": [image.url for image in images],
         })
@@ -392,6 +414,7 @@ def build_product_draft_preview(
         quantity_limit_reached=maximum == 1,
         low_stock=low_stock,
         availability_message=availability_message,
+        delivery_label=_draft_delivery_label(draft),
         is_favorite=False,
         variant_payload=payload,
         price_pending=price is None,

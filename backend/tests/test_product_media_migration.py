@@ -16,6 +16,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "b8c9d0e1f2a3"
 H2_HEAD = "c9d0e1f2a3b4"
+CURRENT_HEAD = "da1b2c3d4e5f"
 H2_COLUMNS = {
     "content_sha256",
     "thumbnail_storage_key",
@@ -109,8 +110,8 @@ def test_h2_upgrade_preserves_legacy_identity_and_adds_nullable_metadata(
         assert not (H2_COLUMNS & _columns(engine))
         _migrate(app, H2_HEAD)
     finally:
-        if _version(engine) != H2_HEAD:
-            _migrate(app, H2_HEAD)
+        if _version(engine) != CURRENT_HEAD:
+            _migrate(app, "head")
 
 
 def test_h2_constraints_reject_partial_or_invalid_derivative_metadata(
@@ -157,7 +158,7 @@ def test_h2_downgrade_fails_closed_when_verified_derivatives_exist(
     with pytest.raises(SystemExit) as blocked:
         _migrate(app, PREVIOUS_HEAD, down=True)
     assert blocked.value.code == 1
-    assert _version(engine) == H2_HEAD
+    assert _version(engine) == CURRENT_HEAD
     assert H2_COLUMNS <= _columns(engine)
 
 
@@ -168,9 +169,9 @@ def test_fresh_database_upgrades_from_base_to_h2_head(app, engine, session):
         with engine.connect() as connection:
             tables = set(inspect(connection).get_table_names())
         assert "product_media" not in tables
-        _migrate(app, "head")
+        _migrate(app, H2_HEAD)
         assert _version(engine) == H2_HEAD
         assert H2_COLUMNS <= _columns(engine)
     finally:
-        if _version(engine) != H2_HEAD:
+        if _version(engine) != CURRENT_HEAD:
             _migrate(app, "head")

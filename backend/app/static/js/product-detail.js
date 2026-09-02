@@ -408,6 +408,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const compare = document.querySelector("[data-variant-compare-price]");
       const availability = document.querySelector("[data-variant-availability]");
       const availabilityLabel = document.querySelector("[data-variant-availability-label]");
+      const deliveryLabel = document.querySelector("[data-variant-delivery-label]");
       const offerInput = document.querySelector("[data-variant-offer-id]");
       const stockMessage = document.querySelector("[data-stock-message]");
       const addButton = document.querySelector("[data-cart-add-form] .purchase-card__add");
@@ -426,6 +427,7 @@ document.addEventListener("DOMContentLoaded", () => {
         availability.classList.toggle("purchase-card__availability--unavailable", !variant.is_available);
       }
       if (availabilityLabel) availabilityLabel.textContent = variant.availability_label;
+      if (deliveryLabel) deliveryLabel.textContent = variant.delivery_label;
       if (offerInput) offerInput.value = variant.offer_id;
       if (stockMessage) {
         stockMessage.textContent = variant.availability_message;

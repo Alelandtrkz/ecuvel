@@ -46,6 +46,7 @@ class FavoriteListItem:
     price: Decimal | None
     compare_at_price: Decimal | None
     currency: str | None
+    preparation_time_days: int | None
     available_quantity: int
 
     @property
@@ -99,6 +100,9 @@ def _canonical_offers_subquery():
             SellerOffer.currency.label("currency"),
             SellerOffer.price.label("price"),
             SellerOffer.compare_at_price.label("compare_at_price"),
+            SellerOffer.preparation_time_days.label(
+                "preparation_time_days"
+            ),
             func.row_number()
             .over(
                 partition_by=Product.id,
@@ -274,6 +278,7 @@ def get_favorites_page(
             canonical_offers.c.price,
             canonical_offers.c.compare_at_price,
             canonical_offers.c.currency,
+            canonical_offers.c.preparation_time_days,
         )
         .select_from(Favorite)
         .join(Product, Product.id == Favorite.product_id)
@@ -308,6 +313,7 @@ def get_favorites_page(
             price=row.price,
             compare_at_price=row.compare_at_price,
             currency=row.currency,
+            preparation_time_days=row.preparation_time_days,
             available_quantity=(
                 max(0, availability.get(row.offer_id, 0))
                 if row.offer_id is not None

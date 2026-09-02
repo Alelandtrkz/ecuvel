@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from flask import render_template_string
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.extensions import db
@@ -105,6 +106,7 @@ def test_product_detail_returns_200(client, session: Session):
     variant.attributes = {"resolution": "4 MP"}
     offer.price = Decimal("45.00")
     offer.compare_at_price = Decimal("60.00")
+    offer.preparation_time_days = 1
     session.commit()
 
     product_updated_at = product.updated_at
@@ -116,6 +118,10 @@ def test_product_detail_returns_200(client, session: Session):
     assert "<h1" in body
     assert "Cámara de prueba" in body
     assert "$45.00" in body
+    assert "Entrega estimada mañana" in body
+    assert 'class="purchase-card__delivery"' in body
+    assert 'data-lucide="truck"' in body
+    assert 'data-variant-delivery-label' in body
     assert "Store " in body
     assert "Category Test" in body
     assert f'/productos/{product.slug}' in client.get("/").get_data(
@@ -136,11 +142,57 @@ def test_product_detail_returns_200(client, session: Session):
     ) == balance_snapshot
 
 
+def test_product_detail_recommendations_use_compact_offer_eta(
+    client, session: Session
+):
+    base = create_catalog_and_stock(session, stock=8)
+    product, _variant, selected_offer = _catalog_entities(session, base)
+    selected_offer.preparation_time_days = 1
+    recommended_product = _create_product_offer(
+        session,
+        base,
+        category_id=product.category_id,
+        title="Recommended ETA product",
+    )
+    recommended_offer = session.scalar(
+        select(SellerOffer)
+        .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
+        .where(ProductVariant.product_id == recommended_product.id)
+    )
+    assert recommended_offer is not None
+    recommended_offer.preparation_time_days = 2
+    session.add(InventoryBalance(
+        offer_id=recommended_offer.id,
+        location_id=base.storage_location_id,
+        on_hand_quantity=4,
+        reserved_quantity=0,
+        blocked_quantity=0,
+    ))
+    session.commit()
+
+    body = client.get(f"/productos/{product.slug}").get_data(as_text=True)
+    assert "Entrega estimada mañana" in body
+    assert "Recommended ETA product" in body
+    assert "Pasado mañana" in body
+
+
 def test_product_detail_returns_404_for_unknown_product(client):
     response = client.get("/productos/producto-desconocido")
 
     assert response.status_code == 404
     assert "No encontramos este producto" in response.get_data(as_text=True)
+
+
+def test_product_detail_legacy_null_keeps_honest_delivery_fallback(
+    client, session: Session
+):
+    base = create_catalog_and_stock(session, stock=3)
+    product, _variant, offer = _catalog_entities(session, base)
+    assert offer.preparation_time_days is None
+    session.commit()
+    body = client.get(f"/productos/{product.slug}").get_data(as_text=True)
+    assert "Información de entrega próximamente" in body
+    assert 'data-lucide="truck"' in body
 
 
 def test_product_detail_hides_or_rejects_product_without_active_offer(
@@ -210,6 +262,7 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
     base = create_catalog_and_stock(session, stock=5)
     product, first_variant, first_offer = _catalog_entities(session, base)
     first_variant.title = "Negro / 128 GB"
+    first_offer.preparation_time_days = 1
     first_variant.combination_key = "color_principal=negro|almacenamiento_gb=128"
     first_variant.attributes = {"color_principal": "Negro", "almacenamiento_gb": "128"}
     product.variant_configuration = {
@@ -255,6 +308,7 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
         currency="USD",
         price=Decimal("12.00"),
         commission_rate=Decimal("0.00"),
+        preparation_time_days=2,
         status=OfferStatus.ACTIVE,
     )
     other_store = Store(
@@ -305,6 +359,9 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
     assert first_variant.catalog_sku in body
     assert foreign_variant.catalog_sku not in body
     assert f'value="{second_offer.id}" data-variant-offer-id' in body
+    assert "Entrega estimada pasado mañana" in body
+    assert 'Entrega estimada ma\\u00f1ana' in body
+    assert 'Entrega estimada pasado ma\\u00f1ana' in body
     assert f"{product.title} — Azul / 128 GB" in body
 
 

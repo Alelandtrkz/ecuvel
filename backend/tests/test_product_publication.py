@@ -53,6 +53,7 @@ from app.services.marketplace_policy import (
     resolve_marketplace_commission,
 )
 from app.services.product_drafts import (
+    ProductDraftValidationError,
     capture_submission_commission_snapshots,
     draft_commission_display_rows,
     submit_saved_product_draft,
@@ -391,7 +392,10 @@ def test_simple_approval_materializes_only_explicit_seller_inventory(
         media_root=source_root,
     )
     draft.variant_configuration = {}
-    draft.inventory_data = {"stock_quantity": 50}
+    draft.inventory_data = {
+        "stock_quantity": 50,
+        "preparation_time_days": 1,
+    }
     capture_submission_commission_snapshots(session, draft)
     commission_rows = draft_commission_display_rows(session, draft)
     assert commission_snapshot_complete(draft, commission_rows) is True
@@ -415,6 +419,7 @@ def test_simple_approval_materializes_only_explicit_seller_inventory(
     assert offer.commission_type == SellerCommissionType.PERCENTAGE
     assert offer.commission_fixed_amount is None
     assert offer.commission_currency == "USD"
+    assert offer.preparation_time_days == 1
     assert result.product.is_active is True
     assert session.scalar(select(func.count(ProductVariant.id))) == 1
     assert session.scalar(select(func.count(ProductMedia.id))) == 3
@@ -535,7 +540,9 @@ def test_family_approval_preserves_enabled_variants_skus_and_color_media(
     ).all()
     assert {variant.catalog_sku for variant in variants} == expected_skus
     assert disabled_sku not in {variant.catalog_sku for variant in variants}
-    assert session.scalar(select(func.count(SellerOffer.id))) == 2
+    offers = session.scalars(select(SellerOffer)).all()
+    assert len(offers) == 2
+    assert {offer.preparation_time_days for offer in offers} == {2}
     assert result.product.variant_configuration == expected_configuration
     media = session.scalars(
         select(ProductMedia).where(ProductMedia.product_id == result.product.id)
@@ -545,6 +552,86 @@ def test_family_approval_preserves_enabled_variants_skus_and_color_media(
     assert {item.variant_value_key for item in media} == {"negro", "azul"}
     assert sum(1 for item in media if item.variant_value_key == "negro") == 2
     assert sum(1 for item in media if item.variant_value_key == "azul") == 1
+
+
+def test_publication_normalizes_legacy_string_preparation_time(
+    session, tmp_path
+):
+    seller = create_user(session)
+    moderator = create_user(session, staff=True)
+    store = create_store(session)
+    parent, child = create_phone_categories(session)
+    create_seller_location(session, store)
+    create_commission_rule(session, rate="8.00", category=parent)
+    source_root = tmp_path / "drafts"
+    draft = create_complete_simple_draft(
+        session,
+        seller=seller,
+        store=store,
+        category=parent,
+        subcategory=child,
+        media_root=source_root,
+    )
+    draft.inventory_data = {
+        **draft.inventory_data,
+        "preparation_time_days": "2",
+    }
+    capture_submission_commission_snapshots(session, draft)
+    session.commit()
+
+    publish_product_draft(
+        session,
+        draft_id=draft.id,
+        actor_user_id=moderator.id,
+        checklist=_checklist(),
+        source_media_root=source_root,
+        catalog_media_root=tmp_path / "catalog",
+    )
+    session.commit()
+    offer = session.scalar(select(SellerOffer))
+    assert offer.preparation_time_days == 2
+    assert isinstance(offer.preparation_time_days, int)
+
+
+def test_publication_rejects_missing_preparation_without_partial_catalog(
+    session, tmp_path
+):
+    seller = create_user(session)
+    moderator = create_user(session, staff=True)
+    store = create_store(session)
+    parent, child = create_phone_categories(session)
+    create_seller_location(session, store)
+    create_commission_rule(session, rate="8.00", category=parent)
+    source_root = tmp_path / "drafts"
+    catalog_root = tmp_path / "catalog"
+    draft = create_complete_simple_draft(
+        session,
+        seller=seller,
+        store=store,
+        category=parent,
+        subcategory=child,
+        media_root=source_root,
+    )
+    draft.inventory_data = {
+        **draft.inventory_data,
+        "preparation_time_days": None,
+    }
+    capture_submission_commission_snapshots(session, draft)
+    session.commit()
+
+    with pytest.raises(ProductModerationValidationError, match="Preparación"):
+        publish_product_draft(
+            session,
+            draft_id=draft.id,
+            actor_user_id=moderator.id,
+            checklist=_checklist(),
+            source_media_root=source_root,
+            catalog_media_root=catalog_root,
+        )
+    session.rollback()
+    assert session.scalar(select(func.count(Product.id))) == 0
+    assert session.scalar(select(func.count(SellerOffer.id))) == 0
+    assert not catalog_root.exists()
 
 
 @pytest.mark.parametrize(

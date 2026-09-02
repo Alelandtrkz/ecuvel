@@ -28,6 +28,10 @@ from app.services.marketplace_policy import (
     commission_from_snapshot,
     ensure_store_inventory_location,
 )
+from app.services.offer_preparation import (
+    OfferPreparationValidationError,
+    normalize_preparation_time_days,
+)
 from app.services.private_storage import verify_private_file
 from app.services.product_image_processing import (
     ProductImageProcessingConfig,
@@ -347,6 +351,15 @@ def publish_product_draft(
     except StoreInventoryLocationMissingError as exc:
         raise ProductModerationValidationError(str(exc)) from exc
     publication_payload = publication_payload_from_draft(draft)
+    try:
+        preparation_time_days = normalize_preparation_time_days(
+            (publication_payload.get("offer") or {}).get(
+                "preparation_time_days"
+            ),
+            required=True,
+        )
+    except OfferPreparationValidationError as exc:
+        raise ProductModerationValidationError(str(exc)) from exc
     rows = (
         [dict(row) for row in publication_payload["variants"]]
         if family_variants_enabled(draft.variant_configuration)
@@ -445,6 +458,7 @@ def publish_product_draft(
                 currency="USD",
                 price=price,
                 compare_at_price=compare_price,
+                preparation_time_days=preparation_time_days,
                 commission_type=commission.mode,
                 commission_rate=commission.rate,
                 commission_fixed_amount=commission.fixed_amount,
