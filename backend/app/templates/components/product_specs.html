@@ -1,4 +1,4 @@
-{% macro product_specs(specifications, preview_mode=false) -%}
+{% macro product_specs(specifications, preview_mode=false, compact_items=none, seller_highlights=none) -%}
 {% if specifications %}
   {% if preview_mode %}
     <dl class="product-specs">
@@ -11,49 +11,32 @@
     </dl>
   {% else %}
     <dl class="product-specs product-specs--buyer">
-      {% for specification_section in specifications if specification_section.key != 'seller_highlights' %}
-        {% if specification_section.key == 'warranty' %}
-          {% set warranty = namespace(type='', duration='', responsible='', conditions='') %}
-          {% for specification in specification_section.items %}
-            {% if specification.key == 'warranty_type' %}{% set warranty.type = specification.value %}{% endif %}
-            {% if specification.key == 'warranty_duration' %}{% set warranty.duration = specification.value %}{% endif %}
-            {% if specification.key == 'warranty_responsible' %}{% set warranty.responsible = specification.value %}{% endif %}
-            {% if specification.key == 'warranty_conditions' %}{% set warranty.conditions = specification.value %}{% endif %}
-          {% endfor %}
-          <div>
-            <dt>Garantía</dt>
-            <dd class="product-specification-warranty">
-              {% if warranty.type or warranty.duration %}<span>{{ warranty.type }}{% if warranty.type and warranty.duration %} · {% endif %}{{ warranty.duration }}</span>{% endif %}
-              {% if warranty.responsible %}<span>Responsable: {{ warranty.responsible }}</span>{% endif %}
-              {% if warranty.conditions %}<span>Condiciones: {{ warranty.conditions }}</span>{% endif %}
-            </dd>
-          </div>
-        {% else %}
-          {% for specification in specification_section.items %}
-            <div>
-              <dt>{{ specification.label or specification_section.title }}</dt>
-              <dd>
-                {% if specification.kind == 'list' %}
-                  <ul class="product-specification-list">
-                    {% for list_item in specification.list_items %}<li>{{ list_item }}</li>{% endfor %}
-                  </ul>
-                {% else %}
-                  {{ specification.value }}
-                {% endif %}
-              </dd>
-            </div>
-          {% endfor %}
-        {% endif %}
+      {% for specification in compact_items or [] %}
+        <div>
+          <dt>{{ specification.label }}</dt>
+          <dd{% if specification.kind == 'multiline' %} class="product-specification-warranty"{% endif %}>
+            {% if specification.kind == 'list' %}
+              <ul class="product-specification-list">
+                {% for list_item in specification.list_items %}<li>{{ list_item }}</li>{% endfor %}
+              </ul>
+            {% else %}
+              {% if specification.value %}<span>{{ specification.value }}</span>{% endif %}
+              {% if specification.kind == 'multiline' %}
+                {% for line in specification.list_items %}<span>{{ line }}</span>{% endfor %}
+              {% endif %}
+            {% endif %}
+          </dd>
+        </div>
       {% endfor %}
     </dl>
-    {% for specification_section in specifications if specification_section.key == 'seller_highlights' %}
+    {% if seller_highlights %}
       <section class="product-specification-highlights" aria-labelledby="product-specification-highlights-title">
-        <h3 id="product-specification-highlights-title">{{ specification_section.title }}</h3>
+        <h3 id="product-specification-highlights-title">Características destacadas</h3>
         <ul class="product-specification-list">
-          {% for list_item in specification_section.items[0].list_items %}<li>{{ list_item }}</li>{% endfor %}
+          {% for list_item in seller_highlights %}<li>{{ list_item }}</li>{% endfor %}
         </ul>
       </section>
-    {% endfor %}
+    {% endif %}
   {% endif %}
 {% else %}
   <div class="detail-empty-state">

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import uuid
 from copy import deepcopy
@@ -99,6 +100,16 @@ def _render_gallery(app, images, product_name: str = "Product Test") -> str:
                 "/static/images/placeholders/product-placeholder.svg"
             ),
         )
+
+
+def _variant_payload(body: str) -> dict:
+    matched = re.search(
+        r'<script type="application/json" data-product-variant-payload>(.*?)</script>',
+        body,
+        re.DOTALL,
+    )
+    assert matched is not None
+    return json.loads(matched.group(1))
 
 
 def test_product_detail_returns_200(client, session: Session):
@@ -343,10 +354,24 @@ def test_product_detail_renders_empty_review_state(client, session: Session):
 def test_product_detail_variant_selector_stays_in_opened_store(client, session: Session):
     base = create_catalog_and_stock(session, stock=5)
     product, first_variant, first_offer = _catalog_entities(session, base)
+    category = session.get(Category, product.category_id)
+    assert category is not None
+    category.code = "ELECTRONICS_PHONES"
+    product.brand = "Marca D3"
+    product.model_number = "Modelo D3"
     first_variant.title = "Negro / 128 GB"
     first_offer.preparation_time_days = 1
     first_variant.combination_key = "color_principal=negro|almacenamiento_gb=128"
-    first_variant.attributes = {"color_principal": "Negro", "almacenamiento_gb": "128"}
+    first_variant.attributes = {
+        "color_principal": "Negro",
+        "almacenamiento_gb": "128",
+        "tipo_producto": "Smartphone",
+        "ram_gb": "8",
+        "camara_principal_mp": "12",
+        "warranty": {"type": "Garantía de tienda", "duration": "3", "unit": "meses"},
+        "highlights": ["Resumen negro"],
+        "variant_options": {"color_principal": "Negro", "almacenamiento_gb": "128"},
+    }
     product.variant_configuration = {
         "version": 4,
         "enabled": True,
@@ -362,6 +387,7 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
                 "values": [
                     {"key": "negro", "label": "Negro", "swatch": "#111827"},
                     {"key": "azul", "label": "Azul", "swatch": "#2563EB"},
+                    {"key": "rojo", "label": "Rojo", "swatch": "#DC2626"},
                 ],
             },
             {
@@ -378,7 +404,22 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
         catalog_sku=f"{first_variant.catalog_sku}-BLUE",
         title="Azul / 128 GB",
         combination_key="color_principal=azul|almacenamiento_gb=128",
-        attributes={"color_principal": "Azul", "almacenamiento_gb": "128"},
+        attributes={
+            "color_principal": "Azul",
+            "almacenamiento_gb": "128",
+            "tipo_producto": "Smartphone",
+            "ram_gb": "16",
+            "camara_principal_mp": "48",
+            "warranty": {
+                "type": "Garantía de tienda",
+                "duration": "12",
+                "unit": "meses",
+                "responsible": "ECUVEL",
+            },
+            "package_contents": ["Teléfono azul", "Cable USB-C"],
+            "highlights": ["Resumen azul"],
+            "variant_options": {"color_principal": "Azul", "almacenamiento_gb": "128"},
+        },
         is_active=True,
     )
     session.add(second_variant)
@@ -389,6 +430,33 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
         seller_sku=f"{first_offer.seller_sku}-BLUE",
         currency="USD",
         price=Decimal("12.00"),
+        commission_rate=Decimal("0.00"),
+        preparation_time_days=2,
+        status=OfferStatus.ACTIVE,
+    )
+    sold_out_variant = ProductVariant(
+        product_id=product.id,
+        catalog_sku=f"{first_variant.catalog_sku}-RED",
+        title="Rojo / 128 GB",
+        combination_key="color_principal=rojo|almacenamiento_gb=128",
+        attributes={
+            "color_principal": "Rojo",
+            "almacenamiento_gb": "128",
+            "tipo_producto": "Smartphone",
+            "ram_gb": "32",
+            "highlights": ["Resumen agotado"],
+            "variant_options": {"color_principal": "Rojo", "almacenamiento_gb": "128"},
+        },
+        is_active=True,
+    )
+    session.add(sold_out_variant)
+    session.flush()
+    sold_out_offer = SellerOffer(
+        store_id=base.store_id,
+        variant_id=sold_out_variant.id,
+        seller_sku=f"{first_offer.seller_sku}-RED",
+        currency="USD",
+        price=Decimal("15.00"),
         commission_rate=Decimal("0.00"),
         preparation_time_days=2,
         status=OfferStatus.ACTIVE,
@@ -407,7 +475,7 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
         attributes={"color_principal": "Azul", "almacenamiento_gb": "128"},
         is_active=True,
     )
-    session.add_all([second_offer, other_store, foreign_variant])
+    session.add_all([second_offer, sold_out_offer, other_store, foreign_variant])
     session.flush()
     foreign_offer = SellerOffer(
         store_id=other_store.id,
@@ -434,6 +502,8 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
 
     response = client.get(f"/productos/{product.slug}?variant={second_variant.catalog_sku}")
     body = response.get_data(as_text=True)
+    payload = _variant_payload(body)
+    by_sku = {variant["catalog_sku"]: variant for variant in payload["variants"]}
 
     assert response.status_code == 200
     assert "data-product-variant-selector" in body
@@ -445,6 +515,70 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
     assert 'Entrega estimada ma\\u00f1ana' in body
     assert 'Entrega estimada pasado ma\\u00f1ana' in body
     assert f"{product.title} — Azul / 128 GB" in body
+    assert payload["selected_catalog_sku"] == second_variant.catalog_sku
+    assert [variant["catalog_sku"] for variant in payload["variants"]] == [
+        second_variant.catalog_sku,
+        first_variant.catalog_sku,
+        sold_out_variant.catalog_sku,
+    ]
+    assert by_sku[first_variant.catalog_sku]["seller_sku"] == first_offer.seller_sku
+    assert by_sku[first_variant.catalog_sku]["combination_key"] == first_variant.combination_key
+    assert by_sku[first_variant.catalog_sku]["attributes"]["variant_options"] == {
+        "color_principal": "Negro",
+        "almacenamiento_gb": "128",
+    }
+    assert by_sku[second_variant.catalog_sku]["offer_id"] == str(second_offer.id)
+    assert {item["value"] for item in by_sku[first_variant.catalog_sku]["public_summary"]} >= {
+        "8 GB",
+    }
+    assert {item["value"] for item in by_sku[second_variant.catalog_sku]["public_summary"]} >= {
+        "16 GB",
+    }
+    assert {
+        "label": "Garantía",
+        "value": "Garantía de tienda · 12 meses",
+        "kind": "multiline",
+        "list_items": ["Responsable: ECUVEL"],
+    } in by_sku[second_variant.catalog_sku]["public_specifications"]
+    assert by_sku[second_variant.catalog_sku]["public_seller_highlights"] == [
+        "Resumen azul"
+    ]
+    assert by_sku[sold_out_variant.catalog_sku]["is_available"] is False
+    assert by_sku[sold_out_variant.catalog_sku]["max_quantity"] == 0
+    assert by_sku[sold_out_variant.catalog_sku]["availability_label"] == "Producto agotado"
+
+    summary_html = body.split("data-product-summary", maxsplit=1)[1].split(
+        "</section>", maxsplit=1
+    )[0]
+    specifications_html = body.split(
+        "data-product-specifications", maxsplit=1
+    )[1].split('id="product-reviews"', maxsplit=1)[0]
+    assert "<dd>16 GB</dd>" in summary_html
+    assert "<dd>8 GB</dd>" not in summary_html
+    assert "Garantía de tienda · 12 meses" in specifications_html
+    assert "Responsable: ECUVEL" in specifications_html
+    assert "Teléfono azul" in specifications_html
+
+    added = client.post(
+        "/carrito/agregar",
+        data={
+            "offer_id": str(second_offer.id),
+            "quantity": "1",
+            "next": f"/productos/{product.slug}?variant={second_variant.catalog_sku}",
+        },
+    )
+    assert added.status_code == 302
+    with client.session_transaction() as browser_session:
+        assert browser_session["cart"]["items"][str(second_offer.id)] == {
+            "quantity": 1,
+            "selected": True,
+        }
+
+    invalid = client.get(f"/productos/{product.slug}?variant=SKU-INEXISTENTE")
+    invalid_body = invalid.get_data(as_text=True)
+    assert invalid.status_code == 200
+    assert "SKU-INEXISTENTE" not in invalid_body
+    assert invalid_body.count("data-variant-offer-id") == 1
 
 
 def test_approved_product_media_uses_safe_public_route(client, app, session: Session, tmp_path):
@@ -764,7 +898,39 @@ def test_product_detail_gallery_query_count_is_constant_for_media_rows(
     session.commit()
     with_media = measured_get()
 
-    assert without_media == with_media == 11
+    for index in range(20):
+        variant = ProductVariant(
+            product_id=product.id,
+            catalog_sku=f"QUERY-VARIANT-{index:02d}",
+            title=f"Variant {index}",
+            combination_key=f"query={index:02d}",
+            attributes={"ram_gb": str(index + 1)},
+            is_active=True,
+        )
+        session.add(variant)
+        session.flush()
+        offer = SellerOffer(
+            store_id=base.store_id,
+            variant_id=variant.id,
+            seller_sku=f"QUERY-SELLER-{index:02d}",
+            currency="USD",
+            price=Decimal("25.00"),
+            commission_rate=Decimal("0.00"),
+            status=OfferStatus.ACTIVE,
+        )
+        session.add(offer)
+        session.flush()
+        session.add(InventoryBalance(
+            offer_id=offer.id,
+            location_id=base.storage_location_id,
+            on_hand_quantity=2,
+            reserved_quantity=0,
+            blocked_quantity=0,
+        ))
+    session.commit()
+    with_variants = measured_get()
+
+    assert without_media == with_media == with_variants == 11
 
     with client.session_transaction() as browser_session:
         browser_session["_user_id"] = str(base.buyer_id)

@@ -39,6 +39,271 @@ const ecuvelGalleryMath = (() => {
 
 globalThis.EcuvelGalleryMath = ecuvelGalleryMath;
 
+const ecuvelVariantState = (() => {
+  const normalizedAxes = (axes) => (Array.isArray(axes) ? axes : []).map((axis) => ({
+    ...axis,
+    key: String(axis?.key || ""),
+    values: Array.isArray(axis?.values) ? axis.values : [],
+  })).filter((axis) => axis.key);
+
+  const valueKey = (axis, variant) => {
+    const raw = variant?.attributes?.[axis.key];
+    const matched = axis.values.find(
+      (value) => value?.key === raw || value?.label === raw,
+    );
+    return String(matched?.key ?? raw ?? "");
+  };
+
+  const combinationToken = (axes, values) => JSON.stringify(
+    axes.map((axis) => String(values?.[axis.key] ?? "")),
+  );
+
+  const createIndex = (rawAxes, rawVariants) => {
+    const axes = normalizedAxes(rawAxes);
+    const variants = Array.isArray(rawVariants) ? rawVariants : [];
+    const valuesByVariant = new Map();
+    const variantsBySku = new Map();
+    const variantsByCombination = new Map();
+    const variantsByAxisValue = new Map(
+      axes.map((axis) => [axis.key, new Map()]),
+    );
+
+    variants.forEach((variant) => {
+      const values = Object.fromEntries(
+        axes.map((axis) => [axis.key, valueKey(axis, variant)]),
+      );
+      valuesByVariant.set(variant, values);
+      if (variant?.catalog_sku && !variantsBySku.has(variant.catalog_sku)) {
+        variantsBySku.set(variant.catalog_sku, variant);
+      }
+      const token = combinationToken(axes, values);
+      if (!variantsByCombination.has(token)) {
+        variantsByCombination.set(token, variant);
+      }
+      axes.forEach((axis) => {
+        const key = values[axis.key];
+        const byValue = variantsByAxisValue.get(axis.key);
+        if (!byValue.has(key)) byValue.set(key, []);
+        byValue.get(key).push(variant);
+      });
+    });
+
+    return {
+      axes,
+      variants,
+      valuesByVariant,
+      variantsBySku,
+      variantsByCombination,
+      variantsByAxisValue,
+    };
+  };
+
+  const initialVariant = (index, catalogSku) => (
+    index.variantsBySku.get(catalogSku) || index.variants[0] || null
+  );
+
+  const resolveVariant = (index, currentValues, changedAxisKey, changedValueKey) => {
+    if (!index.variantsByAxisValue.has(changedAxisKey)) return null;
+    const expected = {
+      ...(currentValues || {}),
+      [changedAxisKey]: String(changedValueKey ?? ""),
+    };
+    const exact = index.variantsByCombination.get(
+      combinationToken(index.axes, expected),
+    );
+    if (exact) return exact;
+
+    const candidates = index.variantsByAxisValue
+      .get(changedAxisKey)
+      .get(String(changedValueKey ?? "")) || [];
+    const otherAxes = index.axes.filter((axis) => axis.key !== changedAxisKey);
+    let best = null;
+    let bestScore = -1;
+    candidates.forEach((variant) => {
+      const values = index.valuesByVariant.get(variant);
+      const score = otherAxes.reduce(
+        (total, axis) => total + Number(values[axis.key] === currentValues?.[axis.key]),
+        0,
+      );
+      if (score > bestScore) {
+        best = variant;
+        bestScore = score;
+      }
+    });
+    return best;
+  };
+
+  const optionState = (index, axisKey, optionValue) => {
+    const candidates = index.variantsByAxisValue
+      .get(axisKey)
+      ?.get(String(optionValue ?? "")) || [];
+    return {
+      disabled: candidates.length === 0,
+      outOfStock: candidates.length > 0
+        && candidates.every((variant) => !variant.is_available),
+    };
+  };
+
+  const quantityState = (value, maximum) => {
+    const max = Math.max(0, Number(maximum) || 0);
+    if (max === 0) return { value: 1, maximum: 0, disabled: true };
+    return {
+      value: Math.min(max, Math.max(1, Number(value) || 1)),
+      maximum: max,
+      disabled: false,
+    };
+  };
+
+  const variantUrl = (href, catalogSku) => {
+    const url = new URL(href);
+    if (catalogSku) url.searchParams.set("variant", catalogSku);
+    return url;
+  };
+
+  const variantViewState = (variant, formatMoney) => {
+    const available = Boolean(variant?.is_available);
+    const comparePrice = variant?.compare_at_price
+      ? formatMoney(variant.compare_at_price, variant.currency)
+      : "";
+    return {
+      price: formatMoney(variant?.price, variant?.currency) || "Precio pendiente",
+      comparePrice,
+      compareHidden: !comparePrice,
+      available,
+      availabilityLabel: String(variant?.availability_label || ""),
+      deliveryLabel: String(variant?.delivery_label || ""),
+      offerId: String(variant?.offer_id || ""),
+      availabilityMessage: String(variant?.availability_message || ""),
+      stockMessageHidden: available && !variant?.low_stock,
+      lowStock: Boolean(variant?.low_stock),
+      maximum: Math.max(0, Number(variant?.max_quantity) || 0),
+    };
+  };
+
+  const appendTextElement = (doc, parent, tagName, text, className = "") => {
+    const element = doc.createElement(tagName);
+    if (className) element.className = className;
+    element.textContent = String(text ?? "");
+    parent.append(element);
+    return element;
+  };
+
+  const renderSummary = (doc, root, rawItems) => {
+    if (!root) return;
+    const items = Array.isArray(rawItems) ? rawItems : [];
+    if (!items.length) {
+      const empty = doc.createElement("p");
+      empty.textContent = "La información resumida está pendiente.";
+      root.replaceChildren(empty);
+      return;
+    }
+    const list = doc.createElement("dl");
+    items.forEach((item) => {
+      const row = doc.createElement("div");
+      appendTextElement(doc, row, "dt", item?.label);
+      appendTextElement(doc, row, "dd", item?.value);
+      list.append(row);
+    });
+    root.replaceChildren(list);
+  };
+
+  const renderSpecificationItem = (doc, item) => {
+    const row = doc.createElement("div");
+    appendTextElement(doc, row, "dt", item?.label);
+    const detail = doc.createElement("dd");
+    const listItems = Array.isArray(item?.list_items) ? item.list_items : [];
+    if (item?.kind === "list") {
+      const list = doc.createElement("ul");
+      list.className = "product-specification-list";
+      listItems.forEach((value) => appendTextElement(doc, list, "li", value));
+      detail.append(list);
+    } else {
+      if (item?.kind === "multiline") {
+        detail.className = "product-specification-warranty";
+      }
+      if (item?.value) appendTextElement(doc, detail, "span", item.value);
+      if (item?.kind === "multiline") {
+        listItems.forEach((value) => appendTextElement(doc, detail, "span", value));
+      }
+    }
+    row.append(detail);
+    return row;
+  };
+
+  const renderSpecifications = (doc, root, rawItems, rawHighlights) => {
+    if (!root) return;
+    const items = Array.isArray(rawItems) ? rawItems : [];
+    const highlights = Array.isArray(rawHighlights) ? rawHighlights : [];
+    if (!items.length && !highlights.length) {
+      const empty = doc.createElement("div");
+      empty.className = "detail-empty-state";
+      appendTextElement(
+        doc,
+        empty,
+        "p",
+        "Las especificaciones detalladas estarán disponibles próximamente.",
+      );
+      root.replaceChildren(empty);
+      return;
+    }
+
+    const nodes = [];
+    if (items.length) {
+      const list = doc.createElement("dl");
+      list.className = "product-specs product-specs--buyer";
+      items.forEach((item) => list.append(renderSpecificationItem(doc, item)));
+      nodes.push(list);
+    }
+    if (highlights.length) {
+      const section = doc.createElement("section");
+      section.className = "product-specification-highlights";
+      section.setAttribute("aria-labelledby", "product-specification-highlights-title");
+      const heading = appendTextElement(
+        doc,
+        section,
+        "h3",
+        "Características destacadas",
+      );
+      heading.id = "product-specification-highlights-title";
+      const list = doc.createElement("ul");
+      list.className = "product-specification-list";
+      highlights.forEach((value) => appendTextElement(doc, list, "li", value));
+      section.append(list);
+      nodes.push(section);
+    }
+    root.replaceChildren(...nodes);
+  };
+
+  const applyPresentation = (doc, variant) => {
+    renderSummary(
+      doc,
+      doc.querySelector("[data-product-summary-content]"),
+      variant?.public_summary,
+    );
+    renderSpecifications(
+      doc,
+      doc.querySelector("[data-product-specifications-content]"),
+      variant?.public_specifications,
+      variant?.public_seller_highlights,
+    );
+  };
+
+  return {
+    applyPresentation,
+    createIndex,
+    initialVariant,
+    optionState,
+    quantityState,
+    renderSpecifications,
+    renderSummary,
+    resolveVariant,
+    variantUrl,
+    variantViewState,
+  };
+})();
+
+globalThis.EcuvelVariantState = ecuvelVariantState;
+
 document.addEventListener("DOMContentLoaded", () => {
   const showDynamicNotice = (message) => {
     const notice = document.querySelector("[data-notice-toast]");
@@ -587,17 +852,20 @@ document.addEventListener("DOMContentLoaded", () => {
     let maximum = Math.max(0, Number(selector.dataset.maxQuantity) || 0);
     const setQuantity = (value) => {
       const minimum = Number(input.min) || 1;
-      if (maximum <= 0) {
-        input.value = "1";
+      const state = ecuvelVariantState.quantityState(value, maximum);
+      if (state.disabled) {
+        input.value = String(state.value);
         input.disabled = true;
         decrease.disabled = true;
         increase.disabled = true;
+        decrease.setAttribute("aria-disabled", "true");
+        increase.setAttribute("aria-disabled", "true");
         return;
       }
       if (value > maximum) {
         showDynamicNotice(`Solo quedan ${maximum} unidades disponibles.`);
       }
-      input.value = String(Math.min(maximum, Math.max(minimum, value)));
+      input.value = String(Math.max(minimum, state.value));
       decrease.disabled = Number(input.value) <= minimum;
       increase.disabled = Number(input.value) >= maximum;
       decrease.setAttribute("aria-disabled", String(decrease.disabled));
@@ -633,24 +901,14 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (_error) {
       return;
     }
-    const axes = Array.isArray(payload.axes) ? payload.axes : [];
-    const variants = Array.isArray(payload.variants) ? payload.variants : [];
-    if (!axes.length || !variants.length) return;
+    const index = ecuvelVariantState.createIndex(payload.axes, payload.variants);
+    if (!index.axes.length || !index.variants.length) return;
 
-    const valueKey = (axis, variant) => {
-      const raw = variant.attributes?.[axis.key];
-      const matched = (axis.values || []).find(
-        (value) => value.key === raw || value.label === raw,
-      );
-      return matched?.key || String(raw || "");
-    };
-    const variantValues = (variant) => Object.fromEntries(
-      axes.map((axis) => [axis.key, valueKey(axis, variant)]),
+    let selected = ecuvelVariantState.initialVariant(
+      index,
+      payload.selected_catalog_sku,
     );
-    let selected = variants.find(
-      (variant) => variant.catalog_sku === payload.selected_catalog_sku,
-    ) || variants[0];
-    let selection = variantValues(selected);
+    let selection = index.valuesByVariant.get(selected);
 
     const formatMoney = (amount, currency) => {
       if (amount === null || amount === undefined || amount === "") return "";
@@ -663,37 +921,31 @@ document.addEventListener("DOMContentLoaded", () => {
       }).format(numeric);
     };
 
-    const matches = (variant, expected, exceptAxis = null) => {
-      const values = variantValues(variant);
-      return axes.every(
-        (axis) => axis.key === exceptAxis || !expected[axis.key] || values[axis.key] === expected[axis.key],
-      );
-    };
-
     const updateButtons = () => {
-      axes.forEach((axis) => {
-        selector.querySelectorAll(`[data-public-variant-axis="${CSS.escape(axis.key)}"] [data-public-variant-value]`).forEach((button) => {
-          const key = button.dataset.publicVariantValue;
-          // En V3 las presentaciones son filas manuales, no una matriz completa.
-          // Una opción sigue siendo navegable si existe en cualquier presentación.
-          const candidates = variants.filter(
-            (variant) => variantValues(variant)[axis.key] === key,
-          );
-          const exists = candidates.length > 0;
-          const hasStock = candidates.some((variant) => variant.is_available);
-          const isSelected = selection[axis.key] === key;
-          button.disabled = !exists;
-          button.classList.toggle("is-selected", isSelected);
-          button.classList.toggle("is-out-of-stock", exists && !hasStock);
-          button.setAttribute("aria-pressed", String(isSelected));
-          button.setAttribute("aria-label", `${button.textContent.trim()}${exists && !hasStock ? ", agotado" : ""}`);
-        });
+      selector.querySelectorAll("[data-public-variant-value]").forEach((button) => {
+        const fieldset = button.closest("[data-public-variant-axis]");
+        const axisKey = fieldset?.dataset.publicVariantAxis;
+        if (!axisKey) return;
+        const key = button.dataset.publicVariantValue;
+        const state = ecuvelVariantState.optionState(index, axisKey, key);
+        const isSelected = selection[axisKey] === key;
+        button.disabled = state.disabled;
+        button.classList.toggle("is-selected", isSelected);
+        button.classList.toggle("is-out-of-stock", state.outOfStock);
+        button.setAttribute("aria-disabled", String(state.disabled));
+        button.setAttribute("aria-pressed", String(isSelected));
+        const suffix = state.disabled
+          ? ", no disponible"
+          : (state.outOfStock ? ", agotado" : "");
+        button.setAttribute("aria-label", `${button.textContent.trim()}${suffix}`);
       });
     };
 
-    const applyVariant = (variant, updateUrl = true) => {
+    const applyVariantState = (variant, { updateUrl = true, announce = true } = {}) => {
+      if (!index.valuesByVariant.has(variant)) return;
+      const viewState = ecuvelVariantState.variantViewState(variant, formatMoney);
       selected = variant;
-      selection = variantValues(variant);
+      selection = index.valuesByVariant.get(variant);
       const publicTitle = variant.name ? `${payload.base_title || "Producto"} — ${variant.name}` : (payload.base_title || "Producto");
       document.querySelector("#product-title")?.replaceChildren(publicTitle);
       document.querySelector("[data-selected-variant-name]")?.replaceChildren(variant.name || "");
@@ -707,48 +959,56 @@ document.addEventListener("DOMContentLoaded", () => {
       const offerInput = document.querySelector("[data-variant-offer-id]");
       const stockMessage = document.querySelector("[data-stock-message]");
       const addButton = document.querySelector("[data-cart-add-form] .purchase-card__add");
+      const buyNowButton = document.querySelector("[data-variant-buy-now]");
       const quantity = document.querySelector("[data-quantity-selector]");
+      const status = selector.querySelector("[data-variant-status]");
       const previewCommercial = Boolean(document.querySelector("[data-preview-commercial]"));
 
-      if (price) price.textContent = formatMoney(variant.price, variant.currency) || "Precio pendiente";
+      if (price) price.textContent = viewState.price;
       if (compare) {
-        compare.textContent = variant.compare_at_price
-          ? formatMoney(variant.compare_at_price, variant.currency)
-          : "";
-        compare.hidden = !variant.compare_at_price;
+        compare.textContent = viewState.comparePrice;
+        compare.hidden = viewState.compareHidden;
       }
       if (availability) {
-        availability.classList.toggle("purchase-card__availability--available", variant.is_available);
-        availability.classList.toggle("purchase-card__availability--unavailable", !variant.is_available);
+        availability.classList.toggle("purchase-card__availability--available", viewState.available);
+        availability.classList.toggle("purchase-card__availability--unavailable", !viewState.available);
       }
-      if (availabilityLabel) availabilityLabel.textContent = variant.availability_label;
-      if (deliveryLabel) deliveryLabel.textContent = variant.delivery_label;
-      if (offerInput) offerInput.value = variant.offer_id;
+      if (availabilityLabel) availabilityLabel.textContent = viewState.availabilityLabel;
+      if (deliveryLabel) deliveryLabel.textContent = viewState.deliveryLabel;
+      if (offerInput) offerInput.value = viewState.offerId;
       if (stockMessage) {
-        stockMessage.textContent = variant.availability_message;
-        stockMessage.hidden = variant.is_available && !variant.low_stock;
-        stockMessage.classList.toggle("purchase-card__stock-message--low", Boolean(variant.low_stock));
-        stockMessage.classList.toggle("purchase-card__stock-message--unavailable", !variant.is_available);
+        stockMessage.textContent = viewState.availabilityMessage;
+        stockMessage.hidden = viewState.stockMessageHidden;
+        stockMessage.classList.toggle("purchase-card__stock-message--low", viewState.lowStock);
+        stockMessage.classList.toggle("purchase-card__stock-message--unavailable", !viewState.available);
       }
-      if (addButton) addButton.disabled = previewCommercial || !variant.is_available;
+      if (addButton) addButton.disabled = previewCommercial || !viewState.available;
+      if (buyNowButton) buyNowButton.disabled = !viewState.available;
       quantity?.dispatchEvent(new CustomEvent("ecuvel:quantity-max", {
-        detail: { maximum: variant.max_quantity },
+        detail: { maximum: viewState.maximum },
       }));
       document.querySelector("[data-product-gallery]")?.dispatchEvent(
         new CustomEvent("ecuvel:gallery-images", {
           detail: { images: variant.images, name: variant.name || document.title },
         }),
       );
+      ecuvelVariantState.applyPresentation(document, variant);
       updateButtons();
-      if (updateUrl && variant.catalog_sku) {
-        const url = new URL(window.location.href);
-        url.searchParams.set("variant", variant.catalog_sku);
-        window.history.replaceState({}, "", url);
+      if (variant.catalog_sku) {
+        const url = ecuvelVariantState.variantUrl(window.location.href, variant.catalog_sku);
+        if (updateUrl) window.history.replaceState({}, "", url);
         document.querySelectorAll(
           "[data-cart-add-form] input[name='next'], [data-favorite-form] input[name='next']",
         ).forEach((nextInput) => {
           nextInput.value = `${url.pathname}${url.search}`;
         });
+      }
+      if (announce && status) {
+        const selectedLabels = index.axes.map((axis) => {
+          const key = selection[axis.key];
+          return axis.values.find((value) => String(value?.key) === key)?.label || key;
+        }).filter(Boolean);
+        status.textContent = `Variante actualizada: ${variant.name || selectedLabels.join(", ")}.`;
       }
     };
 
@@ -758,26 +1018,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const fieldset = button.closest("[data-public-variant-axis]");
       const axisKey = fieldset?.dataset.publicVariantAxis;
       if (!axisKey) return;
-      const expected = { ...selection, [axisKey]: button.dataset.publicVariantValue };
-      let next = variants.find((variant) => matches(variant, expected));
-      if (!next) {
-        const candidates = variants.filter(
-          (variant) => variantValues(variant)[axisKey] === button.dataset.publicVariantValue,
-        );
-        const otherAxes = axes.filter((axis) => axis.key !== axisKey);
-        candidates.sort((left, right) => {
-          const score = (variant) => otherAxes.reduce(
-            (total, axis) => total + Number(variantValues(variant)[axis.key] === selection[axis.key]),
-            0,
-          );
-          return score(right) - score(left) || Number(right.is_available) - Number(left.is_available);
-        });
-        next = candidates[0];
-      }
-      if (next) applyVariant(next);
+      const next = ecuvelVariantState.resolveVariant(
+        index,
+        selection,
+        axisKey,
+        button.dataset.publicVariantValue,
+      );
+      if (next) applyVariantState(next);
     });
 
-    applyVariant(selected, false);
+    applyVariantState(selected, { updateUrl: false, announce: false });
   });
 
   document.querySelectorAll("[data-cart-add-form]").forEach((form) => {

@@ -48,9 +48,11 @@
     {% endif %}
   </section>
 
-  <section class="product-detail-section" aria-labelledby="specifications-title">
+  <section class="product-detail-section" aria-labelledby="specifications-title" data-product-specifications>
     <div class="detail-section-heading"><span>Ficha técnica</span><h2 id="specifications-title">Especificaciones</h2></div>
-    {{ product_specs(product.specifications) }}
+    <div data-product-specifications-content>
+      {{ product_specs(product.specifications, compact_items=product.specification_items, seller_highlights=product.seller_highlights) }}
+    </div>
   </section>
 
   <section class="product-detail-section product-reviews" aria-labelledby="reviews-title">

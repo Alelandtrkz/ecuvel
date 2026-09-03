@@ -15,6 +15,7 @@ from app.services.product_specifications import (
     format_spanish_number,
     is_publicly_empty,
     is_valid_gtin,
+    product_specification_presentation_payload,
     resolve_product_template,
     with_unit,
 )
@@ -266,6 +267,50 @@ def test_summary_is_stable_deduplicated_and_never_exceeds_six_items():
     assert len(first.highlights) == 6
     assert len({item.key for item in first.highlights}) == len(first.highlights)
     assert _items(first)["ram_gb"].value == "8 GB"
+
+
+def test_public_variant_payload_reuses_compact_d2_presentation_without_raw_fields():
+    presentation = build_product_specification_presentation(
+        _row(
+            attributes={
+                "condition": "NEW",
+                "tipo_producto": "Smartphone",
+                "ram_gb": "16",
+                "package_contents": ["Teléfono", "Cable USB-C"],
+                "highlights": ["<img src=x onerror=alert(1)>"],
+                "variant_options": {"color_principal": "Azul"},
+                "warranty": {
+                    "type": "Garantía de tienda",
+                    "duration": "12",
+                    "unit": "meses",
+                    "responsible": "ECUVEL",
+                    "conditions": "Con factura",
+                },
+            }
+        )
+    )
+
+    payload = product_specification_presentation_payload(presentation)
+
+    assert payload["public_seller_highlights"] == [
+        "<img src=x onerror=alert(1)>"
+    ]
+    assert {item["label"] for item in payload["public_summary"]} >= {"Marca", "RAM"}
+    assert {
+        "label": "Garantía",
+        "value": "Garantía de tienda · 12 meses",
+        "kind": "multiline",
+        "list_items": ["Responsable: ECUVEL", "Condiciones: Con factura"],
+    } in payload["public_specifications"]
+    assert {
+        "label": "Contenido del paquete",
+        "value": "",
+        "kind": "list",
+        "list_items": ["Teléfono", "Cable USB-C"],
+    } in payload["public_specifications"]
+    serialized = repr(payload)
+    assert "condition" not in serialized
+    assert "variant_options" not in serialized
 
 
 def test_compact_grid_contract_is_two_up_then_one_up_without_section_cards():

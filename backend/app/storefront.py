@@ -165,8 +165,10 @@ from app.services.product_reviews import (
 )
 from app.services.product_specifications import (
     ProductSpecificationItemViewModel,
+    ProductSpecificationPresentation,
     ProductSpecificationSectionViewModel,
     build_product_specification_presentation,
+    product_specification_presentation_payload,
 )
 from app.services.product_media import (
     has_complete_product_thumbnail,
@@ -270,6 +272,8 @@ class ProductDetailViewModel:
     gallery_images: tuple[ProductGalleryImageViewModel, ...]
     gallery_placeholder_url: str
     specifications: tuple[ProductSpecificationSectionViewModel, ...]
+    specification_items: tuple[ProductSpecificationItemViewModel, ...]
+    seller_highlights: tuple[str, ...]
     highlights: tuple[ProductSpecificationItemViewModel, ...]
     rating: Decimal | None
     review_count: int
@@ -1024,12 +1028,16 @@ def _build_variant_payload(
     product: Product,
     rows: list[Any],
     availability: dict[uuid.UUID, int],
+    presentations: dict[str, ProductSpecificationPresentation],
     selected_catalog_sku: str,
 ) -> dict[str, Any]:
     variants = []
     for row in rows:
         quantity = max(0, availability.get(row.offer_id, 0))
         max_quantity, low_stock, availability_label, availability_message = _stock_presentation(quantity)
+        presentation_payload = product_specification_presentation_payload(
+            presentations[row.catalog_sku]
+        )
         variants.append({
             "catalog_sku": row.catalog_sku,
             "combination_key": row.combination_key,
@@ -1053,6 +1061,7 @@ def _build_variant_payload(
                 product=product,
                 attributes=row.variant_attributes or {},
             ),
+            **presentation_payload,
         })
     return {
         "base_title": product.title,
@@ -3248,7 +3257,11 @@ def product_detail(product_slug: str) -> str:
         availability_message,
     ) = _stock_presentation(available_quantity)
     is_available = available_quantity > 0
-    specification_presentation = build_product_specification_presentation(row)
+    variant_presentations = {
+        item.catalog_sku: build_product_specification_presentation(item)
+        for item in variant_rows
+    }
+    specification_presentation = variant_presentations[row.catalog_sku]
     favorite_ids = _favorite_ids_for_product_ids({row.product_id})
     reviews_page = published_reviews_for_product(
         db.session,
@@ -3296,6 +3309,8 @@ def product_detail(product_slug: str) -> str:
         ),
         gallery_placeholder_url=placeholder_image,
         specifications=specification_presentation.sections,
+        specification_items=specification_presentation.compact_items,
+        seller_highlights=specification_presentation.seller_highlights,
         highlights=specification_presentation.highlights,
         rating=reviews_page.summary.average,
         review_count=reviews_page.summary.count,
@@ -3312,6 +3327,7 @@ def product_detail(product_slug: str) -> str:
             product=product_record,
             rows=variant_rows,
             availability=availability_by_offer,
+            presentations=variant_presentations,
             selected_catalog_sku=row.catalog_sku,
         ),
     )

@@ -45,23 +45,26 @@
             </div>
           </fieldset>
         {% endfor %}
+        <p class="visually-hidden" role="status" aria-live="polite" aria-atomic="true" data-variant-status></p>
       </section>
     {% endif %}
   </header>
 
   {{ purchase_card(product, preview_mode) }}
 
-  <section class="product-summary" aria-labelledby="summary-title">
+  <section class="product-summary" aria-labelledby="summary-title" data-product-summary>
     <h2 id="summary-title">Características principales</h2>
-    {% if product.highlights %}
-      <dl>
-        {% for highlight in product.highlights %}
-          <div><dt>{{ highlight.label }}</dt><dd>{{ highlight.value }}</dd></div>
-        {% endfor %}
-      </dl>
-    {% else %}
-      <p>La información resumida está pendiente.</p>
-    {% endif %}
+    <div data-product-summary-content>
+      {% if product.highlights %}
+        <dl>
+          {% for highlight in product.highlights %}
+            <div><dt>{{ highlight.label }}</dt><dd>{{ highlight.value }}</dd></div>
+          {% endfor %}
+        </dl>
+      {% else %}
+        <p>La información resumida está pendiente.</p>
+      {% endif %}
+    </div>
   </section>
 
   {{ store_card(product, preview_mode) }}

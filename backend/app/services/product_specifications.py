@@ -31,6 +31,8 @@ class ProductSpecificationSectionViewModel:
 class ProductSpecificationPresentation:
     sections: tuple[ProductSpecificationSectionViewModel, ...]
     highlights: tuple[ProductSpecificationItemViewModel, ...]
+    compact_items: tuple[ProductSpecificationItemViewModel, ...]
+    seller_highlights: tuple[str, ...]
 
 
 # This matrix covers every section currently used by PRODUCT_TEMPLATES. New
@@ -271,7 +273,24 @@ def build_product_specification_presentation(row: Any) -> ProductSpecificationPr
     return ProductSpecificationPresentation(
         sections=section_models,
         highlights=_build_summary(section_models),
+        compact_items=_build_compact_items(section_models),
+        seller_highlights=seller_highlights,
     )
+
+
+def product_specification_presentation_payload(
+    presentation: ProductSpecificationPresentation,
+) -> dict[str, list[dict[str, Any]] | list[str]]:
+    """Serialize only server-presented buyer values for client-side switching."""
+    return {
+        "public_summary": [
+            _public_item_payload(item) for item in presentation.highlights
+        ],
+        "public_specifications": [
+            _public_item_payload(item) for item in presentation.compact_items
+        ],
+        "public_seller_highlights": list(presentation.seller_highlights),
+    }
 
 
 def _condition_applies(field: ProductTemplateField, values: Mapping[str, Any]) -> bool:
@@ -365,6 +384,62 @@ def _warranty_items(value: Any) -> tuple[ProductSpecificationItemViewModel, ...]
                 displayed = with_unit(displayed, str(unit))
         items.append(ProductSpecificationItemViewModel(f"warranty_{key}", label, displayed))
     return tuple(items)
+
+
+def _build_compact_items(
+    sections: tuple[ProductSpecificationSectionViewModel, ...],
+) -> tuple[ProductSpecificationItemViewModel, ...]:
+    compact: list[ProductSpecificationItemViewModel] = []
+    for section in sections:
+        if section.key == "seller_highlights":
+            continue
+        if section.key == "warranty":
+            values = {item.key: item.value for item in section.items}
+            warranty_type = values.get("warranty_type", "")
+            duration = values.get("warranty_duration", "")
+            primary = " · ".join(
+                value for value in (warranty_type, duration) if value
+            )
+            secondary = tuple(
+                f"{label}: {values[key]}"
+                for key, label in (
+                    ("warranty_responsible", "Responsable"),
+                    ("warranty_conditions", "Condiciones"),
+                )
+                if values.get(key)
+            )
+            compact.append(
+                ProductSpecificationItemViewModel(
+                    key="warranty",
+                    label="Garantía",
+                    value=primary,
+                    kind="multiline" if secondary else "text",
+                    list_items=secondary,
+                )
+            )
+            continue
+        for item in section.items:
+            compact.append(
+                ProductSpecificationItemViewModel(
+                    key=item.key,
+                    label=item.label or section.title,
+                    value=item.value,
+                    kind=item.kind,
+                    list_items=item.list_items,
+                )
+            )
+    return tuple(compact)
+
+
+def _public_item_payload(
+    item: ProductSpecificationItemViewModel,
+) -> dict[str, Any]:
+    return {
+        "label": item.label,
+        "value": item.value,
+        "kind": item.kind,
+        "list_items": list(item.list_items),
+    }
 
 
 def _build_summary(

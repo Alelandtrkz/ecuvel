@@ -63,7 +63,9 @@
     <button
       class="button button--secondary"
       type="button"
-      {% if product.is_available %}data-notice="La compra directa estará disponible próximamente."{% else %}disabled{% endif %}
+      data-variant-buy-now
+      data-notice="La compra directa estará disponible próximamente."
+      {% if not product.is_available %}disabled{% endif %}
     >Comprar ahora</button>
     <form
       class="purchase-card__favorite-form"
