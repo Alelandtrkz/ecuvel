@@ -243,7 +243,8 @@ def test_card_deep_link_opens_same_exact_variant_price_and_eta(client, session):
     detail = client.get(expected_url)
     detail_body = detail.get_data(as_text=True)
     assert detail.status_code == 200
-    assert variant.catalog_sku in detail_body
+    assert variant.catalog_sku not in detail_body
+    assert detail.request.query_string.decode() == f"variant={variant.catalog_sku}"
     assert "$10.00" in detail_body
     assert "Entrega estimada mañana" in detail_body
 

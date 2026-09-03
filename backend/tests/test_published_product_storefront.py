@@ -76,7 +76,8 @@ def test_simple_approval_is_visible_on_home_detail_and_public_media(
     body = detail.get_data(as_text=True)
     assert detail.status_code == 200
     assert draft.title in body
-    assert draft.seller_sku in body
+    assert draft.seller_sku not in body
+    assert "<span>SKU:" not in body
     assert "$45.00" in body
 
     media = product.media[0]

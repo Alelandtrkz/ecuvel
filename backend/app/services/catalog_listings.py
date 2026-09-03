@@ -36,6 +36,7 @@ class PublicListingMember:
     product_model_number: str | None
     variant_configuration: dict[str, Any]
     category_id: uuid.UUID
+    category_code: str
     category_name: str
     category_slug: str
     variant_id: uuid.UUID
@@ -74,6 +75,7 @@ class PublicListing:
     product_model_number: str | None
     variant_configuration: dict[str, Any]
     category_id: uuid.UUID
+    category_code: str
     category_name: str
     category_slug: str
     variant_id: uuid.UUID
@@ -170,6 +172,7 @@ def public_offer_candidates_statement(
             Product.model_number.label("product_model_number"),
             Product.variant_configuration.label("variant_configuration"),
             Category.id.label("category_id"),
+            Category.code.label("category_code"),
             Category.name.label("category_name"),
             Category.slug.label("category_slug"),
             ProductVariant.id.label("variant_id"),
@@ -315,6 +318,7 @@ def _member_from_row(row: Any, available_quantity: int) -> PublicListingMember:
         product_model_number=row.product_model_number,
         variant_configuration=dict(row.variant_configuration or {}),
         category_id=row.category_id,
+        category_code=row.category_code,
         category_name=row.category_name,
         category_slug=row.category_slug,
         variant_id=row.variant_id,
@@ -397,6 +401,7 @@ def _listing_from_group(
         product_model_number=representative.product_model_number,
         variant_configuration=representative.variant_configuration,
         category_id=representative.category_id,
+        category_code=representative.category_code,
         category_name=representative.category_name,
         category_slug=representative.category_slug,
         variant_id=representative.variant_id,

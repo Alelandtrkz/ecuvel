@@ -50,6 +50,7 @@ def _member(index: int) -> PublicListingMember:
         product_model_number=f"M-{index}",
         variant_configuration={},
         category_id=uuid.UUID(int=40_000),
+        category_code="ELECTRONICS_PHONES",
         category_name="Phones",
         category_slug="phones",
         variant_id=variant_id,

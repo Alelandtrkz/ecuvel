@@ -19,7 +19,7 @@
           0.0 · Sin reseñas
         {% endif %}
       </span>
-      <span>SKU: <span data-selected-sku>{{ product.seller_sku }}</span></span>
+      {% if preview_mode %}<span>SKU: <span data-selected-sku>{{ product.seller_sku }}</span></span>{% endif %}
     </div>
     {% if product.variant_payload.axes and product.variant_payload.variants|length > 1 %}
       {% set selected_ns = namespace(variant=none) %}

@@ -163,6 +163,11 @@ from app.services.product_reviews import (
     resubmit_product_review,
     stage_product_review_images,
 )
+from app.services.product_specifications import (
+    ProductSpecificationItemViewModel,
+    ProductSpecificationSectionViewModel,
+    build_product_specification_presentation,
+)
 from app.services.product_media import (
     has_complete_product_thumbnail,
     load_product_card_media,
@@ -242,12 +247,6 @@ class ProductGalleryImageViewModel:
 
 
 @dataclass(frozen=True, slots=True)
-class ProductSpecificationViewModel:
-    label: str
-    value: str
-
-
-@dataclass(frozen=True, slots=True)
 class ProductDetailViewModel:
     offer_id: uuid.UUID
     product_id: uuid.UUID
@@ -270,8 +269,8 @@ class ProductDetailViewModel:
     offer_status: OfferStatus
     gallery_images: tuple[ProductGalleryImageViewModel, ...]
     gallery_placeholder_url: str
-    specifications: tuple[ProductSpecificationViewModel, ...]
-    highlights: tuple[ProductSpecificationViewModel, ...]
+    specifications: tuple[ProductSpecificationSectionViewModel, ...]
+    highlights: tuple[ProductSpecificationItemViewModel, ...]
     rating: Decimal | None
     review_count: int
     availability_label: str
@@ -872,20 +871,6 @@ def _card_from_favorite_item(
     )
 
 
-def _display_attribute(value: object) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bool):
-        return "Sí" if value else "No"
-    if isinstance(value, (dict, list)):
-        return json.dumps(
-            value,
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-    return str(value)
-
-
 def _build_product_gallery_images(
     product_name: str,
     image_sources: Iterable[str | None | ProductMedia],
@@ -1076,58 +1061,6 @@ def _build_variant_payload(
         "selected_catalog_sku": selected_catalog_sku,
         "variants": variants,
     }
-
-
-def _build_specifications(
-    row: Any,
-) -> tuple[ProductSpecificationViewModel, ...]:
-    specifications: list[ProductSpecificationViewModel] = []
-
-    def add(label: str, value: object) -> None:
-        displayed_value = _display_attribute(value)
-        if displayed_value:
-            specifications.append(
-                ProductSpecificationViewModel(label, displayed_value)
-            )
-
-    add("Categoría", row.category_name)
-    add("Marca", row.product_brand)
-    add("Modelo", row.product_model_number)
-    add("Variante", row.variant_title)
-    add("SKU del catálogo", row.catalog_sku)
-    add("SKU del vendedor", row.seller_sku)
-    add("Código de barras", row.manufacturer_barcode)
-    add("Peso", f"{row.weight_grams} g" if row.weight_grams else None)
-    add("Largo", f"{row.length_mm} mm" if row.length_mm else None)
-    add("Ancho", f"{row.width_mm} mm" if row.width_mm else None)
-    add("Alto", f"{row.height_mm} mm" if row.height_mm else None)
-
-    for key, value in sorted((row.variant_attributes or {}).items()):
-        add(str(key).replace("_", " ").capitalize(), value)
-
-    return tuple(specifications)
-
-
-def _build_highlights(
-    row: Any,
-) -> tuple[ProductSpecificationViewModel, ...]:
-    highlights: list[ProductSpecificationViewModel] = []
-
-    def add(label: str, value: object) -> None:
-        displayed_value = _display_attribute(value)
-        if displayed_value and len(highlights) < 6:
-            highlights.append(
-                ProductSpecificationViewModel(label, displayed_value)
-            )
-
-    add("Categoría", row.category_name)
-    add("Marca", row.product_brand)
-    add("Modelo", row.product_model_number)
-    add("Variante", row.variant_title)
-    for key, value in sorted((row.variant_attributes or {}).items()):
-        add(str(key).replace("_", " ").capitalize(), value)
-
-    return tuple(highlights)
 
 
 def _availability_by_offer_ids(
@@ -3315,7 +3248,7 @@ def product_detail(product_slug: str) -> str:
         availability_message,
     ) = _stock_presentation(available_quantity)
     is_available = available_quantity > 0
-    specifications = _build_specifications(row)
+    specification_presentation = build_product_specification_presentation(row)
     favorite_ids = _favorite_ids_for_product_ids({row.product_id})
     reviews_page = published_reviews_for_product(
         db.session,
@@ -3362,8 +3295,8 @@ def product_detail(product_slug: str) -> str:
             product_slug=product_record.slug,
         ),
         gallery_placeholder_url=placeholder_image,
-        specifications=specifications,
-        highlights=_build_highlights(row),
+        specifications=specification_presentation.sections,
+        highlights=specification_presentation.highlights,
         rating=reviews_page.summary.average,
         review_count=reviews_page.summary.count,
         availability_label=availability_label,

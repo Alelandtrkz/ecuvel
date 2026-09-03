@@ -561,6 +561,8 @@ def test_private_storefront_preview_selects_variants_and_isolates_color_media(cl
     selected_title = re.search(r'<h1 id="product-title">([^<]+)</h1>', selected_html)
     assert selected_title is not None
     assert selected_title.group(1) == "iPhone 17 Pro Max — Azul"
+    assert "SKU:" in selected_html
+    assert blue_sku in selected_html
     assert selected_html.count(str(images[0].id)) > selected_html.count(str(images[1].id))
     assert "Producto agotado" in selected_html
     assert 'data-preview-commercial' in selected_html

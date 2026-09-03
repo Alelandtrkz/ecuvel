@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 import uuid
+from copy import deepcopy
 from decimal import Decimal
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.extensions import db
-from app.models import InventoryBalance, Product, ProductMedia, ProductVariant, SellerOffer, Store
+from app.models import Category, InventoryBalance, Product, ProductMedia, ProductVariant, SellerOffer, Store
 from app.models.enums import OfferStatus, StoreStatus
 from app.storefront import _build_product_gallery_images
 from tests.factories import BaseData, create_catalog_and_stock
@@ -143,6 +144,84 @@ def test_product_detail_returns_200(client, session: Session):
         balance.reserved_quantity,
         balance.blocked_quantity,
     ) == balance_snapshot
+
+
+def test_product_detail_renders_buyer_specs_without_mutating_operational_data(
+    client,
+    session: Session,
+):
+    base = create_catalog_and_stock(session, stock=8)
+    product, variant, offer = _catalog_entities(session, base)
+    category = session.get(Category, product.category_id)
+    assert category is not None
+    category.code = "ELECTRONICS_PHONES"
+    product.brand = "Apple"
+    product.model_number = "iPhone 17 Pro Max"
+    variant.manufacturer_barcode = "CRI-00000002-000042"
+    variant.weight_grams = 500
+    variant.attributes = {
+        "condition": "NEW",
+        "country_origin": "Estados Unidos",
+        "tipo_producto": "Smartphone",
+        "ram_gb": "8",
+        "almacenamiento_gb": "512",
+        "pantalla_pulgadas": "6.7",
+        "camara_principal_mp": "48",
+        "bateria_mah": "5647",
+        "warranty": {"type": "Garantía de tienda", "duration": "3", "unit": "meses"},
+        "package_contents": ["Teléfono", "Cable USB-C"],
+        "highlights": ["Acabado resistente", "<script>alert('d2')</script>"],
+        "variant_options": {"color_principal": "Naranja"},
+        "unknown_private_key": {"storage_key": "private/secret.jpg"},
+    }
+    operational_snapshot = {
+        "catalog_sku": variant.catalog_sku,
+        "seller_sku": offer.seller_sku,
+        "combination_key": variant.combination_key,
+        "manufacturer_barcode": variant.manufacturer_barcode,
+        "attributes": deepcopy(variant.attributes),
+    }
+    session.commit()
+
+    body = client.get(f"/productos/{product.slug}").get_data(as_text=True)
+
+    assert body.count("Ficha técnica") == 1
+    assert body.count(">Especificaciones</h2>") == 1
+    assert "Información general" not in body
+    assert "Especificaciones técnicas" not in body
+    assert "Batería y energía" not in body
+    assert re.search(r"<dt>\s*Estado\s*</dt>", body) is None
+    assert re.search(r"<dd[^>]*>\s*Nuevo\s*</dd>", body) is None
+    assert "País de origen" in body and "Estados Unidos" in body
+    assert "8 GB" in body and "512 GB" in body
+    assert "6,7 pulgadas" in body and "48 MP" in body and "5647 mAh" in body
+    assert "Garantía de tienda · 3 meses" in body
+    assert "Contenido del paquete" in body and "Cable USB-C" in body
+    assert "Características destacadas" in body and "Acabado resistente" in body
+    assert "&lt;script&gt;alert" in body
+    assert "<script>alert('d2')</script>" not in body
+    assert "SKU del vendedor" not in body
+    assert "SKU del catálogo" not in body
+    assert "<span>SKU:" not in body
+    assert "Variant options" not in body
+    assert "Unknown private key" not in body
+    assert "private/secret.jpg" not in body
+    assert "CRI-00000002-000042" not in body
+    assert "[&quot;" not in body and "{&quot;" not in body
+    assert 'class="product-specs product-specs--buyer"' in body
+    assert "product-specification-section" not in body
+
+    session.expire_all()
+    refreshed_variant = session.get(ProductVariant, variant.id)
+    refreshed_offer = session.get(SellerOffer, offer.id)
+    assert refreshed_variant is not None and refreshed_offer is not None
+    assert {
+        "catalog_sku": refreshed_variant.catalog_sku,
+        "seller_sku": refreshed_offer.seller_sku,
+        "combination_key": refreshed_variant.combination_key,
+        "manufacturer_barcode": refreshed_variant.manufacturer_barcode,
+        "attributes": refreshed_variant.attributes,
+    } == operational_snapshot
 
 
 def test_product_detail_recommendations_use_compact_offer_eta(
