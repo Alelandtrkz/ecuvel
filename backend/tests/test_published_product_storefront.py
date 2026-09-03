@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import html
+import json
+import re
+
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -104,6 +108,23 @@ def test_family_detail_exposes_only_active_variants_and_switches_by_sku(
     assert first.status_code == 200
     assert enabled[0]["sku"] in first_body
     assert enabled[0]["name"] in first_body
+
+    payload_match = re.search(
+        r'<script type="application/json" data-product-variant-payload>(.*?)</script>',
+        first_body,
+        re.DOTALL,
+    )
+    assert payload_match is not None
+    payload = json.loads(html.unescape(payload_match.group(1)))
+    for public_variant in payload["variants"]:
+        assert public_variant["images"]
+        for image in public_variant["images"]:
+            assert image["master_url"].split("?", 1)[0].endswith(image["identity"])
+            assert "/thumbnail?v=" in image["thumbnail_url"]
+            assert image["master_width"] > 0
+            assert image["master_height"] > 0
+            assert image["thumbnail_width"] > 0
+            assert image["thumbnail_height"] > 0
 
     sold_out = client.get(
         f"/productos/{product.slug}?variant={enabled[1]['sku']}"

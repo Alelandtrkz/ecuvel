@@ -225,12 +225,20 @@ class ProductCardViewModel:
 
 @dataclass(frozen=True, slots=True)
 class ProductGalleryImageViewModel:
-    url: str
+    master_url: str
     thumbnail_url: str
     alt: str
-    width: int | None
-    height: int | None
+    master_width: int | None
+    master_height: int | None
+    thumbnail_width: int | None
+    thumbnail_height: int | None
+    identity: str
     is_primary: bool
+
+    @property
+    def url(self) -> str:
+        """Backward-compatible alias for the master presentation URL."""
+        return self.master_url
 
 
 @dataclass(frozen=True, slots=True)
@@ -880,25 +888,79 @@ def _display_attribute(value: object) -> str:
 
 def _build_product_gallery_images(
     product_name: str,
-    image_urls: Iterable[str | None],
+    image_sources: Iterable[str | None | ProductMedia],
+    *,
+    product_slug: str | None = None,
 ) -> tuple[ProductGalleryImageViewModel, ...]:
     images: list[ProductGalleryImageViewModel] = []
-    seen_urls: set[str] = set()
+    seen_images: set[tuple[str, ...]] = set()
 
-    for image_url in image_urls:
-        normalized_url = (image_url or "").strip()
-        if not normalized_url or normalized_url in seen_urls:
+    for source in image_sources:
+        if isinstance(source, ProductMedia):
+            if not product_slug:
+                raise ValueError("product_slug is required for ProductMedia galleries")
+            master_url = _versioned_media_url(
+                "storefront.product_media",
+                product_slug=product_slug,
+                media=source,
+                version=source.content_sha256,
+            )
+            has_thumbnail = product_thumbnail_file_exists(
+                source,
+                media_root=current_app.config["PRODUCT_CATALOG_MEDIA_DIR"],
+            )
+            thumbnail_url = (
+                _versioned_media_url(
+                    "storefront.product_media_thumbnail",
+                    product_slug=product_slug,
+                    media=source,
+                    version=source.thumbnail_sha256,
+                )
+                if has_thumbnail
+                else master_url
+            )
+            master_width = source.width
+            master_height = source.height
+            thumbnail_width = source.thumbnail_width if has_thumbnail else source.width
+            thumbnail_height = source.thumbnail_height if has_thumbnail else source.height
+            identity = source.public_id
+            dedupe_key = (
+                (
+                    "sha256",
+                    source.content_sha256,
+                    source.variant_axis_key or "",
+                    source.variant_value_key or "",
+                )
+                if source.content_sha256
+                else ("legacy-url", master_url)
+            )
+        else:
+            master_url = (source or "").strip()
+            if not master_url:
+                continue
+            thumbnail_url = master_url
+            master_width = None
+            master_height = None
+            thumbnail_width = None
+            thumbnail_height = None
+            identity = master_url
+            dedupe_key = ("url", master_url)
+
+        if dedupe_key in seen_images:
             continue
 
-        seen_urls.add(normalized_url)
+        seen_images.add(dedupe_key)
         image_number = len(images) + 1
         images.append(
             ProductGalleryImageViewModel(
-                url=normalized_url,
-                thumbnail_url=normalized_url,
+                master_url=master_url,
+                thumbnail_url=thumbnail_url,
                 alt=f"{product_name}, vista {image_number}",
-                width=None,
-                height=None,
+                master_width=master_width,
+                master_height=master_height,
+                thumbnail_width=thumbnail_width,
+                thumbnail_height=thumbnail_height,
+                identity=identity,
                 is_primary=image_number == 1,
             )
         )
@@ -914,20 +976,28 @@ def _variant_value_key(
     return variant_value_key(configuration, attributes, axis_key)
 
 
+def _media_for_variant(
+    *,
+    product: Product,
+    attributes: dict[str, Any],
+) -> tuple[ProductMedia, ...]:
+    visual_key, value_key = variant_media_binding(
+        product.variant_configuration or {},
+        attributes or {},
+    )
+    return ordered_product_media(
+        product.media,
+        variant_axis_key=visual_key,
+        variant_value_key=value_key,
+    )
+
+
 def _media_urls_for_variant(
     *,
     product: Product,
     attributes: dict[str, Any],
 ) -> tuple[str, ...]:
-    visual_key, value_key = variant_media_binding(
-        product.variant_configuration or {},
-        attributes or {},
-    )
-    selected = ordered_product_media(
-        product.media,
-        variant_axis_key=visual_key,
-        variant_value_key=value_key,
-    )
+    """Return versioned master URLs for non-gallery compatibility callers."""
     return tuple(
         _versioned_media_url(
             "storefront.product_media",
@@ -935,8 +1005,33 @@ def _media_urls_for_variant(
             media=media,
             version=media.content_sha256,
         )
-        for media in selected
+        for media in _media_for_variant(product=product, attributes=attributes)
     )
+
+
+def _media_payload_for_variant(
+    *,
+    product: Product,
+    attributes: dict[str, Any],
+) -> list[dict[str, Any]]:
+    images = _build_product_gallery_images(
+        product.title,
+        _media_for_variant(product=product, attributes=attributes),
+        product_slug=product.slug,
+    )
+    return [
+        {
+            "master_url": image.master_url,
+            "thumbnail_url": image.thumbnail_url,
+            "master_width": image.master_width,
+            "master_height": image.master_height,
+            "thumbnail_width": image.thumbnail_width,
+            "thumbnail_height": image.thumbnail_height,
+            "alt": image.alt,
+            "identity": image.identity,
+        }
+        for image in images
+    ]
 
 
 def _build_variant_payload(
@@ -969,7 +1064,10 @@ def _build_variant_payload(
             "delivery_label": _full_delivery_label(
                 row.preparation_time_days
             ),
-            "images": list(_media_urls_for_variant(product=product, attributes=row.variant_attributes or {})),
+            "images": _media_payload_for_variant(
+                product=product,
+                attributes=row.variant_attributes or {},
+            ),
         })
     return {
         "base_title": product.title,
@@ -3257,10 +3355,11 @@ def product_detail(product_slug: str) -> str:
         offer_status=row.offer_status,
         gallery_images=_build_product_gallery_images(
             row.product_title,
-            _media_urls_for_variant(
+            _media_for_variant(
                 product=product_record,
                 attributes=row.variant_attributes or {},
             ),
+            product_slug=product_record.slug,
         ),
         gallery_placeholder_url=placeholder_image,
         specifications=specifications,

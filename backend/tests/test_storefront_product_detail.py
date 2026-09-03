@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+import re
 import uuid
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from flask import render_template_string
-from sqlalchemy import select
+from sqlalchemy import event, select
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from app.extensions import db
@@ -443,7 +446,7 @@ def test_product_gallery_renders_all_product_images(app):
 
     body = _render_gallery(app, images)
 
-    assert body.count("data-gallery-thumbnail") == 3
+    assert len(re.findall(r"<button[^>]+data-gallery-thumbnail(?:\s|>)", body)) == 3
     assert 'data-gallery-index="0"' in body
     assert 'data-gallery-index="1"' in body
     assert 'data-gallery-index="2"' in body
@@ -472,6 +475,222 @@ def test_product_gallery_deduplicates_repeated_image_urls():
     ]
     assert images[0].is_primary is True
     assert images[1].is_primary is False
+
+
+def _gallery_media(
+    *,
+    public_id: str,
+    sha: str | None,
+    thumbnail_sha: str | None = None,
+    binding: str | None = "azul",
+) -> ProductMedia:
+    return ProductMedia(
+        product_id=uuid.uuid4(),
+        public_id=public_id,
+        storage_key=f"products/demo/{public_id}/master.webp",
+        media_type="image/webp",
+        size_bytes=100,
+        width=1000,
+        height=800,
+        content_sha256=sha,
+        thumbnail_storage_key=(
+            f"products/demo/{public_id}/thumbnail.webp" if thumbnail_sha else None
+        ),
+        thumbnail_media_type="image/webp" if thumbnail_sha else None,
+        thumbnail_size_bytes=50 if thumbnail_sha else None,
+        thumbnail_width=640 if thumbnail_sha else None,
+        thumbnail_height=512 if thumbnail_sha else None,
+        thumbnail_sha256=thumbnail_sha,
+        processing_version=1 if sha else None,
+        variant_axis_key="color" if binding else None,
+        variant_value_key=binding,
+        position=0,
+        is_cover=True,
+        is_active=True,
+    )
+
+
+def test_product_gallery_media_contract_uses_separate_versioned_derivatives(
+    app, tmp_path,
+):
+    master_sha = hashlib.sha256(b"master").hexdigest()
+    thumbnail_sha = hashlib.sha256(b"thumbnail").hexdigest()
+    media = _gallery_media(
+        public_id="media-contract",
+        sha=master_sha,
+        thumbnail_sha=thumbnail_sha,
+    )
+    thumbnail_path = tmp_path / str(media.thumbnail_storage_key)
+    thumbnail_path.parent.mkdir(parents=True)
+    thumbnail_path.write_bytes(b"thumbnail")
+    app.config["PRODUCT_CATALOG_MEDIA_DIR"] = str(tmp_path)
+
+    with app.test_request_context():
+        images = _build_product_gallery_images(
+            "Producto Demo",
+            [media],
+            product_slug="producto-demo",
+        )
+        body = _render_gallery(app, images, "Producto Demo")
+
+    assert len(images) == 1
+    image = images[0]
+    assert image.master_url.endswith(f"/media/{media.public_id}?v={master_sha}")
+    assert image.thumbnail_url.endswith(
+        f"/media/{media.public_id}/thumbnail?v={thumbnail_sha}"
+    )
+    assert (image.master_width, image.master_height) == (1000, 800)
+    assert (image.thumbnail_width, image.thumbnail_height) == (640, 512)
+    assert f'src="{image.master_url}"' in body
+    assert f'src="{image.thumbnail_url}"' not in body  # one image has no rail
+    assert body.count('width="1000" height="800"') == 2
+    assert 'width="1200" height="1200"' not in body
+    assert str(media.storage_key) not in body
+
+
+def test_product_gallery_falls_back_to_master_when_thumbnail_is_unavailable(
+    app, tmp_path,
+):
+    master_sha = hashlib.sha256(b"master-only").hexdigest()
+    thumbnail_sha = hashlib.sha256(b"missing-thumbnail").hexdigest()
+    media = _gallery_media(
+        public_id="missing-thumbnail",
+        sha=master_sha,
+        thumbnail_sha=thumbnail_sha,
+    )
+    app.config["PRODUCT_CATALOG_MEDIA_DIR"] = str(tmp_path)
+
+    with app.test_request_context():
+        image = _build_product_gallery_images(
+            "Producto Demo",
+            [media],
+            product_slug="producto-demo",
+        )[0]
+
+    assert image.thumbnail_url == image.master_url
+    assert (image.thumbnail_width, image.thumbnail_height) == (1000, 800)
+
+
+def test_product_gallery_rail_uses_thumbnail_hash_and_dimensions(app, tmp_path):
+    media_rows = []
+    for index in range(2):
+        master_sha = hashlib.sha256(f"master-{index}".encode()).hexdigest()
+        thumbnail_sha = hashlib.sha256(f"thumbnail-{index}".encode()).hexdigest()
+        media = _gallery_media(
+            public_id=f"rail-{index}",
+            sha=master_sha,
+            thumbnail_sha=thumbnail_sha,
+        )
+        thumbnail_path = tmp_path / str(media.thumbnail_storage_key)
+        thumbnail_path.parent.mkdir(parents=True, exist_ok=True)
+        thumbnail_path.write_bytes(f"thumbnail-{index}".encode())
+        media_rows.append(media)
+    app.config["PRODUCT_CATALOG_MEDIA_DIR"] = str(tmp_path)
+
+    with app.test_request_context():
+        images = _build_product_gallery_images(
+            "Producto Demo",
+            media_rows,
+            product_slug="producto-demo",
+        )
+        body = _render_gallery(app, images, "Producto Demo")
+
+    for image in images:
+        assert f'src="{image.thumbnail_url}"' in body
+        assert f'data-gallery-master-url="{image.master_url}"' in body
+    assert body.count('width="640" height="512"') == 2
+    assert all(image.thumbnail_url != image.master_url for image in images)
+
+
+def test_product_gallery_deduplicates_processed_content_without_deleting_rows(
+    app, tmp_path,
+):
+    shared_sha = hashlib.sha256(b"shared-master").hexdigest()
+    thumbnail_sha = hashlib.sha256(b"shared-thumbnail").hexdigest()
+    duplicate_one = _gallery_media(
+        public_id="duplicate-one",
+        sha=shared_sha,
+        thumbnail_sha=thumbnail_sha,
+    )
+    duplicate_two = _gallery_media(
+        public_id="duplicate-two",
+        sha=shared_sha,
+        thumbnail_sha=thumbnail_sha,
+    )
+    distinct = _gallery_media(
+        public_id="distinct",
+        sha=hashlib.sha256(b"distinct-master").hexdigest(),
+        thumbnail_sha=thumbnail_sha,
+    )
+    app.config["PRODUCT_CATALOG_MEDIA_DIR"] = str(tmp_path)
+
+    with app.test_request_context():
+        images = _build_product_gallery_images(
+            "Producto Demo",
+            [duplicate_one, duplicate_two, distinct],
+            product_slug="producto-demo",
+        )
+        legacy_images = _build_product_gallery_images(
+            "Producto Demo",
+            [
+                _gallery_media(public_id="legacy-one", sha=None),
+                _gallery_media(public_id="legacy-two", sha=None),
+            ],
+            product_slug="producto-demo",
+        )
+
+    assert [image.identity for image in images] == ["duplicate-one", "distinct"]
+    assert [image.identity for image in legacy_images] == ["legacy-one", "legacy-two"]
+    assert duplicate_one.public_id == "duplicate-one"
+    assert duplicate_two.public_id == "duplicate-two"
+
+
+def test_product_detail_gallery_query_count_is_constant_for_media_rows(
+    client,
+    engine: Engine,
+    session: Session,
+):
+    base = create_catalog_and_stock(session, stock=8)
+    product, _variant, _offer = _catalog_entities(session, base)
+    session.commit()
+
+    def measured_get() -> int:
+        statements: list[str] = []
+
+        def record(_conn, _cursor, statement, _params, _context, _executemany):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            response = client.get(f"/productos/{product.slug}")
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        assert response.status_code == 200
+        return len(statements)
+
+    without_media = measured_get()
+    for index in range(10):
+        session.add(
+            ProductMedia(
+                product_id=product.id,
+                public_id=f"query-media-{index}",
+                storage_key=f"query/media-{index}.jpg",
+                media_type="image/jpeg",
+                size_bytes=100,
+                position=index,
+                is_cover=index == 0,
+                is_active=True,
+            )
+        )
+    session.commit()
+    with_media = measured_get()
+
+    assert without_media == with_media == 11
+
+    with client.session_transaction() as browser_session:
+        browser_session["_user_id"] = str(base.buyer_id)
+        browser_session["_fresh"] = True
+    assert measured_get() == 14
 
 
 def test_product_gallery_uses_accessible_alt_text(app):
