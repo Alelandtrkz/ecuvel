@@ -50,23 +50,28 @@
       </div>
     </div>
     <p class="purchase-card__stock-message purchase-card__stock-message--{{ 'low' if product.low_stock else 'unavailable' }}" data-stock-message aria-live="polite" {% if not product.low_stock and product.is_available %}hidden{% endif %}>{{ product.availability_message }}</p>
-    <button
-      class="button button--primary purchase-card__add"
-      type="submit"
-      {{ 'disabled' if not product.is_available }}
-    >
-      <i data-lucide="shopping-cart" aria-hidden="true"></i>
-      Añadir al carrito
-    </button>
+    <div class="purchase-card__cta-group">
+      <button
+        class="button button--primary purchase-card__add"
+        type="submit"
+        name="intent"
+        value="add_to_cart"
+        {{ 'disabled' if not product.is_available }}
+      >
+        <i data-lucide="shopping-cart" aria-hidden="true"></i>
+        Añadir al carrito
+      </button>
+      <button
+        class="button button--secondary purchase-card__buy-now"
+        type="submit"
+        name="intent"
+        value="buy_now"
+        data-variant-buy-now
+        {% if not product.is_available %}disabled{% endif %}
+      >Comprar ahora</button>
+    </div>
   </form>
   <div class="purchase-card__actions">
-    <button
-      class="button button--secondary"
-      type="button"
-      data-variant-buy-now
-      data-notice="La compra directa estará disponible próximamente."
-      {% if not product.is_available %}disabled{% endif %}
-    >Comprar ahora</button>
     <form
       class="purchase-card__favorite-form"
       method="post"

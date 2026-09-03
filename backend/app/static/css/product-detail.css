@@ -653,6 +653,15 @@ body.gallery-lightbox-open {
   margin-top: var(--space-5);
 }
 
+.purchase-card__cta-group {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.purchase-card__cta-group .button {
+  width: 100%;
+}
+
 .purchase-card__favorite {
   min-height: 44px;
   display: flex;
@@ -668,6 +677,14 @@ body.gallery-lightbox-open {
 
 .purchase-card__favorite:hover {
   background: var(--color-primary-soft);
+}
+
+.purchase-card__favorite.is-active {
+  color: var(--color-danger);
+}
+
+.purchase-card__favorite.is-active svg {
+  fill: currentColor;
 }
 
 .purchase-card__favorite svg {
@@ -1022,7 +1039,27 @@ body.gallery-lightbox-open {
     position: static;
     display: grid;
     grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "availability prices"
+      "delivery delivery"
+      "cart actions";
     gap: var(--space-4) var(--space-6);
+  }
+
+  .purchase-card__availability {
+    grid-area: availability;
+  }
+
+  .purchase-card__prices {
+    grid-area: prices;
+  }
+
+  .purchase-card__delivery {
+    grid-area: delivery;
+  }
+
+  .purchase-card__cart-form {
+    grid-area: cart;
   }
 
   .purchase-card__availability,
@@ -1034,8 +1071,8 @@ body.gallery-lightbox-open {
   }
 
   .purchase-card__actions {
-    grid-column: 2;
-    grid-row: 1 / span 4;
+    grid-area: actions;
+    align-self: start;
   }
 }
 

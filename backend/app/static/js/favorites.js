@@ -1,4 +1,26 @@
-document.addEventListener("DOMContentLoaded", () => {
+(function initializeFavoriteState(global) {
+  const applyButtonState = (button, isFavorite) => {
+    button.classList.toggle("is-active", isFavorite);
+    button.setAttribute("aria-pressed", String(isFavorite));
+    const label = button.getAttribute("aria-label") || "";
+    button.setAttribute("aria-label", isFavorite
+      ? label
+        .replace(/^Añadir|^Guardar/, "Eliminar")
+        .replace(" a favoritos", " de favoritos")
+        .replace(" en favoritos", " de favoritos")
+      : label
+        .replace(/^Eliminar/, "Añadir")
+        .replace(" de favoritos", " a favoritos"));
+    const text = button.querySelector("span");
+    if (text && /favoritos/i.test(text.textContent || "")) {
+      text.textContent = isFavorite ? "Guardado en favoritos" : "Guardar en favoritos";
+    }
+  };
+
+  global.EcuvelFavoriteState = { applyButtonState };
+})(typeof window !== "undefined" ? window : globalThis);
+
+if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded", () => {
   const liveRegion = document.createElement("div");
   liveRegion.className = "visually-hidden";
   liveRegion.setAttribute("aria-live", "polite");
@@ -33,19 +55,7 @@ document.addEventListener("DOMContentLoaded", () => {
           isFavorite ? "/agregar" : "/eliminar",
           isFavorite ? "/eliminar" : "/agregar",
         );
-        button.classList.toggle("is-active", isFavorite);
-        button.setAttribute("aria-pressed", String(isFavorite));
-        const label = button.getAttribute("aria-label") || "";
-        button.setAttribute(
-          "aria-label",
-          isFavorite
-            ? label.replace(/^Añadir|^Guardar/, "Eliminar").replace(" a favoritos", " de favoritos")
-            : label.replace(/^Eliminar/, "Añadir").replace(" de favoritos", " a favoritos"),
-        );
-        const text = button.querySelector("span");
-        if (text && /favoritos/i.test(text.textContent || "")) {
-          text.textContent = isFavorite ? "Guardado en favoritos" : "Guardar en favoritos";
-        }
+        window.EcuvelFavoriteState.applyButtonState(button, isFavorite);
       });
   };
 

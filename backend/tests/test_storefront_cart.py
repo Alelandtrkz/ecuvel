@@ -103,6 +103,24 @@ def _add(client, offer_id: uuid.UUID, quantity: str = "1", **extra):
     return client.post("/carrito/agregar", data=data)
 
 
+def _buy_now(
+    client,
+    offer_id: uuid.UUID | str,
+    quantity: str = "1",
+    *,
+    headers: dict[str, str] | None = None,
+    **extra,
+):
+    data = {
+        "offer_id": str(offer_id),
+        "quantity": quantity,
+        "next": "/productos/product-test",
+        "intent": "buy_now",
+        **extra,
+    }
+    return client.post("/carrito/agregar", data=data, headers=headers)
+
+
 def _cart_items(client) -> dict:
     with client.session_transaction() as browser_session:
         return browser_session.get("cart", {}).get("items", {})
@@ -628,3 +646,190 @@ def test_cart_uses_one_inventory_query_for_multiple_offers(
 
     assert response.status_code == 200
     assert len(inventory_queries) == 1
+
+
+def test_buy_now_preserves_cart_contents_selection_and_uses_quantity(
+    client, session: Session
+):
+    base = create_catalog_and_stock(session, stock=10)
+    session.commit()
+    selected_offer = uuid.uuid4()
+    unselected_offer = uuid.uuid4()
+    with client.session_transaction() as browser_session:
+        browser_session["cart"] = {
+            "version": 1,
+            "items": {
+                str(selected_offer): {"quantity": 2, "selected": True},
+                str(unselected_offer): {"quantity": 4, "selected": False},
+            },
+        }
+
+    response = _buy_now(client, base.offer_id, "3")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/carrito")
+    assert _cart_items(client) == {
+        str(selected_offer): {"quantity": 2, "selected": True},
+        str(unselected_offer): {"quantity": 4, "selected": False},
+        str(base.offer_id): {"quantity": 3, "selected": True},
+    }
+
+
+def test_add_and_buy_now_have_identical_existing_line_mutation(app, session: Session):
+    base = create_catalog_and_stock(session, stock=10)
+    session.commit()
+    add_client = app.test_client()
+    buy_client = app.test_client()
+    for test_client in (add_client, buy_client):
+        _set_cart_item(test_client, base.offer_id, 1, selected=False)
+
+    add_response = _add(
+        add_client,
+        base.offer_id,
+        "2",
+        next="/productos/product-test",
+        intent="add_to_cart",
+    )
+    buy_response = _buy_now(buy_client, base.offer_id, "2")
+
+    assert _cart_items(add_client) == _cart_items(buy_client) == {
+        str(base.offer_id): {"quantity": 3, "selected": True}
+    }
+    assert add_response.headers["Location"].endswith("/productos/product-test")
+    assert buy_response.headers["Location"].endswith("/carrito")
+    db.session.remove()
+
+
+@pytest.mark.parametrize("quantity", ["0", "-1", "1.5", "texto", "1000"])
+def test_buy_now_rejects_invalid_quantity_without_success_redirect(
+    client, session: Session, quantity: str
+):
+    base = create_catalog_and_stock(session)
+    session.commit()
+
+    response = _buy_now(
+        client,
+        base.offer_id,
+        quantity,
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.get_json()["ok"] is False
+    assert _cart_items(client) == {}
+
+
+def test_buy_now_rejects_tampered_and_inactive_offers(client, session: Session):
+    base = create_catalog_and_stock(session)
+    offer = session.get(SellerOffer, base.offer_id)
+    assert offer is not None
+    session.commit()
+
+    tampered = _buy_now(
+        client,
+        "not-a-uuid",
+        headers={"Accept": "application/json"},
+    )
+    offer.status = OfferStatus.PAUSED
+    session.commit()
+    inactive = _buy_now(
+        client,
+        offer.id,
+        headers={"Accept": "application/json"},
+    )
+
+    assert tampered.status_code == 422
+    assert inactive.status_code == 409
+    assert tampered.get_json()["ok"] is False
+    assert inactive.get_json()["error"] == "offer_unavailable"
+    assert _cart_items(client) == {}
+
+
+def test_buy_now_revalidates_stock_after_product_render(client, session: Session):
+    base = create_catalog_and_stock(session, stock=1)
+    product, _variant, offer, balance = _entities(session, base)
+    session.commit()
+    rendered = client.get(f"/productos/{product.slug}")
+    assert rendered.status_code == 200
+    assert "Comprar ahora" in rendered.get_data(as_text=True)
+
+    balance.reserved_quantity = 1
+    session.commit()
+    response = _buy_now(
+        client,
+        offer.id,
+        headers={"Accept": "application/json"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "insufficient_stock"
+    assert _cart_items(client) == {}
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_buy_now_matches_anonymous_and_authenticated_cart_policy(
+    client, session: Session, authenticated: bool
+):
+    base = create_catalog_and_stock(session, stock=4)
+    session.commit()
+    if authenticated:
+        with client.session_transaction() as browser_session:
+            browser_session["_user_id"] = str(base.buyer_id)
+            browser_session["_fresh"] = True
+
+    response = _buy_now(client, base.offer_id, "2")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/carrito")
+    assert _cart_items(client)[str(base.offer_id)] == {
+        "quantity": 2,
+        "selected": True,
+    }
+
+
+def test_buy_now_is_post_only_and_csrf_protected(client, app, session: Session):
+    base = create_catalog_and_stock(session)
+    session.commit()
+    previous = app.config["WTF_CSRF_ENABLED"]
+    app.config["WTF_CSRF_ENABLED"] = True
+    try:
+        assert client.get("/carrito/agregar").status_code == 405
+        response = _buy_now(client, base.offer_id)
+        assert response.status_code == 400
+        assert _cart_items(client) == {}
+    finally:
+        app.config["WTF_CSRF_ENABLED"] = previous
+
+
+def test_add_and_buy_now_use_same_database_query_pattern(app, engine, session: Session):
+    base = create_catalog_and_stock(session, stock=10)
+    session.commit()
+
+    def measured_post(intent: str) -> list[str]:
+        test_client = app.test_client()
+        statements: list[str] = []
+
+        def record(_conn, _cursor, statement, _params, _context, _executemany):
+            statements.append(" ".join(statement.split()))
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            response = test_client.post(
+                "/carrito/agregar",
+                data={
+                    "offer_id": str(base.offer_id),
+                    "quantity": "1",
+                    "next": "/productos/product-test",
+                    "intent": intent,
+                },
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        assert response.status_code == 302
+        return statements
+
+    add_statements = measured_post("add_to_cart")
+    buy_statements = measured_post("buy_now")
+
+    assert add_statements == buy_statements
+    assert len(add_statements) == 2

@@ -199,6 +199,8 @@ MAX_SEARCH_LENGTH = 100
 MAX_CATEGORY_LENGTH = 140
 MAX_RECOMMENDATIONS = 10
 CART_SESSION_KEY = "cart"
+CART_INTENT_ADD = "add_to_cart"
+CART_INTENT_BUY_NOW = "buy_now"
 CHECKOUT_DRAFT_SESSION_KEY = "checkout_draft"
 CHECKOUT_ORDERS_SESSION_KEY = "checkout_order_ids"
 COMPLETED_CHECKOUTS_SESSION_KEY = "completed_checkouts"
@@ -2731,6 +2733,19 @@ def payment_proof_too_large(_error):
 @storefront.post("/carrito/agregar")
 def add_to_cart():
     next_url = _safe_next_url(_request_value("next"))
+    intent = (_request_value("intent") or CART_INTENT_ADD).strip()
+    if intent not in {CART_INTENT_ADD, CART_INTENT_BUY_NOW}:
+        return _cart_error_response(
+            message="La acción solicitada no es válida.",
+            error="invalid_intent",
+            status=422,
+            redirect_url=next_url,
+        )
+    success_url = (
+        url_for("storefront.cart")
+        if intent == CART_INTENT_BUY_NOW
+        else next_url
+    )
     try:
         offer_id = uuid.UUID(_request_value("offer_id") or "")
         quantity = _validated_cart_quantity(_request_value("quantity"))
@@ -2823,7 +2838,7 @@ def add_to_cart():
         _record_server_action_event("ADD_TO_CART", ranking_context)
     return _cart_success_response(
         message="Producto añadido al carrito.",
-        redirect_url=next_url,
+        redirect_url=success_url,
         quantity=requested_total,
         max_quantity=max_quantity,
     )

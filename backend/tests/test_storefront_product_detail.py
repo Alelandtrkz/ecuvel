@@ -565,9 +565,11 @@ def test_product_detail_variant_selector_stays_in_opened_store(client, session: 
             "offer_id": str(second_offer.id),
             "quantity": "1",
             "next": f"/productos/{product.slug}?variant={second_variant.catalog_sku}",
+            "intent": "buy_now",
         },
     )
     assert added.status_code == 302
+    assert added.headers["Location"].endswith("/carrito")
     with client.session_transaction() as browser_session:
         assert browser_session["cart"]["items"][str(second_offer.id)] == {
             "quantity": 1,

@@ -1033,14 +1033,36 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll("[data-cart-add-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (form.dataset.submitting === "true") return;
       const input = form.querySelector("input[name='quantity']");
+      const submitter = event.submitter || form.querySelector("button[type='submit']");
+      const submitButtons = Array.from(form.querySelectorAll("button[type='submit']"));
+      const initiallyDisabled = new Map(
+        submitButtons.map((button) => [button, button.disabled]),
+      );
+      const formData = new FormData(form);
+      if (submitter?.name) formData.set(submitter.name, submitter.value);
+      form.dataset.submitting = "true";
+      form.setAttribute("aria-busy", "true");
+      submitter?.setAttribute("aria-busy", "true");
+      submitButtons.forEach((button) => { button.disabled = true; });
+
+      const restoreSubmissionState = () => {
+        delete form.dataset.submitting;
+        form.removeAttribute("aria-busy");
+        submitter?.removeAttribute("aria-busy");
+        submitButtons.forEach((button) => {
+          button.disabled = initiallyDisabled.get(button) || false;
+        });
+      };
       try {
         const response = await fetch(form.action, {
           method: "POST",
-          body: new FormData(form),
+          body: formData,
           headers: { Accept: "application/json" },
+          credentials: "same-origin",
         });
-        const payload = await response.json();
+        const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
           if (input && payload.max_quantity) {
             input.max = String(payload.max_quantity);
@@ -1049,10 +1071,18 @@ document.addEventListener("DOMContentLoaded", () => {
             );
           }
           showDynamicNotice(payload.message || "No fue posible añadir el producto.");
+          restoreSubmissionState();
           return;
         }
         window.location.assign(payload.redirect_url || window.location.href);
       } catch (_error) {
+        if (submitter?.name) {
+          const fallbackIntent = document.createElement("input");
+          fallbackIntent.type = "hidden";
+          fallbackIntent.name = submitter.name;
+          fallbackIntent.value = submitter.value;
+          form.append(fallbackIntent);
+        }
         HTMLFormElement.prototype.submit.call(form);
       }
     });
