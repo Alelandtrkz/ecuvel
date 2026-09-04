@@ -1,6 +1,67 @@
-document.documentElement.classList.add("js");
+(function initializeCartConfirmation(global) {
+  const createDeleteConfirmation = (root, dialog) => {
+    if (!root || !dialog || typeof dialog.showModal !== "function") return null;
 
-document.addEventListener("DOMContentLoaded", () => {
+    const title = dialog.querySelector("[data-cart-delete-title]");
+    const message = dialog.querySelector("[data-cart-delete-message]");
+    const cancelButton = dialog.querySelector("[data-cart-delete-cancel]");
+    const confirmButton = dialog.querySelector("[data-cart-delete-confirm]");
+    const confirmedForms = new WeakSet();
+    let pendingForm = null;
+    let pendingSubmitter = null;
+    let returnFocus = null;
+
+    const closeDialog = () => {
+      if (dialog.open) dialog.close();
+    };
+
+    root.addEventListener("submit", (event) => {
+      const form = event.target.closest?.("[data-cart-delete-form]");
+      if (!form || confirmedForms.has(form)) return;
+
+      event.preventDefault();
+      pendingForm = form;
+      pendingSubmitter = event.submitter || form.querySelector("button[type='submit']");
+      returnFocus = pendingSubmitter;
+      if (title) title.textContent = form.dataset.confirmTitle;
+      if (message) message.textContent = form.dataset.confirmMessage;
+      dialog.showModal();
+    });
+
+    cancelButton?.addEventListener("click", closeDialog);
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      closeDialog();
+    });
+    dialog.addEventListener("close", () => {
+      const focusTarget = returnFocus;
+      pendingForm = null;
+      pendingSubmitter = null;
+      returnFocus = null;
+      focusTarget?.focus();
+    });
+    confirmButton?.addEventListener("click", () => {
+      if (!pendingForm) return;
+      const form = pendingForm;
+      const submitter = pendingSubmitter;
+      confirmedForms.add(form);
+      closeDialog();
+      try {
+        form.requestSubmit(submitter);
+      } finally {
+        confirmedForms.delete(form);
+      }
+    });
+
+    return { closeDialog };
+  };
+
+  global.EcuvelCartConfirmation = { createDeleteConfirmation };
+})(typeof window !== "undefined" ? window : globalThis);
+
+if (typeof document !== "undefined") document.documentElement.classList.add("js");
+
+if (typeof document !== "undefined") document.addEventListener("DOMContentLoaded", () => {
   const toast = document.querySelector("[data-notice-toast]");
   const toastMessage = toast?.querySelector("[data-notice-message]");
   const closeButton = toast?.querySelector("[data-notice-close]");
@@ -109,9 +170,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  document.querySelectorAll("[data-confirm]").forEach((form) => {
-    form.addEventListener("submit", (event) => {
-      if (!window.confirm(form.dataset.confirm)) event.preventDefault();
-    });
-  });
+  window.EcuvelCartConfirmation.createDeleteConfirmation(
+    document,
+    document.querySelector("[data-cart-delete-dialog]"),
+  );
 });

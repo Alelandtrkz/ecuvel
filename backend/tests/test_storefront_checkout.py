@@ -20,6 +20,7 @@ from app.models import (
     User,
 )
 from app.models.enums import OfferStatus, PaymentStatus
+from app.services.cart_storage import load_cart_state_for_user
 from tests.factories import BaseData, create_catalog_and_stock
 
 
@@ -110,9 +111,8 @@ def _set_cart(client, *items: tuple[uuid.UUID, int, bool]) -> None:
         }
 
 
-def _cart_items(client) -> dict:
-    with client.session_transaction() as browser_session:
-        return browser_session.get("cart", {}).get("items", {})
+def _cart_items(session, user_id) -> dict:
+    return load_cart_state_for_user(session, user_id)["items"]
 
 
 def _checkout_token(client) -> str:
@@ -196,7 +196,7 @@ def test_successful_checkout_removes_only_purchased_items(
 
     assert response.status_code == 302
     assert "/checkout/transferencia/" in response.headers["Location"]
-    assert list(_cart_items(client)) == [str(second.id)]
+    assert list(_cart_items(session, base.buyer_id)) == [str(second.id)]
     attempt = session.scalar(select(PaymentAttempt))
     assert attempt is not None
     assert attempt.status == PaymentStatus.AWAITING_PROOF
@@ -217,7 +217,7 @@ def test_failed_checkout_keeps_cart(client, app, session: Session):
     response = _submit(client, token)
 
     assert response.status_code == 302
-    assert str(base.offer_id) in _cart_items(client)
+    assert str(base.offer_id) in _cart_items(session, base.buyer_id)
     assert session.scalar(select(func.count(Order.id))) == 0
     assert session.scalar(select(func.count(PaymentAttempt.id))) == 0
 
@@ -317,6 +317,6 @@ def test_checkout_still_rejects_when_stock_changes_after_cart_validation(
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/checkout")
-    assert _cart_items(client)[str(base.offer_id)]["quantity"] == 3
+    assert _cart_items(session, base.buyer_id)[str(base.offer_id)]["quantity"] == 3
     assert session.scalar(select(func.count(Order.id))) == 0
     assert session.scalar(select(func.count(PaymentAttempt.id))) == 0

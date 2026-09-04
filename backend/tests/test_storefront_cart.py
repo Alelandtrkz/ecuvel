@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import event, func, select
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.extensions import db
 from app.models import (
+    Favorite,
     InventoryBalance,
     InventoryMovement,
     InventoryReservation,
@@ -17,10 +19,18 @@ from app.models import (
     SellerOffer,
 )
 from app.models.enums import OfferStatus
+from app.services.cart_storage import (
+    load_cart_state_for_user,
+    mutate_cart_for_user,
+)
 from tests.factories import BaseData, create_catalog_and_stock
 
 
 pytestmark = pytest.mark.integration
+
+CART_STYLES = (
+    Path(__file__).resolve().parents[1] / "app" / "static" / "css" / "cart.css"
+).read_text(encoding="utf-8")
 
 
 @pytest.fixture
@@ -288,6 +298,55 @@ def test_remove_selected_cart_items(client, session: Session):
 
     assert response.status_code == 302
     assert list(_cart_items(client)) == [str(second_offer.id)]
+
+
+def test_cart_favorite_renders_outline_then_filled_state_after_reload(
+    client,
+    session: Session,
+):
+    base = create_catalog_and_stock(session)
+    product, _variant, _offer, _balance = _entities(session, base)
+    session.commit()
+    with client.session_transaction() as browser_session:
+        browser_session["_user_id"] = str(base.buyer_id)
+        browser_session["_fresh"] = True
+    _add(client, base.offer_id)
+
+    body = client.get("/carrito").get_data(as_text=True)
+    item_html = body.split('<article class="cart-item', maxsplit=1)[1].split(
+        "</article>", maxsplit=1
+    )[0]
+    assert 'class="cart-item__favorite"' in item_html
+    assert 'aria-pressed="false"' in item_html
+
+    session.add(Favorite(user_id=base.buyer_id, product_id=product.id))
+    session.commit()
+    body = client.get("/carrito").get_data(as_text=True)
+    item_html = body.split('<article class="cart-item', maxsplit=1)[1].split(
+        "</article>", maxsplit=1
+    )[0]
+    assert 'class="cart-item__favorite is-active"' in item_html
+    assert 'aria-pressed="true"' in item_html
+    assert ".cart-item__favorite.is-active svg" in CART_STYLES
+    assert "fill: currentColor;" in CART_STYLES
+
+
+def test_cart_delete_forms_share_accessible_native_dialog(client, session: Session):
+    base = create_catalog_and_stock(session)
+    session.commit()
+    _add(client, base.offer_id)
+
+    body = client.get("/carrito").get_data(as_text=True)
+
+    assert body.count("data-cart-delete-form") == 2
+    assert "data-confirm=" not in body
+    assert '<dialog class="cart-delete-dialog"' in body
+    assert 'aria-modal="true"' in body
+    assert 'aria-labelledby="cart-delete-dialog-title"' in body
+    assert "¿Eliminar este producto del carrito?" in body
+    assert "Esta acción quitará el producto de tu carrito." in body
+    assert "¿Eliminar los productos seleccionados del carrito?" in body
+    assert "Esta acción quitará los productos seleccionados de tu carrito." in body
 
 
 def test_cart_totals_are_calculated_from_database_prices(
@@ -648,6 +707,69 @@ def test_cart_uses_one_inventory_query_for_multiple_offers(
     assert len(inventory_queries) == 1
 
 
+def test_cart_get_query_counts_are_constant_for_guest_and_authenticated(
+    app,
+    engine,
+    session: Session,
+):
+    base = create_catalog_and_stock(session, stock=20)
+    offer_ids = [base.offer_id]
+    for index in range(24):
+        _product, offer, _balance = _create_additional_offer(
+            session,
+            base,
+            title=f"Query Cart Product {index}",
+        )
+        offer_ids.append(offer.id)
+    session.commit()
+
+    def state_for(line_count: int):
+        return {
+            "version": 1,
+            "items": {
+                str(offer_id): {"quantity": 1, "selected": True}
+                for offer_id in offer_ids[:line_count]
+            },
+        }
+
+    def measure(test_client) -> int:
+        statements: list[str] = []
+
+        def record(*args):
+            statements.append(args[2])
+
+        db.session.remove()
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            assert test_client.get("/carrito").status_code == 200
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return len(statements)
+
+    guest_client = app.test_client()
+    guest_counts = [measure(guest_client)]
+    for line_count in (1, 10, 20):
+        with guest_client.session_transaction() as browser_session:
+            browser_session["cart"] = state_for(line_count)
+        guest_counts.append(measure(guest_client))
+
+    auth_client = app.test_client()
+    with auth_client.session_transaction() as browser_session:
+        browser_session["_user_id"] = str(base.buyer_id)
+        browser_session["_fresh"] = True
+    auth_counts = [measure(auth_client)]
+    for line_count in (1, 10, 20):
+        mutate_cart_for_user(
+            session,
+            base.buyer_id,
+            lambda _current, count=line_count: state_for(count),
+        )
+        auth_counts.append(measure(auth_client))
+
+    assert guest_counts == [8, 11, 11, 11]
+    assert auth_counts == [13, 17, 17, 17]
+
+
 def test_buy_now_preserves_cart_contents_selection_and_uses_quantity(
     client, session: Session
 ):
@@ -781,7 +903,12 @@ def test_buy_now_matches_anonymous_and_authenticated_cart_policy(
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/carrito")
-    assert _cart_items(client)[str(base.offer_id)] == {
+    items = (
+        load_cart_state_for_user(session, base.buyer_id)["items"]
+        if authenticated
+        else _cart_items(client)
+    )
+    assert items[str(base.offer_id)] == {
         "quantity": 2,
         "selected": True,
     }

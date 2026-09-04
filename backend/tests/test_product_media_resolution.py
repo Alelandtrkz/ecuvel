@@ -22,6 +22,7 @@ from app.models import (
     SellerOffer,
     SellerOrder,
     Store,
+    User,
 )
 from app.models.enums import PaymentMethod
 from app.services.product_media import (
@@ -612,6 +613,15 @@ def test_home_media_query_and_total_query_count_are_constant(
     session.commit()
     ten_card_queries, ten_card_media_queries = measured_get()
 
+    with client.session_transaction() as browser_session:
+        browser_session["_user_id"] = str(
+            session.scalar(select(User.id).limit(1))
+        )
+        browser_session["_fresh"] = True
+    authenticated_queries, authenticated_media_queries = measured_get()
+
     assert one_card_media_queries == ten_card_media_queries == 1
     assert ten_card_queries == one_card_queries
     assert ten_card_queries <= 8
+    assert authenticated_media_queries == 1
+    assert authenticated_queries == ten_card_queries + 4 == 12

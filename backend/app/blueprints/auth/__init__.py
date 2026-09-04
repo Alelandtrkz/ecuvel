@@ -47,6 +47,10 @@ from app.services.session_order_claims import (
     claim_session_orders,
     normalize_session_order_ids,
 )
+from app.services.cart_storage import (
+    CART_SESSION_KEY,
+    adopt_guest_cart_for_authenticated_user,
+)
 from app.services.admin_users import AdminUserError, accept_staff_invitation
 
 
@@ -88,7 +92,7 @@ def _claim_orders_for_user(user_id, database_session=None) -> None:
 
 def _login_user_preserving_session(user, *, remember: bool = False) -> None:
     preserved = {
-        "cart": flask_session.get("cart"),
+        CART_SESSION_KEY: flask_session.get(CART_SESSION_KEY),
         "checkout_order_ids": flask_session.get("checkout_order_ids"),
     }
     flask_session.clear()
@@ -96,6 +100,7 @@ def _login_user_preserving_session(user, *, remember: bool = False) -> None:
         if value is not None:
             flask_session[key] = value
     login_user(user, remember=remember)
+    adopt_guest_cart_for_authenticated_user()
 
 
 def _send_verification_email(email: str, token: str) -> None:
@@ -275,6 +280,7 @@ def logout():
         and bool(getattr(current_user, "is_ecuvel_staff", False))
     )
     logout_user()
+    flask_session.pop(CART_SESSION_KEY, None)
     flash("Sesión cerrada.", "success")
     if from_admin:
         return redirect(

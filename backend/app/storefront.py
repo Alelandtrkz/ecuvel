@@ -57,14 +57,21 @@ from app.services.cart import (
     CART_LOW_STOCK_THRESHOLD,
     MAX_CART_QUANTITY,
     CartServiceError,
+    CartStockLimitError,
     add_cart_item,
-    get_cart_item_count,
     get_cart_state,
     remove_cart_item,
     remove_selected_cart_items,
     set_all_cart_items_selected,
     set_cart_item_quantity,
     set_cart_item_selected,
+)
+from app.services.cart_storage import (
+    CART_SESSION_KEY,
+    cart_count_for_identity,
+    load_cart_state_for_identity,
+    mutate_cart_for_identity,
+    replace_cart_state_for_identity,
 )
 from app.services.checkout import (
     CheckoutServiceError,
@@ -198,7 +205,6 @@ logger = logging.getLogger(__name__)
 MAX_SEARCH_LENGTH = 100
 MAX_CATEGORY_LENGTH = 140
 MAX_RECOMMENDATIONS = 10
-CART_SESSION_KEY = "cart"
 CART_INTENT_ADD = "add_to_cart"
 CART_INTENT_BUY_NOW = "buy_now"
 CHECKOUT_DRAFT_SESSION_KEY = "checkout_draft"
@@ -417,9 +423,7 @@ def cart_header_context() -> dict[str, int]:
     if current_user.is_authenticated:
         favorite_count = favorite_count_for_user(db.session, current_user.id)
     return {
-        "header_cart_count": get_cart_item_count(
-            flask_session.get(CART_SESSION_KEY)
-        ),
+        "header_cart_count": cart_count_for_identity(),
         "header_favorite_count": favorite_count,
         "nav_categories": _load_nav_categories(),
     }
@@ -1135,8 +1139,7 @@ def _cart_offer_rows(offer_ids: set[uuid.UUID]):
 
 
 def _save_cart_state(state: dict[str, Any]) -> None:
-    flask_session[CART_SESSION_KEY] = state
-    flask_session.modified = True
+    replace_cart_state_for_identity(state)
 
 
 def _rehydrate_cart() -> tuple[
@@ -1144,8 +1147,13 @@ def _rehydrate_cart() -> tuple[
     set[uuid.UUID],
     set[uuid.UUID],
 ]:
-    raw_state = flask_session.get(CART_SESSION_KEY)
-    state = get_cart_state(raw_state)
+    raw_guest_state = (
+        flask_session.get(CART_SESSION_KEY)
+        if not current_user.is_authenticated
+        else None
+    )
+    state = load_cart_state_for_identity()
+    original_state = get_cart_state(state)
     item_states = state["items"]
     offer_ids = {uuid.UUID(offer_id) for offer_id in item_states}
     rows_by_offer_id = {
@@ -1260,7 +1268,10 @@ def _rehydrate_cart() -> tuple[
         product_ids.add(row.product_id)
 
     state["items"] = clean_items
-    if raw_state != state:
+    if original_state != state or (
+        not current_user.is_authenticated
+        and raw_guest_state != state
+    ):
         _save_cart_state(state)
 
     eligible_selected = [
@@ -2030,7 +2041,7 @@ def checkout() -> str:
     auth_redirect = _requires_verified_identity()
     if auth_redirect is not None:
         return auth_redirect
-    cart_state = get_cart_state(flask_session.get(CART_SESSION_KEY))
+    cart_state = load_cart_state_for_identity()
     try:
         preview = build_checkout_preview(
             session=db.session, cart_state=cart_state
@@ -2090,7 +2101,7 @@ def create_checkout():
             )
 
     draft = flask_session.get(CHECKOUT_DRAFT_SESSION_KEY)
-    cart_state = get_cart_state(flask_session.get(CART_SESSION_KEY))
+    cart_state = load_cart_state_for_identity()
     signature = _checkout_cart_signature(cart_state)
     if (
         not isinstance(draft, dict)
@@ -2147,10 +2158,12 @@ def create_checkout():
         flash(str(exc), "error")
         return redirect(url_for("storefront.checkout"))
 
-    updated_cart = cart_state
-    for offer_id in result.purchased_offer_ids:
-        updated_cart = remove_cart_item(updated_cart, offer_id)
-    _save_cart_state(updated_cart)
+    def consume_purchased(state):
+        for offer_id in result.purchased_offer_ids:
+            state = remove_cart_item(state, offer_id)
+        return state
+
+    mutate_cart_for_identity(consume_purchased)
     _remember_checkout_order(result.order_id)
 
     completed = (
@@ -2789,7 +2802,7 @@ def add_to_cart():
         0, _availability_by_offer_ids({offer_id}).get(offer_id, 0)
     )
     max_quantity = min(MAX_CART_QUANTITY, available_quantity)
-    state_before = get_cart_state(flask_session.get(CART_SESSION_KEY))
+    state_before = load_cart_state_for_identity()
     existing_item = state_before["items"].get(str(offer_id))
     current_quantity = (
         int(existing_item["quantity"]) if existing_item is not None else 0
@@ -2818,11 +2831,33 @@ def add_to_cart():
             max_quantity=max_quantity,
         )
 
+    def add_with_stock_limit(current):
+        current_item = current["items"].get(str(offer_id))
+        locked_quantity = (
+            int(current_item["quantity"])
+            if current_item is not None
+            else 0
+        )
+        if locked_quantity + quantity > max_quantity:
+            raise CartStockLimitError(locked_quantity)
+        return add_cart_item(current, offer_id, quantity)
+
     try:
-        state = add_cart_item(
-            state_before,
-            offer_id,
-            quantity,
+        state = mutate_cart_for_identity(add_with_stock_limit)
+    except CartStockLimitError as exc:
+        return _cart_error_response(
+            message=(
+                f"Solo hay {available_quantity} unidades disponibles de "
+                f"{row.product_title}. Ya tienes {exc.current_quantity} "
+                "unidades en el carrito."
+            ),
+            error="insufficient_stock",
+            status=409,
+            redirect_url=next_url,
+            available_quantity=available_quantity,
+            current_cart_quantity=exc.current_quantity,
+            requested_quantity=quantity,
+            max_quantity=max_quantity,
         )
     except CartServiceError as exc:
         return _cart_error_response(
@@ -2832,7 +2867,7 @@ def add_to_cart():
             redirect_url=next_url,
         )
 
-    _save_cart_state(state)
+    requested_total = int(state["items"][str(offer_id)]["quantity"])
     ranking_context = _submitted_ranking_context()
     if ranking_context is not None and ranking_context.offer_id == offer_id:
         _record_server_action_event("ADD_TO_CART", ranking_context)
@@ -2847,7 +2882,7 @@ def add_to_cart():
 @storefront.post("/carrito/items/<uuid:offer_id>/cantidad")
 def update_cart_quantity(offer_id: uuid.UUID):
     redirect_url = url_for("storefront.cart")
-    state_before = get_cart_state(flask_session.get(CART_SESSION_KEY))
+    state_before = load_cart_state_for_identity()
     existing_item = state_before["items"].get(str(offer_id))
     current_quantity = (
         int(existing_item["quantity"]) if existing_item is not None else 0
@@ -2911,10 +2946,12 @@ def update_cart_quantity(offer_id: uuid.UUID):
         )
 
     try:
-        state = set_cart_item_quantity(
-            state_before,
-            offer_id,
-            quantity,
+        mutate_cart_for_identity(
+            lambda current: set_cart_item_quantity(
+                current,
+                offer_id,
+                quantity,
+            )
         )
     except CartServiceError as exc:
         return _cart_error_response(
@@ -2925,7 +2962,6 @@ def update_cart_quantity(offer_id: uuid.UUID):
             current_cart_quantity=current_quantity,
         )
 
-    _save_cart_state(state)
     return _cart_success_response(
         message="Cantidad actualizada.",
         redirect_url=redirect_url,
@@ -2936,42 +2972,41 @@ def update_cart_quantity(offer_id: uuid.UUID):
 
 @storefront.post("/carrito/items/<uuid:offer_id>/seleccion")
 def update_cart_selection(offer_id: uuid.UUID):
-    state = set_cart_item_selected(
-        flask_session.get(CART_SESSION_KEY),
-        offer_id,
-        _form_selected(),
+    mutate_cart_for_identity(
+        lambda current: set_cart_item_selected(
+            current,
+            offer_id,
+            _form_selected(),
+        )
     )
-    _save_cart_state(state)
     return redirect(url_for("storefront.cart"))
 
 
 @storefront.post("/carrito/seleccion")
 def update_all_cart_selection():
-    state = set_all_cart_items_selected(
-        flask_session.get(CART_SESSION_KEY),
-        _form_selected(),
+    mutate_cart_for_identity(
+        lambda current: set_all_cart_items_selected(
+            current,
+            _form_selected(),
+        )
     )
-    _save_cart_state(state)
     return redirect(url_for("storefront.cart"))
 
 
 @storefront.post("/carrito/items/<uuid:offer_id>/eliminar")
 def delete_cart_item(offer_id: uuid.UUID):
-    state = remove_cart_item(
-        flask_session.get(CART_SESSION_KEY),
-        offer_id,
+    mutate_cart_for_identity(
+        lambda current: remove_cart_item(current, offer_id)
     )
-    _save_cart_state(state)
     flash("Producto eliminado del carrito.", "success")
     return redirect(url_for("storefront.cart"))
 
 
 @storefront.post("/carrito/eliminar-seleccionados")
 def delete_selected_cart_items():
-    state = remove_selected_cart_items(
-        flask_session.get(CART_SESSION_KEY)
+    mutate_cart_for_identity(
+        remove_selected_cart_items
     )
-    _save_cart_state(state)
     flash("Productos seleccionados eliminados.", "success")
     return redirect(url_for("storefront.cart"))
 

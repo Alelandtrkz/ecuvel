@@ -164,6 +164,13 @@ class User(
         cascade="all, delete-orphan",
     )
 
+    cart: Mapped["Cart | None"] = relationship(
+        "Cart",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
     product_reviews: Mapped[list["ProductReview"]] = relationship(
         "ProductReview",
         back_populates="user",

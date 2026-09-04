@@ -6,6 +6,8 @@ from typing import Any
 
 
 CART_VERSION = 1
+GUEST_CART_VERSION = 2
+GUEST_CART_TOKEN_HEX_LENGTH = 64
 MAX_CART_LINES = 50
 MAX_CART_QUANTITY = 99
 CART_LOW_STOCK_THRESHOLD = 5
@@ -21,6 +23,14 @@ class InvalidCartQuantityError(CartServiceError):
 
 class CartItemLimitError(CartServiceError):
     """El carrito alcanzó su máximo de líneas."""
+
+
+class CartStockLimitError(CartServiceError):
+    """La suma solicitada supera la disponibilidad validada."""
+
+    def __init__(self, current_quantity: int):
+        self.current_quantity = current_quantity
+        super().__init__("La cantidad solicitada supera la disponibilidad.")
 
 
 def _empty_cart() -> dict[str, Any]:
@@ -51,7 +61,7 @@ def get_cart_state(session_data: object) -> dict[str, Any]:
 
     if not isinstance(session_data, Mapping):
         return _empty_cart()
-    if session_data.get("version") != CART_VERSION:
+    if session_data.get("version") not in {CART_VERSION, GUEST_CART_VERSION}:
         return _empty_cart()
 
     raw_items = session_data.get("items")
@@ -81,6 +91,42 @@ def get_cart_state(session_data: object) -> dict[str, Any]:
         }
 
     return {"version": CART_VERSION, "items": normalized_items}
+
+
+def get_guest_cart_merge_token(session_data: object) -> str | None:
+    if not isinstance(session_data, Mapping):
+        return None
+    if session_data.get("version") != GUEST_CART_VERSION:
+        return None
+    token = session_data.get("merge_token")
+    if not isinstance(token, str) or len(token) != GUEST_CART_TOKEN_HEX_LENGTH:
+        return None
+    try:
+        bytes.fromhex(token)
+    except ValueError:
+        return None
+    return token.casefold()
+
+
+def guest_cart_payload(
+    cart_state: object,
+    *,
+    merge_token: str,
+) -> dict[str, Any]:
+    if len(merge_token) != GUEST_CART_TOKEN_HEX_LENGTH:
+        raise ValueError("El token de adopción del carrito no es válido.")
+    try:
+        bytes.fromhex(merge_token)
+    except ValueError as exc:
+        raise ValueError(
+            "El token de adopción del carrito no es válido."
+        ) from exc
+    state = get_cart_state(cart_state)
+    return {
+        "version": GUEST_CART_VERSION,
+        "merge_token": merge_token.casefold(),
+        "items": state["items"],
+    }
 
 
 def add_cart_item(

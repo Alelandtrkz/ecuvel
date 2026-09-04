@@ -17,6 +17,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "da1b2c3d4e5f"
 H4_HEAD = "6499defb2c52"
+CURRENT_HEAD = "7c1a9e4d2b6f"
 TABLE = "catalog_interaction_events"
 
 
@@ -68,7 +69,7 @@ def test_h4_upgrade_is_schema_only_and_empty_downgrade_is_allowed(app, engine, s
         _migrate(app, PREVIOUS_HEAD, down=True)
         assert TABLE not in _tables(engine)
     finally:
-        if _version(engine) != H4_HEAD:
+        if _version(engine) != CURRENT_HEAD:
             _migrate(app, "head")
 
 
@@ -122,7 +123,7 @@ def test_h4_downgrade_fails_closed_when_events_exist(app, engine, session):
     with pytest.raises(SystemExit) as blocked:
         _migrate(app, PREVIOUS_HEAD, down=True)
     assert blocked.value.code == 1
-    assert _version(engine) == H4_HEAD
+    assert _version(engine) == CURRENT_HEAD
     assert TABLE in _tables(engine)
 
 
@@ -132,8 +133,8 @@ def test_fresh_database_upgrades_from_base_to_h4_head(app, engine, session):
         _migrate(app, "base", down=True)
         assert TABLE not in _tables(engine)
         _migrate(app, "head")
-        assert _version(engine) == H4_HEAD
+        assert _version(engine) == CURRENT_HEAD
         assert TABLE in _tables(engine)
     finally:
-        if _version(engine) != H4_HEAD:
+        if _version(engine) != CURRENT_HEAD:
             _migrate(app, "head")

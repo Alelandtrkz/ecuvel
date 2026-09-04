@@ -62,7 +62,7 @@
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <input type="hidden" name="next" value="{{ url_for('storefront.cart') }}">
       <button
-        class="{{ 'is-active' if item.is_favorite }}"
+        class="cart-item__favorite{{ ' is-active' if item.is_favorite }}"
         type="submit"
         aria-label="{{ 'Eliminar ' ~ item.product_name ~ ' de favoritos' if item.is_favorite else 'Guardar ' ~ item.product_name ~ ' en favoritos' }}"
         aria-pressed="{{ 'true' if item.is_favorite else 'false' }}"
@@ -70,9 +70,15 @@
         <i data-lucide="heart" aria-hidden="true"></i>
       </button>
     </form>
-    <form method="post" action="{{ url_for('storefront.delete_cart_item', offer_id=item.offer_id) }}" data-confirm="¿Eliminar este producto del carrito?">
+    <form
+      method="post"
+      action="{{ url_for('storefront.delete_cart_item', offer_id=item.offer_id) }}"
+      data-cart-delete-form
+      data-confirm-title="¿Eliminar este producto del carrito?"
+      data-confirm-message="Esta acción quitará el producto de tu carrito."
+    >
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" aria-label="Eliminar {{ item.product_name }} del carrito"><i data-lucide="trash-2" aria-hidden="true"></i></button>
+      <button type="submit" aria-label="Eliminar {{ item.product_name }} del carrito" aria-haspopup="dialog" aria-controls="cart-delete-dialog"><i data-lucide="trash-2" aria-hidden="true"></i></button>
     </form>
   </div>
 </article>

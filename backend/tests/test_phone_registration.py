@@ -3,6 +3,8 @@ from __future__ import annotations
 from sqlalchemy import select
 
 from app.models import User
+from app.services.cart_storage import load_cart_state_for_user
+from tests.factories import create_catalog_and_stock
 from tests.phone_auth_helpers import phone_client, request_phone_code, verify_phone_code
 
 
@@ -36,8 +38,18 @@ def test_phone_registration_requires_full_name(phone_client, session):
 
 
 def test_phone_registration_preserves_cart(phone_client, session):
+    base = create_catalog_and_stock(session, stock=10)
+    session.commit()
     with phone_client.session_transaction() as browser_session:
-        browser_session["cart"] = {"version": 1, "items": {"offer": {"quantity": 2}}}
+        browser_session["cart"] = {
+            "version": 1,
+            "items": {
+                str(base.offer_id): {
+                    "quantity": 2,
+                    "selected": True,
+                }
+            },
+        }
     request_phone_code(phone_client)
     verify_phone_code(phone_client)
     phone_client.post(
@@ -45,5 +57,12 @@ def test_phone_registration_preserves_cart(phone_client, session):
         data={"full_name": "Cliente Teléfono", "email": ""},
     )
 
+    user = session.scalar(
+        select(User).where(User.phone_normalized == "+593999330014")
+    )
+    assert user is not None
+    assert load_cart_state_for_user(session, user.id)["items"][
+        str(base.offer_id)
+    ]["quantity"] == 2
     with phone_client.session_transaction() as browser_session:
-        assert browser_session["cart"]["items"]["offer"]["quantity"] == 2
+        assert "cart" not in browser_session

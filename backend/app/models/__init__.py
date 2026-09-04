@@ -21,6 +21,7 @@ from app.models.seller_inbound import (
     SellerInboundPackageItem,
 )
 from app.models.favorite import Favorite
+from app.models.cart import Cart, CartAdoption, CartItem
 from app.models.catalog_interaction import CatalogInteractionEvent
 from app.models.physical_inventory import (
     PhysicalInventoryCount,
@@ -132,6 +133,9 @@ __all__ = [
     "SellerInboundPackage",
     "SellerInboundPackageItem",
     "Favorite",
+    "Cart",
+    "CartItem",
+    "CartAdoption",
     "CatalogInteractionEvent",
     "PhysicalInventoryCount",
     "PhysicalInventoryCountExpectedPackage",

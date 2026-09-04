@@ -89,6 +89,14 @@ def create_app() -> Flask:
     def clear_cached_login_user() -> None:
         g.pop("_login_user", None)
 
+    @app.before_request
+    def adopt_pending_guest_cart() -> None:
+        from app.services.cart_storage import (
+            adopt_guest_cart_for_authenticated_user,
+        )
+
+        adopt_guest_cart_for_authenticated_user()
+
     app.cli.add_command(seed_demo)
     app.cli.add_command(seed_product_categories)
     app.cli.add_command(receive_demo_stock)

@@ -14,7 +14,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "a7b8c9d0e1f2"
 L2_HEAD = "b8c9d0e1f2a3"
-CURRENT_HEAD = "6499defb2c52"
+CURRENT_HEAD = "7c1a9e4d2b6f"
 
 
 def _migrations_dir(app) -> Path:

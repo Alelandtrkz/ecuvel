@@ -23,9 +23,15 @@
             <label><input type="checkbox" name="selected" value="1" data-cart-select-all {{ 'checked' if cart.all_selected }}> Elegir todos los productos</label>
             <button class="progressive-submit" type="submit">Aplicar</button>
           </form>
-          <form method="post" action="{{ url_for('storefront.delete_selected_cart_items') }}" data-confirm="¿Eliminar los productos seleccionados?">
+          <form
+            method="post"
+            action="{{ url_for('storefront.delete_selected_cart_items') }}"
+            data-cart-delete-form
+            data-confirm-title="¿Eliminar los productos seleccionados del carrito?"
+            data-confirm-message="Esta acción quitará los productos seleccionados de tu carrito."
+          >
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="cart-selection-bar__delete" type="submit" aria-label="Eliminar productos seleccionados" {{ 'disabled' if not cart.summary.selected_lines }}><i data-lucide="trash-2" aria-hidden="true"></i><span>Eliminar seleccionados</span></button>
+            <button class="cart-selection-bar__delete" type="submit" aria-label="Eliminar productos seleccionados" aria-haspopup="dialog" aria-controls="cart-delete-dialog" {{ 'disabled' if not cart.summary.selected_lines }}><i data-lucide="trash-2" aria-hidden="true"></i><span>Eliminar seleccionados</span></button>
           </form>
         </div>
 
@@ -47,6 +53,18 @@
 
       {{ cart_summary(cart.summary) }}
     </div>
+
+    <dialog class="cart-delete-dialog" id="cart-delete-dialog" aria-modal="true" aria-labelledby="cart-delete-dialog-title" aria-describedby="cart-delete-dialog-message" data-cart-delete-dialog>
+      <div class="cart-delete-dialog__card">
+        <span class="cart-delete-dialog__icon" aria-hidden="true"><i data-lucide="trash-2"></i></span>
+        <h2 id="cart-delete-dialog-title" data-cart-delete-title>¿Eliminar este producto del carrito?</h2>
+        <p id="cart-delete-dialog-message" data-cart-delete-message>Esta acción quitará el producto de tu carrito.</p>
+        <div class="cart-delete-dialog__actions">
+          <button class="button button--secondary" type="button" data-cart-delete-cancel>Cancelar</button>
+          <button class="button cart-delete-dialog__confirm" type="button" data-cart-delete-confirm>Eliminar</button>
+        </div>
+      </div>
+    </dialog>
   {% else %}
     <section class="cart-empty" aria-labelledby="cart-empty-title">
       <div><i data-lucide="shopping-cart" aria-hidden="true"></i></div>
