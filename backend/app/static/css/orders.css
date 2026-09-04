@@ -568,3 +568,27 @@
   width: fit-content;
   max-width: 100%;
 }
+
+@media (max-width: 427px) {
+  .orders-layout--orders .customer-sidebar {
+    padding: var(--space-4);
+  }
+
+  .orders-layout--orders .customer-sidebar__nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .orders-layout--orders .customer-sidebar__nav a {
+    min-height: 44px;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    padding-inline: var(--space-2);
+  }
+
+  .orders-layout--orders .customer-order-card {
+    grid-template-columns: 1fr;
+  }
+}
