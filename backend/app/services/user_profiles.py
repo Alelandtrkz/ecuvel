@@ -9,6 +9,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from app.models import User
 from app.models.enums import UserAccountTokenPurpose, UserStatus
 from app.models.user import normalize_email
+from app.services.age_eligibility import is_at_least_18
 from app.services.account_tokens import (
     InvalidAccountTokenError,
     create_account_token,
@@ -19,6 +20,7 @@ from app.services.authentication import (
     normalize_full_name,
     validate_password,
 )
+from app.services.delivery_eta import ecuador_local_date
 
 
 class ProfileError(Exception):
@@ -26,6 +28,30 @@ class ProfileError(Exception):
 
 
 VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say", ""}
+
+
+def _validate_birth_date_transition(
+    *,
+    existing: date | None,
+    incoming: date | None,
+    today: date,
+) -> None:
+    if incoming == existing:
+        return
+    if incoming is None:
+        raise ProfileError(
+            "La fecha de nacimiento no puede eliminarse una vez registrada."
+        )
+    if existing is not None and is_at_least_18(existing, today=today):
+        raise ProfileError(
+            "La fecha de nacimiento no puede modificarse una vez registrada."
+        )
+    if incoming > today:
+        raise ProfileError("La fecha de nacimiento no puede estar en el futuro.")
+    if not is_at_least_18(incoming, today=today):
+        raise ProfileError(
+            "Debes tener al menos 18 años para registrar tu fecha de nacimiento."
+        )
 
 
 def update_profile(
@@ -36,6 +62,7 @@ def update_profile(
     phone: str | None,
     birth_date: date | None,
     gender: str | None,
+    today: date | None = None,
 ) -> User:
     user = session.get(User, user_id, with_for_update=True)
     if user is None:
@@ -43,11 +70,14 @@ def update_profile(
     name = normalize_full_name(full_name)
     if len(name) < 2 or len(name) > 120:
         raise ProfileError("Ingresa tu nombre y apellido.")
-    if birth_date and birth_date > date.today():
-        raise ProfileError("La fecha de nacimiento no puede estar en el futuro.")
     normalized_gender = (gender or "").strip()
     if normalized_gender not in VALID_GENDERS:
         raise ProfileError("Selecciona una opción de género válida.")
+    _validate_birth_date_transition(
+        existing=user.birth_date,
+        incoming=birth_date,
+        today=today if today is not None else ecuador_local_date(),
+    )
     user.full_name = name
     user.birth_date = birth_date
     user.gender = normalized_gender or None
