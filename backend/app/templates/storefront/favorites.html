@@ -10,7 +10,7 @@
 
 {% block content %}
 <div class="orders-shell">
-  <div class="orders-layout content-container">
+  <div class="orders-layout orders-layout--favorites content-container">
     {% include "components/customer_sidebar.html" %}
 
     <main class="favorites-main" aria-labelledby="favorites-title">
@@ -28,8 +28,9 @@
         </p>
         <div class="favorites-grid" data-favorites-grid>
           {% for product in products %}
+            {% set favorites_image_sizes = "(max-width: 479px) calc((100vw - 44px) / 2), " ~ (product.image_sizes or "100vw") %}
             <div class="favorite-card-shell" data-favorite-card="{{ product.product_slug }}">
-              {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context, product.image_srcset, product.image_sizes, product.image_width, product.image_height, product.image_alt) }}
+              {{ product_card(product.product_url, product.image_url, product.title, product.current_price, product.compare_at_price, product.rating, product.review_count, product.is_favorite, product.delivery_label, product.product_slug, product.offer_id, product.is_available, product.listing_label, product.listing_key, product.ranking_context, product.image_srcset, favorites_image_sizes, product.image_width, product.image_height, product.image_alt) }}
             </div>
           {% endfor %}
         </div>
