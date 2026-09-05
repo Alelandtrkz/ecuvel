@@ -17,6 +17,8 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture
 def phone_client(app):
+    previous_enabled = app.config["PHONE_OTP_ENABLED"]
+    app.config["PHONE_OTP_ENABLED"] = True
     app.config["PHONE_OTP_BACKEND"] = "fake"
     app.config["PHONE_OTP_PEPPER"] = "test-only-phone-otp-pepper"
     app.config["PHONE_OTP_RESEND_COOLDOWN_SECONDS"] = 10
@@ -27,6 +29,7 @@ def phone_client(app):
     test_client = app.test_client()
     yield test_client
     fake_phone_otp_sender.outbox.clear()
+    app.config["PHONE_OTP_ENABLED"] = previous_enabled
     db.session.remove()
 
 

@@ -165,6 +165,22 @@ def _clear_phone_challenge() -> None:
     flask_session.pop(PHONE_NEXT_SESSION_KEY, None)
 
 
+def clear_phone_otp_session_state() -> None:
+    _clear_phone_challenge()
+    flask_session.pop(PHONE_REGISTRATION_CHALLENGE_SESSION_KEY, None)
+
+
+def _phone_otp_disabled_redirect():
+    if current_app.config.get("PHONE_OTP_ENABLED", False):
+        return None
+    clear_phone_otp_session_state()
+    flash(
+        "El acceso por teléfono estará disponible próximamente.",
+        "warning",
+    )
+    return redirect(url_for("auth.login_form"))
+
+
 @auth.get("/registro")
 def register_form():
     if current_user.is_authenticated:
@@ -421,6 +437,9 @@ def reset_password_post(token: str):
 
 @auth.get("/ingresar-telefono")
 def phone_login_form():
+    disabled_redirect = _phone_otp_disabled_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     if current_user.is_authenticated:
         return redirect(url_for("account.profile"))
     return render_template(
@@ -433,6 +452,9 @@ def phone_login_form():
 @auth.post("/ingresar-telefono")
 @limiter.limit(lambda: current_app.config["PHONE_OTP_REQUEST_RATE_LIMIT"])
 def phone_login_request():
+    disabled_redirect = _phone_otp_disabled_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     next_url = _safe_next(request.form.get("next"))
     form = {"phone": request.form.get("phone", "").strip()}
     try:
@@ -464,6 +486,9 @@ def phone_login_request():
 
 @auth.get("/verificar-telefono")
 def phone_verify_form():
+    disabled_redirect = _phone_otp_disabled_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     challenge_id = flask_session.get(PHONE_CHALLENGE_SESSION_KEY)
     if not challenge_id:
         return redirect(url_for("auth.phone_login_form"))
@@ -473,6 +498,9 @@ def phone_verify_form():
 @auth.post("/verificar-telefono")
 @limiter.limit(lambda: current_app.config["PHONE_OTP_VERIFY_RATE_LIMIT"])
 def phone_verify_post():
+    disabled_redirect = _phone_otp_disabled_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     challenge_id = flask_session.get(PHONE_CHALLENGE_SESSION_KEY)
     purpose_value = flask_session.get(PHONE_PURPOSE_SESSION_KEY)
     if not challenge_id or not purpose_value:
@@ -529,6 +557,9 @@ def phone_verify_post():
 @auth.post("/reenviar-codigo-telefono")
 @limiter.limit(lambda: current_app.config["PHONE_OTP_RESEND_RATE_LIMIT"])
 def phone_resend_code():
+    disabled_redirect = _phone_otp_disabled_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     challenge_id = flask_session.get(PHONE_CHALLENGE_SESSION_KEY)
     purpose_value = flask_session.get(PHONE_PURPOSE_SESSION_KEY)
     if not challenge_id or not purpose_value:
@@ -562,6 +593,9 @@ def phone_resend_code():
 
 @auth.get("/registro/telefono/completar")
 def complete_phone_registration_form():
+    disabled_redirect = _phone_otp_disabled_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     if not flask_session.get(PHONE_REGISTRATION_CHALLENGE_SESSION_KEY):
         return redirect(url_for("auth.phone_login_form"))
     return render_template("auth/phone_complete_registration.html", form={})
@@ -569,6 +603,9 @@ def complete_phone_registration_form():
 
 @auth.post("/registro/telefono/completar")
 def complete_phone_registration_post():
+    disabled_redirect = _phone_otp_disabled_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     challenge_id = flask_session.get(PHONE_REGISTRATION_CHALLENGE_SESSION_KEY)
     if not challenge_id:
         return redirect(url_for("auth.phone_login_form"))

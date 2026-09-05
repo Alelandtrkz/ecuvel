@@ -46,7 +46,11 @@
         {% else %}
           {{ verification_badge("No configurado", "missing") }}
         {% endif %}
-        <a href="{{ url_for('account.add_phone_form') }}">{{ "Cambiar teléfono" if current_user.phone_verified_at else "Añadir número telefónico" }}</a>
+        {% if config.PHONE_OTP_ENABLED %}
+          <a href="{{ url_for('account.add_phone_form') }}">{{ "Cambiar teléfono" if current_user.phone_verified_at else "Añadir número telefónico" }}</a>
+        {% else %}
+          <span>Gestión telefónica — Próximamente</span>
+        {% endif %}
       </article>
       <article>
         <span>Contraseña</span>
@@ -69,7 +73,11 @@
         <div class="profile-readonly">
           <span>Número telefónico</span>
           <strong>{{ current_user.phone or "No configurado" }}</strong>
-          <a href="{{ url_for('account.add_phone_form') }}">Verificar o cambiar teléfono</a>
+          {% if config.PHONE_OTP_ENABLED %}
+            <a href="{{ url_for('account.add_phone_form') }}">Verificar o cambiar teléfono</a>
+          {% else %}
+            <span>Verificación telefónica — Próximamente</span>
+          {% endif %}
         </div>
         <label>
           <span>Fecha de nacimiento</span>

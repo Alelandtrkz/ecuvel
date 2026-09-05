@@ -63,6 +63,27 @@ def _environment_choice(name: str, default: str, choices: set[str]) -> str:
     return value
 
 
+def validate_phone_otp_configuration(
+    *,
+    enabled: bool,
+    backend: str,
+    production: bool,
+    testing: bool,
+    pepper: str,
+) -> None:
+    if not enabled:
+        return
+    if production and backend in {"console", "fake"}:
+        raise RuntimeError(
+            f"PHONE_OTP_BACKEND={backend} no está permitido en producción "
+            "cuando PHONE_OTP_ENABLED=true."
+        )
+    if not testing and not pepper:
+        raise RuntimeError(
+            "PHONE_OTP_PEPPER debe configurarse cuando PHONE_OTP_ENABLED=true."
+        )
+
+
 class Config:
     SECRET_KEY = os.environ["SECRET_KEY"]
 
@@ -179,7 +200,7 @@ class Config:
     )
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
 
-    PHONE_OTP_ENABLED = _environment_bool("PHONE_OTP_ENABLED", True)
+    PHONE_OTP_ENABLED = _environment_bool("PHONE_OTP_ENABLED", False)
     PHONE_OTP_BACKEND = _environment_choice(
         "PHONE_OTP_BACKEND",
         "console",
@@ -213,17 +234,13 @@ class Config:
         "PHONE_OTP_PEPPER",
         "test-only-phone-otp-pepper" if TESTING else "",
     )
-    if PHONE_OTP_ENABLED and not TESTING and not PHONE_OTP_PEPPER:
-        raise RuntimeError(
-            "PHONE_OTP_PEPPER debe configurarse cuando PHONE_OTP_ENABLED=true."
-        )
-    if (
-        PHONE_OTP_BACKEND == "console"
-        and ECUVEL_PRODUCTION
-    ):
-        raise RuntimeError(
-            "PHONE_OTP_BACKEND=console no estÃ¡ permitido en producciÃ³n."
-        )
+    validate_phone_otp_configuration(
+        enabled=PHONE_OTP_ENABLED,
+        backend=PHONE_OTP_BACKEND,
+        production=ECUVEL_PRODUCTION,
+        testing=TESTING,
+        pepper=PHONE_OTP_PEPPER,
+    )
     PHONE_OTP_REQUEST_RATE_LIMIT = os.getenv(
         "PHONE_OTP_REQUEST_RATE_LIMIT",
         "5 per 15 minutes",

@@ -26,7 +26,11 @@
 
   <button class="button button--primary auth-submit" type="submit">Ingresar</button>
 </form>
-<p class="auth-card__switch"><a href="{{ url_for('auth.phone_login_form', next=next_url) }}">Usar número telefónico</a></p>
+{% if config.PHONE_OTP_ENABLED %}
+  <p class="auth-card__switch"><a href="{{ url_for('auth.phone_login_form', next=next_url) }}">Usar número telefónico</a></p>
+{% else %}
+  <p class="auth-card__switch">Acceso por teléfono — Próximamente</p>
+{% endif %}
 <p class="auth-card__switch"><a href="{{ url_for('auth.forgot_password_form') }}">¿Olvidaste tu contraseña?</a></p>
 <p class="auth-card__switch"><a href="{{ url_for('auth.register_form', next=next_url) }}">Crear una cuenta</a></p>
 {% endblock %}

@@ -23,27 +23,31 @@ LOGGER = logging.getLogger(__name__)
 
 
 class PhoneOtpError(Exception):
-    """Error base de autenticaciÃ³n telefÃ³nica."""
+    """Error base de autenticación telefónica."""
+
+
+class PhoneOtpUnavailableError(PhoneOtpError):
+    """La verificación telefónica no está disponible."""
 
 
 class InvalidPhoneNumberError(PhoneOtpError):
-    """El telÃ©fono no cumple el formato permitido."""
+    """El teléfono no cumple el formato permitido."""
 
 
 class PhoneOtpCooldownError(PhoneOtpError):
-    """Se solicitÃ³ un cÃ³digo demasiado pronto."""
+    """Se solicitó un código demasiado pronto."""
 
 
 class InvalidPhoneOtpError(PhoneOtpError):
-    """El cÃ³digo no es vÃ¡lido."""
+    """El código no es válido."""
 
 
 class PhoneAlreadyLinkedError(PhoneOtpError):
-    """El telÃ©fono pertenece a otra cuenta."""
+    """El teléfono pertenece a otra cuenta."""
 
 
 class PhoneRegistrationError(PhoneOtpError):
-    """No se pudo crear la cuenta telefÃ³nica."""
+    """No se pudo crear la cuenta telefónica."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,9 +76,11 @@ class PhoneOtpSender:
 class ConsolePhoneOtpSender(PhoneOtpSender):
     def send_code(self, *, phone: str, code: str) -> None:
         if current_app.config.get("ECUVEL_PRODUCTION"):
-            raise PhoneOtpError("El backend console no estÃ¡ permitido en producciÃ³n.")
+            raise PhoneOtpError(
+                "El backend console no está permitido en producción."
+            )
         LOGGER.info(
-            "[DEV] CÃ³digo de autenticaciÃ³n para telÃ©fono terminado en %s: %s",
+            "[DEV] Código de autenticación para teléfono terminado en %s: %s",
             mask_phone(phone)[-4:],
             code,
         )
@@ -88,6 +94,13 @@ class FakePhoneOtpSender(PhoneOtpSender):
 
 
 fake_phone_otp_sender = FakePhoneOtpSender()
+
+
+def require_phone_otp_enabled() -> None:
+    if not current_app.config.get("PHONE_OTP_ENABLED", False):
+        raise PhoneOtpUnavailableError(
+            "La verificación telefónica estará disponible próximamente."
+        )
 
 
 def get_phone_otp_sender() -> PhoneOtpSender:
@@ -109,21 +122,25 @@ def mask_phone(phone: str | None) -> str:
 def normalize_phone_number(value: str) -> str:
     raw = (value or "").strip()
     if not raw:
-        raise InvalidPhoneNumberError("Ingresa un nÃºmero telefÃ³nico vÃ¡lido.")
+        raise InvalidPhoneNumberError("Ingresa un número telefónico válido.")
     if re.search(r"[A-Za-z]", raw):
-        raise InvalidPhoneNumberError("Ingresa un nÃºmero telefÃ³nico vÃ¡lido.")
+        raise InvalidPhoneNumberError("Ingresa un número telefónico válido.")
     cleaned = re.sub(r"[\s\-\(\)]", "", raw)
     if cleaned.startswith("+"):
         if not re.fullmatch(r"\+5939\d{8}", cleaned):
-            raise InvalidPhoneNumberError("Ingresa un nÃºmero telefÃ³nico ecuatoriano vÃ¡lido.")
+            raise InvalidPhoneNumberError(
+                "Ingresa un número telefónico ecuatoriano válido."
+            )
         return cleaned
     if not cleaned.isdigit():
-        raise InvalidPhoneNumberError("Ingresa un nÃºmero telefÃ³nico vÃ¡lido.")
+        raise InvalidPhoneNumberError("Ingresa un número telefónico válido.")
     if re.fullmatch(r"09\d{8}", cleaned):
         return "+593" + cleaned[1:]
     if re.fullmatch(r"5939\d{8}", cleaned):
         return "+" + cleaned
-    raise InvalidPhoneNumberError("Ingresa un nÃºmero telefÃ³nico ecuatoriano vÃ¡lido.")
+    raise InvalidPhoneNumberError(
+        "Ingresa un número telefónico ecuatoriano válido."
+    )
 
 
 def generate_otp_code(length: int) -> str:
@@ -133,7 +150,7 @@ def generate_otp_code(length: int) -> str:
 
 def hash_otp_code(*, phone_normalized: str, code: str, pepper: str) -> str:
     if not pepper:
-        raise PhoneOtpError("PHONE_OTP_PEPPER no estÃ¡ configurado.")
+        raise PhoneOtpError("PHONE_OTP_PEPPER no está configurado.")
     message = f"{phone_normalized}:{code}".encode("utf-8")
     return hmac.new(pepper.encode("utf-8"), message, "sha256").hexdigest()
 
@@ -161,6 +178,7 @@ def request_phone_otp(
     purpose: PhoneOtpPurpose,
     user_id=None,
 ) -> RequestedPhoneOtp:
+    require_phone_otp_enabled()
     phone_normalized = normalize_phone_number(phone)
     now = datetime.now(timezone.utc)
     cooldown_seconds = current_app.config["PHONE_OTP_RESEND_COOLDOWN_SECONDS"]
@@ -175,7 +193,7 @@ def request_phone_otp(
         .with_for_update()
     )
     if latest and latest.last_sent_at + timedelta(seconds=cooldown_seconds) > now:
-        raise PhoneOtpCooldownError("Espera antes de solicitar un nuevo cÃ³digo.")
+        raise PhoneOtpCooldownError("Espera antes de solicitar un nuevo código.")
     active = session.scalars(
         select(PhoneOtpChallenge)
         .where(
@@ -214,6 +232,7 @@ def verify_phone_otp(
     code: str,
     expected_purpose: PhoneOtpPurpose,
 ) -> VerifiedPhoneOtp:
+    require_phone_otp_enabled()
     challenge = session.get(
         PhoneOtpChallenge,
         _challenge_uuid(challenge_id),
@@ -227,13 +246,13 @@ def verify_phone_otp(
         or challenge.expires_at <= now
         or challenge.attempt_count >= challenge.max_attempts
     ):
-        raise InvalidPhoneOtpError("El cÃ³digo no es vÃ¡lido o ya caducÃ³.")
+        raise InvalidPhoneOtpError("El código no es válido o ya caducó.")
     submitted = (code or "").strip()
     expected_length = current_app.config["PHONE_OTP_CODE_LENGTH"]
     if not re.fullmatch(rf"\d{{{expected_length}}}", submitted):
         challenge.attempt_count += 1
         session.flush()
-        raise InvalidPhoneOtpError("El cÃ³digo no es vÃ¡lido o ya caducÃ³.")
+        raise InvalidPhoneOtpError("El código no es válido o ya caducó.")
     expected_hash = hash_otp_code(
         phone_normalized=challenge.phone_normalized,
         code=submitted,
@@ -242,7 +261,7 @@ def verify_phone_otp(
     if not _constant_compare(challenge.code_hash, expected_hash):
         challenge.attempt_count += 1
         session.flush()
-        raise InvalidPhoneOtpError("El cÃ³digo no es vÃ¡lido o ya caducÃ³.")
+        raise InvalidPhoneOtpError("El código no es válido o ya caducó.")
     challenge.verified_at = now
     existing_user = _active_user_by_phone(session, challenge.phone_normalized)
     if existing_user is not None and (
@@ -251,7 +270,7 @@ def verify_phone_otp(
     ):
         challenge.consumed_at = now
         session.flush()
-        raise InvalidPhoneOtpError("El cÃ³digo no es vÃ¡lido o ya caducÃ³.")
+        raise InvalidPhoneOtpError("El código no es válido o ya caducó.")
     if existing_user is not None and expected_purpose == PhoneOtpPurpose.LOGIN_OR_REGISTER:
         challenge.consumed_at = now
         existing_user.last_login_at = now
@@ -267,6 +286,7 @@ def register_phone_user(
     email: str | None,
     verification_ttl_minutes: int,
 ) -> PhoneRegistrationResult:
+    require_phone_otp_enabled()
     challenge = session.get(
         PhoneOtpChallenge,
         _challenge_uuid(challenge_id),
@@ -280,7 +300,9 @@ def register_phone_user(
         or challenge.consumed_at is not None
         or challenge.expires_at <= now
     ):
-        raise PhoneRegistrationError("La verificaciÃ³n telefÃ³nica no estÃ¡ disponible.")
+        raise PhoneRegistrationError(
+            "La verificación telefónica no está disponible."
+        )
     existing = _active_user_by_phone(session, challenge.phone_normalized)
     if existing is not None:
         challenge.consumed_at = now
@@ -293,7 +315,7 @@ def register_phone_user(
     display_email = (email or "").strip() or None
     normalized_email = normalize_email(display_email) if display_email else None
     if display_email and ("@" not in display_email or len(display_email) > 254):
-        raise PhoneRegistrationError("Ingresa un correo electrÃ³nico vÃ¡lido.")
+        raise PhoneRegistrationError("Ingresa un correo electrónico válido.")
     if normalized_email:
         if session.scalar(select(User).where(User.email_normalized == normalized_email)):
             raise PhoneRegistrationError("Ya existe una cuenta con este correo.")
@@ -332,6 +354,7 @@ def link_verified_phone(
     user_id,
     challenge_id,
 ) -> User:
+    require_phone_otp_enabled()
     challenge = session.get(
         PhoneOtpChallenge,
         _challenge_uuid(challenge_id),
@@ -345,13 +368,15 @@ def link_verified_phone(
         or challenge.consumed_at is not None
         or challenge.expires_at <= now
     ):
-        raise PhoneRegistrationError("La verificaciÃ³n telefÃ³nica no estÃ¡ disponible.")
+        raise PhoneRegistrationError(
+            "La verificación telefónica no está disponible."
+        )
     owner = _active_user_by_phone(session, challenge.phone_normalized)
     if owner is not None and owner.id != user_id:
-        raise PhoneAlreadyLinkedError("No fue posible vincular este nÃºmero.")
+        raise PhoneAlreadyLinkedError("No fue posible vincular este número.")
     user = session.get(User, user_id, with_for_update=True)
     if user is None:
-        raise PhoneRegistrationError("No se encontrÃ³ la cuenta.")
+        raise PhoneRegistrationError("No se encontró la cuenta.")
     user.phone = challenge.phone_normalized
     user.phone_normalized = challenge.phone_normalized
     user.phone_verified_at = now

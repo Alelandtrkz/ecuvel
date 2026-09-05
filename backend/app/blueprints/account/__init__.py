@@ -299,9 +299,25 @@ def change_password_post():
         return render_template("account/change_password.html"), 400
 
 
+def _phone_otp_disabled_profile_redirect():
+    if current_app.config.get("PHONE_OTP_ENABLED", False):
+        return None
+    from app.blueprints.auth import clear_phone_otp_session_state
+
+    clear_phone_otp_session_state()
+    flash(
+        "La verificación telefónica estará disponible próximamente.",
+        "warning",
+    )
+    return redirect(url_for("account.profile"))
+
+
 @account.get("/perfil/agregar-telefono")
 @login_required
 def add_phone_form():
+    disabled_redirect = _phone_otp_disabled_profile_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     return render_template("account/add_phone.html", form={})
 
 
@@ -309,6 +325,9 @@ def add_phone_form():
 @login_required
 @limiter.limit(lambda: current_app.config["PHONE_OTP_REQUEST_RATE_LIMIT"])
 def add_phone_post():
+    disabled_redirect = _phone_otp_disabled_profile_redirect()
+    if disabled_redirect is not None:
+        return disabled_redirect
     phone = request.form.get("phone", "").strip()
     try:
         db.session.remove()
@@ -330,12 +349,12 @@ def add_phone_post():
         flask_session[PHONE_CHALLENGE_SESSION_KEY] = str(result.challenge.id)
         flask_session[PHONE_PURPOSE_SESSION_KEY] = PhoneOtpPurpose.LINK_PHONE.value
         flask_session[PHONE_NEXT_SESSION_KEY] = url_for("account.profile")
-        flash("Enviamos un cÃ³digo al nÃºmero indicado.", "success")
+        flash("Enviamos un código al número indicado.", "success")
         return redirect(url_for("auth.phone_verify_form"))
     except PhoneOtpCooldownError as exc:
         flash(str(exc), "error")
     except PhoneOtpError:
-        flash("Ingresa un nÃºmero telefÃ³nico vÃ¡lido.", "error")
+        flash("Ingresa un número telefónico válido.", "error")
     return render_template("account/add_phone.html", form={"phone": phone}), 400
 
 
