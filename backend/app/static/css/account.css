@@ -1,4 +1,5 @@
 .account-panel {
+  min-width: 0;
   background: #fff;
   border-radius: 28px;
   padding: clamp(1.25rem, 4vw, 3rem);
@@ -12,10 +13,27 @@
   margin: 0 0 1rem;
 }
 
+.account-panel__header h1 > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.account-panel__header,
+.account-panel__header > *,
+.account-methods,
+.account-methods article,
+.profile-grid,
+.profile-grid > *,
+.profile-readonly {
+  min-width: 0;
+}
+
 .account-panel__header p {
   max-width: 760px;
   color: #6f8193;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .profile-form {
@@ -38,6 +56,13 @@
   background: #fbfcfd;
 }
 
+.account-methods article > *,
+.profile-readonly > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .account-methods span,
 .account-methods a {
   font-size: 0.9rem;
@@ -52,6 +77,7 @@
 
 .account-verification {
   width: max-content;
+  max-width: 100%;
   padding: 0.25rem 0.55rem;
   border-radius: 999px;
   font-size: 0.78rem;
@@ -92,6 +118,9 @@
 
 .profile-grid input,
 .profile-grid select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 44px;
   border: 1px solid #d6dde6;
   border-radius: 12px;
@@ -100,9 +129,11 @@
 }
 
 .profile-grid a {
-  width: max-content;
+  width: fit-content;
+  max-width: 100%;
   color: #1164ff;
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .profile-actions {
@@ -158,16 +189,109 @@
   background: #f1f5f9;
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .account-methods {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .profile-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .account-panel {
     border-radius: 20px;
+  }
+}
+
+@media (max-width: 427px) {
+  .orders-layout--profile {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .orders-layout--profile .customer-sidebar,
+  .orders-layout--profile .account-panel {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    padding: var(--space-4);
+  }
+
+  .orders-layout--profile .customer-sidebar__identity,
+  .orders-layout--profile .customer-sidebar__identity-text {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .orders-layout--profile .customer-sidebar__nav {
+    display: flex;
+    grid-template-columns: none;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    flex-flow: row nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    contain: inline-size;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .orders-layout--profile .customer-sidebar__nav > a,
+  .orders-layout--profile .customer-sidebar__nav > span {
+    width: auto;
+    max-width: none;
+    min-height: 44px;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    padding-inline: var(--space-2);
+    overflow-wrap: normal;
+    word-break: normal;
+    white-space: nowrap;
+  }
+
+  .orders-layout--profile .account-panel > *,
+  .orders-layout--profile .account-panel__header,
+  .orders-layout--profile .account-panel__header > div,
+  .orders-layout--profile .account-panel__header h1,
+  .orders-layout--profile .account-panel__header p,
+  .orders-layout--profile .account-methods,
+  .orders-layout--profile .account-methods article,
+  .orders-layout--profile .profile-form,
+  .orders-layout--profile .profile-grid,
+  .orders-layout--profile .profile-grid > *,
+  .orders-layout--profile .profile-readonly,
+  .orders-layout--profile .profile-actions {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .orders-layout--profile .account-methods,
+  .orders-layout--profile .profile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .orders-layout--profile .account-methods article,
+  .orders-layout--profile .profile-grid input,
+  .orders-layout--profile .profile-grid select {
+    box-sizing: border-box;
+  }
+
+  .account-panel__header h1 {
+    min-width: 0;
+    align-items: flex-start;
+    font-size: 1.65rem;
+    line-height: 1.2;
+  }
+
+  .account-panel__header h1 svg {
+    flex: 0 0 auto;
+    margin-top: 0.15em;
   }
 }
