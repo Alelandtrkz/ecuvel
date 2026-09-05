@@ -32,6 +32,7 @@ from app.models.enums import (
     StoreStatus,
     UserStatus,
 )
+from app.services.age_eligibility import is_at_least_18
 from app.services.cart import get_cart_state
 from app.services.inventory import (
     InventoryServiceError,
@@ -520,6 +521,15 @@ def create_checkout_order(
     )
     if buyer is None or buyer.status != UserStatus.ACTIVE:
         raise CheckoutBuyerError("El comprador no está disponible.")
+    if not is_at_least_18(buyer.birth_date):
+        if buyer.birth_date is None:
+            raise CheckoutBuyerError(
+                "Para comprar en ECUVEL debes tener al menos 18 años. "
+                "Indica tu fecha de nacimiento para continuar."
+            )
+        raise CheckoutBuyerError(
+            "Para comprar en ECUVEL debes tener al menos 18 años."
+        )
 
     rows = _load_rows(session, selected, lock_offers=True)
     preview = _preview_from_rows(selected, rows)

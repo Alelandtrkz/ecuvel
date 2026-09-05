@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -137,6 +137,120 @@ def test_checkout_redirects_when_cart_is_empty(client):
     response = client.get("/checkout")
     assert response.status_code == 302
     assert "/iniciar-sesion" in response.headers["Location"]
+
+
+@pytest.mark.parametrize("birth_date", (None, date(2010, 1, 1)))
+def test_checkout_get_redirects_ineligible_buyer_to_age_gate(
+    client,
+    app,
+    session: Session,
+    birth_date,
+):
+    base = create_catalog_and_stock(session, stock=10)
+    buyer = session.get(User, base.buyer_id)
+    assert buyer is not None
+    buyer.birth_date = birth_date
+    _prepare_demo_buyer(session, base, app, client)
+    session.commit()
+    _set_cart(client, (base.offer_id, 1, True))
+
+    response = client.get("/checkout")
+
+    assert response.status_code == 302
+    assert "/verificar-edad" in response.headers["Location"]
+    assert "next=/checkout" in response.headers["Location"]
+    assert "back=/carrito" in response.headers["Location"]
+    if birth_date is not None:
+        age_gate = client.get(response.headers["Location"])
+        assert 'name="birth_date"' not in age_gate.get_data(as_text=True)
+
+
+@pytest.mark.parametrize("birth_date", (None, date(2010, 1, 1)))
+def test_direct_checkout_post_rejects_age_without_purchase_effects(
+    client,
+    app,
+    session: Session,
+    birth_date,
+):
+    base = create_catalog_and_stock(session, stock=10)
+    buyer = session.get(User, base.buyer_id)
+    balance = session.get(InventoryBalance, base.balance_id)
+    assert buyer is not None and balance is not None
+    buyer.birth_date = birth_date
+    _prepare_demo_buyer(session, base, app, client)
+    session.commit()
+    _set_cart(client, (base.offer_id, 2, True))
+    before_balance = (
+        balance.on_hand_quantity,
+        balance.reserved_quantity,
+        balance.blocked_quantity,
+    )
+
+    response = _submit(client, "forged-direct-token")
+
+    assert response.status_code == 302
+    assert "/verificar-edad" in response.headers["Location"]
+    assert session.scalar(select(func.count(Order.id))) == 0
+    assert session.scalar(select(func.count(InventoryReservation.id))) == 0
+    assert session.scalar(select(func.count(PaymentAttempt.id))) == 0
+    session.expire_all()
+    stored_balance = session.get(InventoryBalance, base.balance_id)
+    assert stored_balance is not None
+    assert (
+        stored_balance.on_hand_quantity,
+        stored_balance.reserved_quantity,
+        stored_balance.blocked_quantity,
+    ) == before_balance
+
+
+def test_successful_age_gate_returns_to_visible_checkout(
+    client,
+    app,
+    session: Session,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.age_eligibility.ecuador_local_date",
+        lambda: date(2026, 9, 4),
+    )
+    monkeypatch.setattr(
+        "app.services.user_profiles.ecuador_local_date",
+        lambda: date(2026, 9, 4),
+    )
+    base = create_catalog_and_stock(session, stock=10)
+    buyer = session.get(User, base.buyer_id)
+    assert buyer is not None
+    buyer.birth_date = None
+    _prepare_demo_buyer(session, base, app, client)
+    session.commit()
+    _set_cart(client, (base.offer_id, 1, True))
+
+    response = client.post(
+        "/verificar-edad",
+        data={
+            "birth_date": "2008-09-04",
+            "next": "/checkout",
+            "back": "/carrito",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/checkout")
+    assert client.get(response.headers["Location"]).status_code == 200
+
+
+def test_authenticated_buyer_without_birth_date_can_still_view_cart(
+    client, app, session: Session
+):
+    base = create_catalog_and_stock(session, stock=10)
+    buyer = session.get(User, base.buyer_id)
+    assert buyer is not None
+    buyer.birth_date = None
+    _prepare_demo_buyer(session, base, app, client)
+    session.commit()
+    _set_cart(client, (base.offer_id, 1, True))
+
+    assert client.get("/carrito").status_code == 200
 
 
 def test_checkout_renders_only_selected_cart_items(

@@ -95,6 +95,35 @@ def update_profile(
     return user
 
 
+def register_birth_date(
+    *,
+    session: Session,
+    user_id,
+    birth_date: date | None,
+    today: date | None = None,
+) -> User:
+    user = session.get(User, user_id, with_for_update=True)
+    if user is None:
+        raise ProfileError("No se encontró la cuenta.")
+
+    effective_today = today if today is not None else ecuador_local_date()
+    if user.birth_date is not None:
+        if is_at_least_18(user.birth_date, today=effective_today):
+            return user
+        raise ProfileError("Para comprar en ECUVEL debes tener al menos 18 años.")
+    if birth_date is None:
+        raise ProfileError("Indica tu fecha de nacimiento para continuar.")
+
+    _validate_birth_date_transition(
+        existing=None,
+        incoming=birth_date,
+        today=effective_today,
+    )
+    user.birth_date = birth_date
+    session.flush()
+    return user
+
+
 def request_email_change(
     *,
     session: Session,

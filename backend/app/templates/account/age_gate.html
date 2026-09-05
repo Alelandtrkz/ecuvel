@@ -1,0 +1,29 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Confirma tu edad | Ecuvel{% endblock %}
+
+{% block auth_content %}
+  {% if blocked %}
+    <h1 id="auth-title">Debes tener al menos 18 años para continuar</h1>
+    <p class="auth-card__intro">Según la fecha de nacimiento registrada, no puedes realizar esta compra.</p>
+  {% else %}
+    <h1 id="auth-title">Indica tu fecha de nacimiento</h1>
+    <p class="auth-card__intro">Debes tener al menos 18 años para comprar en ECUVEL.</p>
+
+    {% if error %}
+      <div class="flash-message flash-message--error" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <form class="auth-form" method="post" action="{{ url_for('account.age_gate_submit') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input type="hidden" name="back" value="{{ back_url }}">
+      <label for="birth-date">Fecha de nacimiento</label>
+      <input id="birth-date" name="birth_date" type="date" value="{{ birth_date_value }}" autocomplete="bday" required>
+      <p class="auth-card__hint">Tu fecha de nacimiento se guardará en tu perfil y no podrá modificarse una vez registrada.</p>
+      <button class="button button--primary auth-submit" type="submit">Confirmar</button>
+    </form>
+  {% endif %}
+
+  <p class="auth-card__switch"><a class="auth-back" href="{{ back_url }}">Volver atrás</a></p>
+{% endblock %}

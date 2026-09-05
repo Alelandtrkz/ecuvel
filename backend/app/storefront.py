@@ -73,6 +73,7 @@ from app.services.cart_storage import (
     mutate_cart_for_identity,
     replace_cart_state_for_identity,
 )
+from app.services.age_eligibility import is_at_least_18
 from app.services.checkout import (
     CheckoutServiceError,
     EmptyCheckoutError,
@@ -1528,6 +1529,18 @@ def _requires_verified_identity():
     return None
 
 
+def _requires_adult_eligibility():
+    if not is_at_least_18(current_user.birth_date):
+        return redirect(
+            url_for(
+                "account.age_gate",
+                next=url_for("storefront.checkout"),
+                back=url_for("storefront.cart"),
+            )
+        )
+    return None
+
+
 def _remember_checkout_order(order_id: uuid.UUID) -> None:
     values = [
         value
@@ -2041,6 +2054,9 @@ def checkout() -> str:
     auth_redirect = _requires_verified_identity()
     if auth_redirect is not None:
         return auth_redirect
+    age_redirect = _requires_adult_eligibility()
+    if age_redirect is not None:
+        return age_redirect
     cart_state = load_cart_state_for_identity()
     try:
         preview = build_checkout_preview(
@@ -2088,6 +2104,9 @@ def create_checkout():
     auth_redirect = _requires_verified_identity()
     if auth_redirect is not None:
         return auth_redirect
+    age_redirect = _requires_adult_eligibility()
+    if age_redirect is not None:
+        return age_redirect
     token = (request.form.get("checkout_token") or "").strip()
     completed = flask_session.get(COMPLETED_CHECKOUTS_SESSION_KEY, {})
     if isinstance(completed, dict) and token in completed:

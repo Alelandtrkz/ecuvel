@@ -346,6 +346,7 @@ def test_anonymous_and_unverified_checkout_are_blocked(client, session):
 def test_verified_checkout_uses_current_user_as_buyer(client, session):
     base = create_catalog_and_stock(session, stock=5)
     user = _user(session)
+    user.birth_date = date(1990, 1, 1)
     session.commit()
     _login(client)
     with client.session_transaction() as browser_session:

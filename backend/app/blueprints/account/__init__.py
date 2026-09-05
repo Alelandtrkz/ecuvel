@@ -14,13 +14,16 @@ from flask import (
 from flask_login import current_user, login_required
 
 from app.extensions import db, limiter
+from app.models import User
 from app.models.enums import PhoneOtpPurpose
+from app.services.age_eligibility import is_at_least_18
+from app.services.mail import MailError, mail_service
 from app.services.phone_otp import (
     PhoneOtpCooldownError,
     PhoneOtpError,
     request_phone_otp,
 )
-from app.services.mail import MailError, mail_service
+from app.services.safe_redirects import safe_local_redirect
 from app.services.transactional_mail import (
     build_mail_action_url,
     email_change_mail,
@@ -30,6 +33,7 @@ from app.services.user_profiles import (
     change_password,
     confirm_email_change,
     create_password,
+    register_birth_date,
     request_email_change,
     update_profile,
 )
@@ -70,6 +74,97 @@ def _send_email_change(
             expiration_minutes=expiration_minutes,
         )
     )
+
+
+def _age_gate_destinations() -> tuple[str, str]:
+    return (
+        safe_local_redirect(
+            request.values.get("next"),
+            fallback=url_for("storefront.home"),
+        ),
+        safe_local_redirect(
+            request.values.get("back"),
+            fallback=url_for("storefront.cart"),
+        ),
+    )
+
+
+def _render_age_gate(
+    *,
+    user: User,
+    next_url: str,
+    back_url: str,
+    error: str | None = None,
+    birth_date_value: str = "",
+    status: int = 200,
+):
+    return (
+        render_template(
+            "account/age_gate.html",
+            blocked=(
+                user.birth_date is not None
+                and not is_at_least_18(user.birth_date)
+            ),
+            next_url=next_url,
+            back_url=back_url,
+            error=error,
+            birth_date_value=birth_date_value,
+        ),
+        status,
+    )
+
+
+@account.get("/verificar-edad")
+@login_required
+def age_gate():
+    next_url, back_url = _age_gate_destinations()
+    if is_at_least_18(current_user.birth_date):
+        return redirect(next_url)
+    return _render_age_gate(
+        user=current_user,
+        next_url=next_url,
+        back_url=back_url,
+    )
+
+
+@account.post("/verificar-edad")
+@login_required
+def age_gate_submit():
+    next_url, back_url = _age_gate_destinations()
+    user_id = current_user.id
+    birth_date_value = (request.form.get("birth_date") or "").strip()
+    try:
+        if not birth_date_value:
+            raise ProfileError("Indica tu fecha de nacimiento para continuar.")
+        try:
+            submitted_birth_date = date.fromisoformat(birth_date_value)
+        except ValueError as exc:
+            raise ProfileError("Ingresa una fecha de nacimiento válida.") from exc
+
+        db.session.remove()
+        database_session = db.session()
+        with database_session.begin():
+            register_birth_date(
+                session=database_session,
+                user_id=user_id,
+                birth_date=submitted_birth_date,
+            )
+        return redirect(next_url)
+    except ProfileError as exc:
+        db.session.remove()
+        user = db.session.get(User, user_id)
+        if user is None:
+            return redirect(url_for("auth.login_form"))
+        return _render_age_gate(
+            user=user,
+            next_url=next_url,
+            back_url=back_url,
+            error=str(exc),
+            birth_date_value=(
+                "" if user.birth_date is not None else birth_date_value
+            ),
+            status=400,
+        )
 
 
 @account.get("/perfil")

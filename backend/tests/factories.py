@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -79,6 +79,7 @@ def create_catalog_and_stock(
         email=f"buyer-{token}@test.local",
         password_hash="test",
         full_name="Buyer Test",
+        birth_date=date(1990, 1, 1),
         status=UserStatus.ACTIVE,
     )
     operator = User(

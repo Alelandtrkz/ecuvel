@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -21,6 +21,7 @@ from app.models import (
     SellerOffer,
     SellerOrder,
     Store,
+    User,
     Warehouse,
     WarehouseLocation,
 )
@@ -35,8 +36,10 @@ from app.models.enums import (
     SellerCommissionType,
     SellerOrderStatus,
     StoreStatus,
+    UserStatus,
 )
 from app.services.checkout import (
+    CheckoutBuyerError,
     CheckoutIdempotencyConflictError,
     CheckoutItemUnavailableError,
     CheckoutWarehouseError,
@@ -203,6 +206,83 @@ def test_bank_transfer_checkout_creates_complete_pending_order(
     assert session.scalar(select(func.count(OrderItem.id))) == 1
 
 
+@pytest.mark.parametrize("birth_date", (None, date(2008, 9, 5)))
+def test_checkout_rejects_ineligible_buyer_without_side_effects(
+    session: Session,
+    monkeypatch,
+    birth_date,
+):
+    monkeypatch.setattr(
+        "app.services.age_eligibility.ecuador_local_date",
+        lambda: date(2026, 9, 4),
+    )
+    base = create_catalog_and_stock(session, stock=10)
+    buyer = session.get(User, base.buyer_id)
+    balance = session.get(InventoryBalance, base.balance_id)
+    assert buyer is not None and balance is not None
+    buyer.birth_date = birth_date
+    session.commit()
+    before_counts = (
+        session.scalar(select(func.count(Order.id))),
+        session.scalar(select(func.count(InventoryReservation.id))),
+        session.scalar(select(func.count(PaymentAttempt.id))),
+    )
+    before_balance = (
+        balance.on_hand_quantity,
+        balance.reserved_quantity,
+        balance.blocked_quantity,
+    )
+    session.rollback()
+
+    with pytest.raises(CheckoutBuyerError, match="al menos 18 años"):
+        with session.begin():
+            _checkout(
+                session,
+                base,
+                _cart((base.offer_id, 2, True)),
+                f"age-rejection-{birth_date}",
+            )
+
+    session.expire_all()
+    stored_balance = session.get(InventoryBalance, base.balance_id)
+    assert stored_balance is not None
+    assert (
+        session.scalar(select(func.count(Order.id))),
+        session.scalar(select(func.count(InventoryReservation.id))),
+        session.scalar(select(func.count(PaymentAttempt.id))),
+    ) == before_counts
+    assert (
+        stored_balance.on_hand_quantity,
+        stored_balance.reserved_quantity,
+        stored_balance.blocked_quantity,
+    ) == before_balance
+
+
+def test_checkout_accepts_buyer_exactly_eighteen(
+    session: Session,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.age_eligibility.ecuador_local_date",
+        lambda: date(2026, 9, 4),
+    )
+    base = create_catalog_and_stock(session, stock=10)
+    buyer = session.get(User, base.buyer_id)
+    assert buyer is not None
+    buyer.birth_date = date(2008, 9, 4)
+    session.commit()
+
+    with session.begin():
+        result = _checkout(
+            session,
+            base,
+            _cart((base.offer_id, 1, True)),
+            "exactly-eighteen",
+        )
+
+    assert session.get(Order, result.order_id) is not None
+
+
 def test_checkout_preserves_fixed_commission_compatibility(session: Session):
     base = create_catalog_and_stock(session, stock=10)
     offer = session.get(SellerOffer, base.offer_id)
@@ -330,10 +410,15 @@ def test_repeated_checkout_returns_same_order(session: Session):
     with session.begin():
         first = _checkout(session, base, cart, "same-checkout")
     with session.begin():
+        buyer = session.get(User, base.buyer_id)
+        assert buyer is not None
+        buyer.status = UserStatus.BLOCKED
+    with session.begin():
         replay = _checkout(session, base, cart, "same-checkout")
 
     assert replay.replayed is True
     assert replay.order_id == first.order_id
+    assert replay.payment_attempt_id == first.payment_attempt_id
     assert session.scalar(select(func.count(Order.id))) == 1
     assert session.scalar(select(func.count(PaymentAttempt.id))) == 1
     assert session.scalar(select(func.count(InventoryReservation.id))) == 1
