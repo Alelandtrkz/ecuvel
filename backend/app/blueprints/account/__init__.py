@@ -20,7 +20,11 @@ from app.services.phone_otp import (
     PhoneOtpError,
     request_phone_otp,
 )
-from app.services.mail import OutgoingMail, mail_service
+from app.services.mail import MailError, mail_service
+from app.services.transactional_mail import (
+    build_mail_action_url,
+    email_change_mail,
+)
 from app.services.user_profiles import (
     ProfileError,
     change_password,
@@ -49,13 +53,21 @@ def _parse_birth_date(value: str | None) -> date | None:
     return date.fromisoformat(value)
 
 
-def _send_email_change(new_email: str, token: str) -> None:
-    link = url_for("account.confirm_email_change_route", token=token, _external=True)
+def _send_email_change(
+    new_email: str,
+    token: str,
+    *,
+    expiration_minutes: int,
+) -> None:
+    link = build_mail_action_url(
+        "account.confirm_email_change_route",
+        token=token,
+    )
     mail_service.send(
-        OutgoingMail(
+        email_change_mail(
             to=new_email,
-            subject="Confirma tu nuevo correo en Ecuvel",
-            body=f"Confirma el cambio de correo con este enlace:\n{link}",
+            action_url=link,
+            expiration_minutes=expiration_minutes,
         )
     )
 
@@ -104,6 +116,9 @@ def change_email_form():
 def change_email_post():
     new_email = request.form.get("new_email", "").strip()
     user_id = current_user.id
+    ttl_minutes = current_app.config[
+        "EMAIL_VERIFICATION_TOKEN_TTL_MINUTES"
+    ]
     try:
         db.session.remove()
         database_session = db.session()
@@ -113,19 +128,33 @@ def change_email_post():
                 user_id=user_id,
                 new_email=new_email,
                 current_password=request.form.get("current_password", ""),
-                ttl_minutes=current_app.config[
-                    "EMAIL_VERIFICATION_TOKEN_TTL_MINUTES"
-                ],
+                ttl_minutes=ttl_minutes,
             )
-        _send_email_change(new_email, token)
-        flash(
-            "Enviamos un enlace de confirmación al nuevo correo.",
-            "success",
-        )
-        return redirect(url_for("account.profile"))
     except ProfileError as exc:
         flash(str(exc), "error")
         return render_template("account/change_email.html"), 400
+    try:
+        _send_email_change(
+            new_email,
+            token,
+            expiration_minutes=ttl_minutes,
+        )
+    except MailError as exc:
+        current_app.logger.warning(
+            "event=mail_failed mail_type=CHANGE_EMAIL error=%s",
+            type(exc).__name__,
+        )
+        flash(
+            "No pudimos enviar el correo de confirmación en este momento. "
+            "Inténtalo nuevamente más tarde.",
+            "warning",
+        )
+        return redirect(url_for("account.profile"))
+    flash(
+        "Enviamos un enlace de confirmación al nuevo correo.",
+        "success",
+    )
+    return redirect(url_for("account.profile"))
 
 
 @account.get("/perfil/confirmar-correo/<string:token>")

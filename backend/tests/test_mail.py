@@ -15,6 +15,7 @@ from app.services.mail import (
     validate_mail_configuration,
 )
 from app.services.transactional_mail import (
+    email_change_mail,
     password_reset_mail,
     review_rejected_mail,
     staff_invitation_mail,
@@ -253,3 +254,24 @@ def test_transactional_templates_render_text_html_and_only_public_review_reason(
     assert "Operadora de punto" in messages[2].html_body
     assert "cambios públicos" in messages[3].text_body
     assert "internal_notes" not in messages[3].text_body
+
+
+def test_email_change_template_renders_text_html_expiration_and_tag(app):
+    action_url = "https://ecuvel.test/perfil/confirmar-correo/opaque-token"
+
+    message = email_change_mail(
+        to="new@example.test",
+        action_url=action_url,
+        expiration_minutes=30,
+    )
+
+    assert message.subject == "Confirma tu nuevo correo de ECUVEL"
+    assert message.tags == {"mail_type": "CHANGE_EMAIL"}
+    assert action_url in message.text_body
+    assert action_url in message.html_body
+    assert "Confirmar nuevo correo" in message.text_body
+    assert "Confirmar nuevo correo" in message.html_body
+    assert "30 minutos" in message.text_body
+    assert "30 minutos" in message.html_body
+    assert "Si no solicitaste este cambio" in message.text_body
+    assert "Si no solicitaste este cambio" in message.html_body

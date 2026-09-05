@@ -1,0 +1,10 @@
+Confirma tu nuevo correo
+
+Recibimos una solicitud para cambiar el correo de tu cuenta ECUVEL.
+
+Confirmar nuevo correo: {{ action_url }}
+{% if expiration_minutes %}
+Este enlace estará disponible durante {{ expiration_minutes }} minutos.
+{% endif %}
+
+Si no solicitaste este cambio, puedes ignorar este mensaje.

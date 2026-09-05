@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -28,6 +29,15 @@ class ProfileError(Exception):
 
 
 VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say", ""}
+_EMAIL_UNIQUE_CONSTRAINTS = {
+    "ix_users_email",
+    "ix_users_email_normalized",
+}
+_PASSWORDLESS_EMAIL_CHANGE_MESSAGE = (
+    "Por seguridad, el cambio de correo para cuentas sin contraseña "
+    "requiere una nueva verificación telefónica. Esta función estará "
+    "disponible próximamente."
+)
 
 
 def _validate_birth_date_transition(
@@ -96,14 +106,22 @@ def request_email_change(
     user = session.get(User, user_id, with_for_update=True)
     if user is None:
         raise ProfileError("La contraseña actual no es correcta.")
-    if user.password_hash and not check_password_hash(
+    if user.password_hash is None:
+        raise ProfileError(_PASSWORDLESS_EMAIL_CHANGE_MESSAGE)
+    if not check_password_hash(
         user.password_hash,
         current_password,
     ):
         raise ProfileError("La contraseña actual no es correcta.")
-    normalized = normalize_email(new_email)
-    if not new_email.strip() or "@" not in new_email or len(new_email.strip()) > 254:
+    display_email = new_email.strip()
+    if not display_email or "@" not in display_email or len(display_email) > 254:
         raise ProfileError("Ingresa un correo electrónico válido.")
+    normalized = normalize_email(display_email)
+    if normalized == user.email_normalized:
+        raise ProfileError(
+            "El correo ingresado es igual a tu correo actual. "
+            "Ingresa un correo diferente."
+        )
     existing = session.scalar(
         select(User).where(
             User.email_normalized == normalized,
@@ -111,13 +129,15 @@ def request_email_change(
         )
     )
     if existing is not None:
-        raise ProfileError("Ya existe una cuenta con este correo.")
+        raise ProfileError(
+            "Ya existe una cuenta con este correo. Prueba con otro."
+        )
     token = create_account_token(
         session=session,
         user_id=user.id,
         purpose=UserAccountTokenPurpose.CHANGE_EMAIL,
         ttl_minutes=ttl_minutes,
-        new_email=new_email.strip(),
+        new_email=display_email,
     )
     return user, token.token
 
@@ -136,13 +156,42 @@ def confirm_email_change(
     except InvalidAccountTokenError as exc:
         raise ProfileError(str(exc)) from exc
     user = session.get(User, account_token.user_id, with_for_update=True)
-    if user is None or not account_token.new_email:
+    if (
+        user is None
+        or not account_token.new_email
+        or not account_token.new_email_normalized
+    ):
         raise ProfileError("El enlace no es válido o ya caducó.")
+    if user.password_hash is None:
+        raise ProfileError(_PASSWORDLESS_EMAIL_CHANGE_MESSAGE)
+    conflicting_user_id = session.scalar(
+        select(User.id).where(
+            User.email_normalized == account_token.new_email_normalized,
+            User.id != user.id,
+        )
+    )
+    if conflicting_user_id is not None:
+        raise ProfileError(
+            "Ya existe una cuenta con este correo. Prueba con otro."
+        )
     user.email = account_token.new_email
-    user.email_normalized = normalize_email(account_token.new_email)
+    user.email_normalized = account_token.new_email_normalized
     user.email_verified_at = datetime.now(timezone.utc)
-    user.status = UserStatus.ACTIVE
-    session.flush()
+    if user.status == UserStatus.PENDING_VERIFICATION:
+        user.status = UserStatus.ACTIVE
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        constraint_name = getattr(
+            getattr(exc.orig, "diag", None),
+            "constraint_name",
+            None,
+        )
+        if constraint_name in _EMAIL_UNIQUE_CONSTRAINTS:
+            raise ProfileError(
+                "Ya existe una cuenta con este correo. Prueba con otro."
+            ) from exc
+        raise
     return user
 
 

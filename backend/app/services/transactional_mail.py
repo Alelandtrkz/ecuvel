@@ -72,6 +72,19 @@ def password_reset_mail(
     )
 
 
+def email_change_mail(
+    *, to: str, action_url: str, expiration_minutes: int | None
+) -> OutgoingMail:
+    return _mail(
+        to=to,
+        subject="Confirma tu nuevo correo de ECUVEL",
+        template_name="email_change",
+        mail_type="CHANGE_EMAIL",
+        action_url=action_url,
+        expiration_minutes=expiration_minutes,
+    )
+
+
 def staff_invitation_mail(
     *,
     to: str,
