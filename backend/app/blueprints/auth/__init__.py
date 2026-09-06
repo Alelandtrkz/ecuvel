@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from urllib.parse import urlsplit
-
 from flask import (
     Blueprint,
     current_app,
@@ -52,6 +50,7 @@ from app.services.cart_storage import (
     adopt_guest_cart_for_authenticated_user,
 )
 from app.services.admin_users import AdminUserError, accept_staff_invitation
+from app.services.safe_redirects import safe_local_redirect
 
 
 auth = Blueprint("auth", __name__)
@@ -60,15 +59,6 @@ PHONE_CHALLENGE_SESSION_KEY = "phone_otp_challenge_id"
 PHONE_PURPOSE_SESSION_KEY = "phone_otp_purpose"
 PHONE_NEXT_SESSION_KEY = "phone_otp_next"
 PHONE_REGISTRATION_CHALLENGE_SESSION_KEY = "phone_registration_challenge_id"
-
-
-def _safe_next(value: str | None) -> str:
-    if not value:
-        return url_for("storefront.home")
-    parsed = urlsplit(value)
-    if parsed.scheme or parsed.netloc or not value.startswith("/"):
-        return url_for("storefront.home")
-    return value
 
 
 def _claim_orders_for_user(user_id, database_session=None) -> None:
@@ -187,7 +177,10 @@ def register_form():
         return redirect(url_for("account.profile"))
     return render_template(
         "auth/register.html",
-        next_url=_safe_next(request.args.get("next")),
+        next_url=safe_local_redirect(
+            request.args.get("next"),
+            fallback=url_for("storefront.home"),
+        ),
         form={},
     )
 
@@ -195,7 +188,10 @@ def register_form():
 @auth.post("/registro")
 @limiter.limit("5 per minute")
 def register():
-    next_url = _safe_next(request.form.get("next"))
+    next_url = safe_local_redirect(
+        request.form.get("next"),
+        fallback=url_for("storefront.home"),
+    )
     form = {
         "email": request.form.get("email", "").strip(),
         "full_name": request.form.get("full_name", "").strip(),
@@ -253,7 +249,10 @@ def login_form():
         return redirect(url_for("account.profile"))
     return render_template(
         "auth/login.html",
-        next_url=_safe_next(request.args.get("next")),
+        next_url=safe_local_redirect(
+            request.args.get("next"),
+            fallback=url_for("storefront.home"),
+        ),
         form={},
     )
 
@@ -261,7 +260,10 @@ def login_form():
 @auth.post("/iniciar-sesion")
 @limiter.limit("5 per minute")
 def login():
-    next_url = _safe_next(request.form.get("next"))
+    next_url = safe_local_redirect(
+        request.form.get("next"),
+        fallback=url_for("storefront.home"),
+    )
     form = {"email": request.form.get("email", "").strip()}
     try:
         db.session.remove()
@@ -444,7 +446,10 @@ def phone_login_form():
         return redirect(url_for("account.profile"))
     return render_template(
         "auth/phone_request.html",
-        next_url=_safe_next(request.args.get("next")),
+        next_url=safe_local_redirect(
+            request.args.get("next"),
+            fallback=url_for("storefront.home"),
+        ),
         form={},
     )
 
@@ -455,7 +460,10 @@ def phone_login_request():
     disabled_redirect = _phone_otp_disabled_redirect()
     if disabled_redirect is not None:
         return disabled_redirect
-    next_url = _safe_next(request.form.get("next"))
+    next_url = safe_local_redirect(
+        request.form.get("next"),
+        fallback=url_for("storefront.home"),
+    )
     form = {"phone": request.form.get("phone", "").strip()}
     try:
         db.session.remove()
@@ -530,7 +538,10 @@ def phone_verify_post():
             user = None
         database_session.commit()
         if purpose == PhoneOtpPurpose.LOGIN_OR_REGISTER and user is not None:
-            next_url = _safe_next(flask_session.get(PHONE_NEXT_SESSION_KEY))
+            next_url = safe_local_redirect(
+                flask_session.get(PHONE_NEXT_SESSION_KEY),
+                fallback=url_for("storefront.home"),
+            )
             _clear_phone_challenge()
             _login_user_preserving_session(user)
             flash("Sesión iniciada.", "success")
@@ -583,7 +594,10 @@ def phone_resend_code():
         _store_phone_challenge(
             result.challenge.id,
             purpose,
-            _safe_next(flask_session.get(PHONE_NEXT_SESSION_KEY)),
+            safe_local_redirect(
+                flask_session.get(PHONE_NEXT_SESSION_KEY),
+                fallback=url_for("storefront.home"),
+            ),
         )
         flash("Enviamos un código al número indicado.", "success")
     except PhoneOtpCooldownError as exc:

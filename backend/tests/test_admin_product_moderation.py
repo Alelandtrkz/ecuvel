@@ -37,7 +37,7 @@ CHECKLIST = (
 
 def _login(client, user) -> None:
     with client.session_transaction() as browser:
-        browser["_user_id"] = str(user.id)
+        browser["_user_id"] = user.get_id()
         browser["_fresh"] = True
 
 
@@ -78,7 +78,7 @@ def test_admin_products_requires_active_ecuvel_staff(app, session, tmp_path):
     blocked_staff = create_user(session, staff=True, active=False)
     session.commit()
     _login(client, blocked_staff)
-    assert client.get("/admin/products").status_code == 403
+    assert client.get("/admin/products").status_code == 302
 
 
 def test_admin_products_filters_counts_and_search(app, session, tmp_path):

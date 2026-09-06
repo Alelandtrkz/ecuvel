@@ -18,6 +18,7 @@ from app.services.account_tokens import (
 )
 from app.services.authentication import (
     PasswordPolicyError,
+    bump_auth_version,
     normalize_full_name,
     validate_password,
 )
@@ -244,6 +245,7 @@ def change_password(
         raise PasswordPolicyError("Las contraseñas no coinciden.")
     validate_password(new_password, min_length=password_min_length)
     user.password_hash = generate_password_hash(new_password)
+    bump_auth_version(user)
     session.flush()
     return user
 
@@ -265,5 +267,6 @@ def create_password(
         raise PasswordPolicyError("Las contraseñas no coinciden.")
     validate_password(new_password, min_length=password_min_length)
     user.password_hash = generate_password_hash(new_password)
+    bump_auth_version(user)
     session.flush()
     return user

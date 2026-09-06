@@ -1,4 +1,7 @@
 import os
+from collections.abc import Mapping
+from ipaddress import ip_address
+from urllib.parse import urlsplit
 
 
 def derive_bank_account_last4(
@@ -84,6 +87,62 @@ def validate_phone_otp_configuration(
         )
 
 
+def _valid_public_base_hostname(hostname: str) -> bool:
+    try:
+        ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    if len(ascii_hostname) > 253:
+        return False
+    labels = ascii_hostname.rstrip(".").split(".")
+    return bool(labels) and all(
+        label
+        and len(label) <= 63
+        and label[0] != "-"
+        and label[-1] != "-"
+        and all(character.isalnum() or character == "-" for character in label)
+        for label in labels
+    )
+
+
+def validate_public_base_url_configuration(config: Mapping[str, object]) -> None:
+    if not bool(config.get("ECUVEL_PRODUCTION")):
+        return
+
+    value = str(config.get("PUBLIC_BASE_URL") or "").strip()
+    try:
+        parsed = urlsplit(value)
+        parsed_port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(
+            "PUBLIC_BASE_URL debe ser un origen HTTPS absoluto y válido en producción."
+        ) from exc
+
+    if (
+        not value
+        or parsed.scheme != "https"
+        or not parsed.netloc
+        or not parsed.hostname
+        or not _valid_public_base_hostname(parsed.hostname)
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or (parsed_port is not None and not 1 <= parsed_port <= 65535)
+        or "\\" in value
+        or any(ord(character) < 33 or ord(character) == 127 for character in value)
+    ):
+        raise RuntimeError(
+            "PUBLIC_BASE_URL debe ser un origen HTTPS absoluto y válido en producción."
+        )
+
+
 class Config:
     SECRET_KEY = os.environ["SECRET_KEY"]
 
@@ -99,6 +158,7 @@ class Config:
         ECUVEL_PRODUCTION,
     )
     REMEMBER_COOKIE_HTTPONLY = True
+    REMEMBER_COOKIE_SAMESITE = "Lax"
     REMEMBER_COOKIE_SECURE = _environment_bool(
         "REMEMBER_COOKIE_SECURE",
         ECUVEL_PRODUCTION,

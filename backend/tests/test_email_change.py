@@ -288,6 +288,7 @@ def test_confirmation_preserves_account_status_and_is_active(
     assert confirmed.email_verified_at > old_verified_at
     assert confirmed.status == expected_status
     assert confirmed.is_active is is_active
+    assert confirmed.auth_version == 1
 
 
 def test_confirmed_token_cannot_be_reused(session):

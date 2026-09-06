@@ -17,6 +17,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "6499defb2c52"
 C1_HEAD = "7c1a9e4d2b6f"
+CURRENT_HEAD = "8d4e5f6a7b9c"
 TABLES = {"carts", "cart_items", "cart_adoptions"}
 
 
@@ -153,5 +154,5 @@ def test_c1_downgrade_fails_closed_when_cart_data_exists(
     with pytest.raises(SystemExit) as blocked:
         _migrate(app, PREVIOUS_HEAD, down=True)
     assert blocked.value.code == 1
-    assert _version(engine) == C1_HEAD
+    assert _version(engine) == CURRENT_HEAD
     assert TABLES <= _tables(engine)

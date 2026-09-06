@@ -71,6 +71,13 @@ class User(
         nullable=True,
     )
 
+    auth_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+
     full_name: Mapped[str] = mapped_column(
         String(150),
         nullable=False,
@@ -193,6 +200,10 @@ class User(
     @property
     def is_anonymous(self) -> bool:
         return False
+
+    def get_id(self) -> str:
+        auth_version = self.auth_version if self.auth_version is not None else 1
+        return f"v1:{self.id}:{auth_version}"
 
     @property
     def public_account_code(self) -> str:

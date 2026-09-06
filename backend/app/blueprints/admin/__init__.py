@@ -2304,7 +2304,11 @@ def staff_edit(employee_code: str):
         db.session.remove()
         database_session = db.session()
         with database_session.begin():
-            locked = find_staff_by_employee_code(database_session, employee_code)
+            locked = find_staff_by_employee_code(
+                database_session,
+                employee_code,
+                for_update=True,
+            )
             if locked is None:
                 abort(404)
             update_staff_profile(
@@ -2328,7 +2332,11 @@ def staff_access(employee_code: str):
     try:
         db.session.remove(); database_session = db.session()
         with database_session.begin():
-            profile = find_staff_by_employee_code(database_session, employee_code)
+            profile = find_staff_by_employee_code(
+                database_session,
+                employee_code,
+                for_update=True,
+            )
             if profile is None:
                 abort(404)
             set_staff_access(
@@ -2467,7 +2475,11 @@ def user_status(identifier: str):
     try:
         db.session.remove(); database_session = db.session()
         with database_session.begin():
-            user = find_user_by_public_code(database_session, identifier)
+            user = find_user_by_public_code(
+                database_session,
+                identifier,
+                for_update=True,
+            )
             if user is None:
                 abort(404)
             set_user_suspension(

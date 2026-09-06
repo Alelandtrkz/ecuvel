@@ -8,8 +8,10 @@ def create_app() -> Flask:
     app = Flask(__name__)
     app.config.from_object(Config)
 
+    from app.config import validate_public_base_url_configuration
     from app.services.mail import validate_mail_configuration
 
+    validate_public_base_url_configuration(app.config)
     validate_mail_configuration(app.config)
 
     db.init_app(app)
@@ -75,15 +77,23 @@ def create_app() -> Flask:
     from app.storefront import storefront
 
     from app.models import User
+    from app.services.authentication import (
+        is_user_authentication_allowed,
+        parse_authentication_identity,
+    )
 
     @login_manager.user_loader
     def load_user(user_id: str) -> User | None:
-        try:
-            import uuid
-
-            return db.session.get(User, uuid.UUID(user_id))
-        except (TypeError, ValueError):
+        identity = parse_authentication_identity(user_id)
+        if identity is None:
             return None
+        user = db.session.get(User, identity.user_id)
+        if (
+            not is_user_authentication_allowed(user)
+            or user.auth_version != identity.auth_version
+        ):
+            return None
+        return user
 
     @app.before_request
     def clear_cached_login_user() -> None:

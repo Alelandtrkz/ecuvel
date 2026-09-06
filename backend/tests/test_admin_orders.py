@@ -87,7 +87,7 @@ def _staff_with_role(session, role: StaffRole):
 
 def _login(client, user):
     with client.session_transaction() as browser:
-        browser["_user_id"] = str(user.id)
+        browser["_user_id"] = user.get_id()
         browser["_fresh"] = True
 
 
@@ -280,7 +280,7 @@ def test_all_admin_order_routes_require_internal_staff(session, client, app, tmp
         session.commit()
         _login(client, disabled)
         for url in urls:
-            assert client.get(url).status_code == 403
+            assert client.get(url).status_code == 302
 
 
 @pytest.mark.parametrize(

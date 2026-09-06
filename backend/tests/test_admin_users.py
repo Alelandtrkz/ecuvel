@@ -181,6 +181,43 @@ def test_invitation_is_single_use_and_enables_same_user(session):
         )
 
 
+def test_staff_invitation_never_replaces_existing_password(session):
+    admin = _user(session, staff=True)
+    point = _warehouse(session)
+    created = create_staff_member(
+        session,
+        actor_user_id=admin.id,
+        first_names="Ana",
+        last_names="Operadora",
+        email="stale-invite@ecuvel.com",
+        phone="",
+        identification_type="PASSPORT",
+        identification_number="PASS-STALE",
+        nationality_code="ECU",
+        role="POINT_OPERATOR",
+        employment_status="ACTIVE",
+        employment_started_at=None,
+        warehouse_id=point.id,
+        invitation_ttl_minutes=60,
+    )
+    existing_hash = generate_password_hash("ExistingPassword123!")
+    created.profile.user.password_hash = existing_hash
+    session.commit()
+
+    with pytest.raises(AdminUserError, match="ya tiene credenciales"):
+        accept_staff_invitation(
+            session,
+            token=created.invitation_token,
+            password="ReplacementPassword123!",
+            confirmation="ReplacementPassword123!",
+            password_min_length=12,
+        )
+    session.rollback()
+    session.expire_all()
+
+    assert session.get(User, created.profile.user_id).password_hash == existing_hash
+
+
 def test_pending_invitation_can_be_revoked_without_changing_employment(session):
     admin = _user(session, staff=True); point = _warehouse(session)
     created = create_staff_member(

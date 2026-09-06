@@ -138,13 +138,14 @@ def test_registration_rejects_duplicate_email_case_insensitive(client, session):
 
 
 def test_login_is_case_insensitive_and_rejects_open_redirect(client, session):
-    _user(session, email="cliente@example.com")
+    user = _user(session, email="cliente@example.com")
     session.commit()
 
     response = _login(client, email="CLIENTE@example.com", next_url="https://evil.test")
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/")
+    assert user.auth_version == 1
 
 
 def test_login_rejects_wrong_password_with_generic_message(client, session):
@@ -161,12 +162,14 @@ def test_login_rejects_wrong_password_with_generic_message(client, session):
 
 
 def test_logout_requires_post(client, session):
-    _user(session)
+    user = _user(session)
     session.commit()
     assert _login(client).status_code == 302
 
     assert client.get("/cerrar-sesion").status_code == 405
     assert client.post("/cerrar-sesion").status_code == 302
+    session.expire_all()
+    assert session.get(User, user.id).auth_version == 1
 
 
 def test_valid_email_verification_token_verifies_user(client, session):
@@ -186,6 +189,7 @@ def test_valid_email_verification_token_verifies_user(client, session):
     user = session.get(User, user.id)
     assert user.status == UserStatus.ACTIVE
     assert user.email_verified_at is not None
+    assert user.auth_version == 1
     assert session.scalar(select(UserAccountToken.used_at)) is not None
 
 

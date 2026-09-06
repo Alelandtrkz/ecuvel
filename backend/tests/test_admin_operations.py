@@ -103,7 +103,7 @@ def _store(session, *, name: str = "Tienda Admin") -> Store:
 
 def _login(client, user: User) -> None:
     with client.session_transaction() as browser:
-        browser["_user_id"] = str(user.id)
+        browser["_user_id"] = user.get_id()
         browser["_fresh"] = True
 
 
@@ -253,8 +253,18 @@ def test_admin_requires_active_ecuvel_staff(session, client):
     assert client.get("/admin/search?q=ECV-").status_code == 200
     assert client.post("/admin").status_code == 405
 
+    pending = _user(
+        session,
+        status=UserStatus.PENDING_VERIFICATION,
+        is_active=True,
+        is_staff=True,
+    )
+    session.commit()
+    _login(client, pending)
+    assert client.get("/admin").status_code == 403
+    assert client.get("/admin/search?q=ECV-").status_code == 403
+
     for status, active in (
-        (UserStatus.PENDING_VERIFICATION, True),
         (UserStatus.BLOCKED, True),
         (UserStatus.SUSPENDED, True),
         (UserStatus.ACTIVE, False),
@@ -262,8 +272,8 @@ def test_admin_requires_active_ecuvel_staff(session, client):
         denied = _user(session, status=status, is_active=active, is_staff=True)
         session.commit()
         _login(client, denied)
-        assert client.get("/admin").status_code == 403
-        assert client.get("/admin/search?q=ECV-").status_code == 403
+        assert client.get("/admin").status_code == 302
+        assert client.get("/admin/search?q=ECV-").status_code == 302
 
 
 def test_ecuador_partial_day_windows_and_real_daily_metrics(session):

@@ -12,6 +12,11 @@ def build_mail_action_url(endpoint: str, **values) -> str:
     if configured_base:
         with current_app.test_request_context(base_url=f"{configured_base}/"):
             return url_for(endpoint, _external=True, **values)
+    if current_app.config.get("ECUVEL_PRODUCTION"):
+        raise MailConfigurationError(
+            "PUBLIC_BASE_URL debe configurarse para generar enlaces de correo "
+            "en producción."
+        )
     if has_request_context():
         return url_for(endpoint, _external=True, **values)
     raise MailConfigurationError(

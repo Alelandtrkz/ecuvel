@@ -43,6 +43,8 @@ from app.models.enums import (
 from app.models.user import normalize_email
 from app.services.authentication import (
     PasswordPolicyError,
+    bump_auth_version,
+    is_user_authentication_allowed,
     normalize_full_name,
     public_user_code,
     validate_password,
@@ -316,12 +318,22 @@ def get_admin_clients_page(
     )
 
 
-def find_user_by_public_code(session: Session, value: str) -> User | None:
+def find_user_by_public_code(
+    session: Session,
+    value: str,
+    *,
+    for_update: bool = False,
+) -> User | None:
     match = re.fullmatch(r"U-(\d{1,8})", (value or "").strip(), re.I)
     if match:
-        return session.scalar(select(User).where(User.registration_number == int(match.group(1))))
+        statement = select(User).where(
+            User.registration_number == int(match.group(1))
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return session.scalar(statement)
     try:
-        return session.get(User, uuid.UUID(value))
+        return session.get(User, uuid.UUID(value), with_for_update=for_update)
     except (TypeError, ValueError):
         return None
 
@@ -483,7 +495,13 @@ def get_admin_staff_page(
     )
 
 
-def find_staff_by_employee_code(session: Session, value: str, *, options: bool = True) -> StaffProfile | None:
+def find_staff_by_employee_code(
+    session: Session,
+    value: str,
+    *,
+    options: bool = True,
+    for_update: bool = False,
+) -> StaffProfile | None:
     match = re.fullmatch(r"EMP-(\d{1,8})", (value or "").strip(), re.I)
     if not match:
         return None
@@ -494,6 +512,8 @@ def find_staff_by_employee_code(session: Session, value: str, *, options: bool =
             selectinload(StaffProfile.assignments).selectinload(StaffPointAssignment.warehouse),
             selectinload(StaffProfile.invitations),
         )
+    if for_update:
+        statement = statement.with_for_update()
     return session.scalar(statement)
 
 
@@ -679,6 +699,11 @@ def accept_staff_invitation(
     if profile is None or profile.employment_status in (StaffEmploymentStatus.SUSPENDED, StaffEmploymentStatus.INACTIVE):
         raise AdminUserError("La cuenta laboral no permite habilitar acceso.")
     user = session.get(User, profile.user_id, with_for_update=True)
+    if user is None or user.password_hash:
+        raise AdminUserError(
+            "La cuenta ya tiene credenciales. Usa el flujo de restablecimiento "
+            "de contraseña."
+        )
     user.password_hash = generate_password_hash(password)
     user.is_active = True; user.is_ecuvel_staff = True; user.status = UserStatus.ACTIVE
     user.email_verified_at = user.email_verified_at or now
@@ -694,8 +719,11 @@ def set_user_suspension(session: Session, *, user: User, actor_user_id, suspend:
         raise AdminUserError("El motivo es obligatorio.")
     if user.id == actor_user_id and suspend:
         raise AdminUserError("No puedes suspender tu propia cuenta administrativa.")
+    revoke_sessions = suspend and is_user_authentication_allowed(user)
     user.is_active = not suspend
     user.status = UserStatus.SUSPENDED if suspend else UserStatus.ACTIVE
+    if revoke_sessions:
+        bump_auth_version(user)
     record_admin_audit(session, actor_user_id=actor_user_id, target_user_id=user.id,
                        action="USER_SUSPENDED" if suspend else "USER_REACTIVATED", reason=reason)
     session.flush()
@@ -708,8 +736,11 @@ def set_staff_access(session: Session, *, profile: StaffProfile, actor_user_id, 
     if enable and profile.employment_status in (StaffEmploymentStatus.SUSPENDED, StaffEmploymentStatus.INACTIVE):
         raise AdminUserError("No se puede habilitar acceso a personal suspendido o inactivo.")
     user = session.get(User, profile.user_id, with_for_update=True)
+    revoke_sessions = not enable and is_user_authentication_allowed(user)
     user.is_active = enable
     user.status = UserStatus.ACTIVE if enable else UserStatus.SUSPENDED
+    if revoke_sessions:
+        bump_auth_version(user)
     record_admin_audit(session, actor_user_id=actor_user_id, target_user_id=user.id,
                        action="STAFF_ACCESS_ENABLED" if enable else "STAFF_ACCESS_DISABLED", reason=reason)
     session.flush()
@@ -735,7 +766,10 @@ def update_staff_profile(
         if has_custody:
             raise AdminUserError("El empleado conserva paquetes bajo custodia. Reasigna la custodia antes de suspenderlo.")
         user = session.get(User, profile.user_id, with_for_update=True)
+        revoke_sessions = is_user_authentication_allowed(user)
         user.is_active = False; user.status = UserStatus.SUSPENDED
+        if revoke_sessions:
+            bump_auth_version(user)
     profile.role = new_role; profile.employment_status = new_status
     profile.last_employment_reason = reason or profile.last_employment_reason
     profile.user.phone = phone.strip() or None

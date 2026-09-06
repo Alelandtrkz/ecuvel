@@ -11,7 +11,7 @@ from flask import (
     request,
     url_for,
 )
-from flask_login import current_user, login_required
+from flask_login import current_user, login_required, logout_user
 
 from app.extensions import db, limiter
 from app.models import User
@@ -292,8 +292,12 @@ def change_password_post():
                     "AUTH_PASSWORD_MIN_LENGTH"
                 ],
             )
-        flash("Contraseña actualizada.", "success")
-        return redirect(url_for("account.profile"))
+        logout_user()
+        flash(
+            "Contraseña actualizada. Inicia sesión nuevamente.",
+            "success",
+        )
+        return redirect(url_for("auth.login_form"))
     except Exception as exc:
         flash(str(exc), "error")
         return render_template("account/change_password.html"), 400
@@ -367,13 +371,14 @@ def create_password_form():
 @account.post("/perfil/crear-contrasena")
 @login_required
 def create_password_post():
+    user_id = current_user.id
     try:
         db.session.remove()
         database_session = db.session()
         with database_session.begin():
             create_password(
                 session=database_session,
-                user_id=current_user.id,
+                user_id=user_id,
                 new_password=request.form.get("new_password", ""),
                 new_password_confirmation=request.form.get(
                     "new_password_confirmation",
@@ -383,8 +388,12 @@ def create_password_post():
                     "AUTH_PASSWORD_MIN_LENGTH"
                 ],
             )
-        flash("ContraseÃ±a creada.", "success")
-        return redirect(url_for("account.profile"))
+        logout_user()
+        flash(
+            "Contraseña actualizada. Inicia sesión nuevamente.",
+            "success",
+        )
+        return redirect(url_for("auth.login_form"))
     except Exception as exc:
         flash(str(exc), "error")
         return render_template("account/create_password.html"), 400

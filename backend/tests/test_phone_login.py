@@ -28,7 +28,7 @@ def test_existing_phone_otp_logs_user_in(phone_client, session):
     assert response.status_code == 302
     assert session.get(User, user.id).last_login_at is not None
     with phone_client.session_transaction() as browser_session:
-        assert browser_session["_user_id"] == str(user.id)
+        assert browser_session["_user_id"] == user.get_id()
 
 
 def test_phone_login_updates_last_login_at(phone_client, session):
