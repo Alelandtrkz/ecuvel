@@ -86,6 +86,7 @@ from app.services.customer_orders import (
     normalize_orders_filter,
     normalize_page,
 )
+from app.services.safe_redirects import safe_local_redirect
 from app.services.catalog_listings import load_public_listings
 from app.services.catalog_ranking import (
     LIVE_RANKER_VERSION,
@@ -1525,7 +1526,20 @@ def _requires_verified_identity():
         and current_user.phone_verified_at is None
     ):
         flash("Verifica tu correo o teléfono antes de continuar.", "warning")
-        return redirect(url_for("auth.verification_pending"))
+        requested_target = (
+            request.full_path
+            if request.method == "GET" and request.query_string
+            else request.path
+        )
+        return redirect(
+            url_for(
+                "auth.verification_pending",
+                next=safe_local_redirect(
+                    requested_target,
+                    fallback=url_for("storefront.home"),
+                ),
+            )
+        )
     return None
 
 

@@ -7,6 +7,7 @@
   <p class="auth-card__intro">Enviamos un enlace de verificación a {{ current_user.email }}.{% if config.PHONE_OTP_ENABLED %} También puedes verificar un teléfono desde tu perfil.{% endif %}</p>
   <form method="post" action="{{ url_for('auth.resend_verification') }}" class="auth-form">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="next" value="{{ next_url }}">
     <button class="button button--primary auth-submit" type="submit">Reenviar verificación</button>
   </form>
 {% else %}

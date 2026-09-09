@@ -50,6 +50,7 @@ def test_auth_version_upgrade_backfills_and_downgrade_is_clean(
     engine,
     session,
 ):
+    app_logger_was_disabled = app.logger.disabled
     session.close()
     try:
         _migrate(app, PREVIOUS_HEAD, down=True)
@@ -106,3 +107,4 @@ def test_auth_version_upgrade_backfills_and_downgrade_is_clean(
     finally:
         if _version(engine) != LR11_HEAD:
             _migrate(app, "head")
+    assert app.logger.disabled is app_logger_was_disabled

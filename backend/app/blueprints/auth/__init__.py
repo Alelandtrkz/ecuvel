@@ -93,8 +93,16 @@ def _login_user_preserving_session(user, *, remember: bool = False) -> None:
     adopt_guest_cart_for_authenticated_user()
 
 
-def _send_verification_email(email: str, token: str) -> None:
-    link = build_mail_action_url("auth.verify_email", token=token)
+def _send_verification_email(
+    email: str,
+    token: str,
+    *,
+    next_url: str | None = None,
+) -> None:
+    values = {"token": token}
+    if next_url:
+        values["next"] = next_url
+    link = build_mail_action_url("auth.verify_email", **values)
     mail_service.send(
         verification_mail(
             to=email,
@@ -219,7 +227,11 @@ def register():
             _claim_orders_for_user(result.user.id, database_session)
         _login_user_preserving_session(result.user)
         try:
-            _send_verification_email(result.user.email, result.verification_token)
+            _send_verification_email(
+                result.user.email,
+                result.verification_token,
+                next_url=next_url,
+            )
         except MailError as exc:
             current_app.logger.warning(
                 "event=mail_failed mail_type=VERIFY_EMAIL error=%s",
@@ -233,7 +245,9 @@ def register():
         else:
             flash("Cuenta creada. Revisa tu correo para verificarla.", "success")
         if current_app.config["AUTH_REQUIRE_EMAIL_VERIFICATION"]:
-            return redirect(url_for("auth.verification_pending"))
+            return redirect(
+                url_for("auth.verification_pending", next=next_url)
+            )
         return redirect(next_url)
     except AuthenticationError as exc:
         flash(str(exc), "error")
@@ -314,19 +328,36 @@ def logout():
 @auth.get("/verificacion-pendiente")
 @login_required
 def verification_pending():
-    return render_template("auth/verify_email_pending.html")
+    next_url = safe_local_redirect(
+        request.args.get("next"),
+        fallback=url_for("account.profile"),
+    )
+    if (
+        not current_app.config["AUTH_REQUIRE_EMAIL_VERIFICATION"]
+        or current_user.email_verified_at is not None
+        or current_user.phone_verified_at is not None
+    ):
+        return redirect(next_url)
+    return render_template(
+        "auth/verify_email_pending.html",
+        next_url=next_url,
+    )
 
 
 @auth.post("/reenviar-verificacion")
 @login_required
 @limiter.limit("3 per minute")
 def resend_verification():
+    next_url = safe_local_redirect(
+        request.form.get("next"),
+        fallback=url_for("account.profile"),
+    )
     if not current_user.email:
         flash("Añade un correo electrónico antes de reenviar la verificación.", "warning")
         return redirect(url_for("account.profile"))
     if current_user.email_verified_at is not None:
         flash("Tu correo ya está verificado.", "success")
-        return redirect(url_for("account.profile"))
+        return redirect(next_url)
     user_id = current_user.id
     email = current_user.email
     ttl_minutes = current_app.config[
@@ -344,7 +375,11 @@ def resend_verification():
             ttl_minutes=ttl_minutes,
         )
     try:
-        _send_verification_email(email, token.token)
+        _send_verification_email(
+            email,
+            token.token,
+            next_url=next_url,
+        )
     except MailError as exc:
         current_app.logger.warning(
             "event=mail_failed mail_type=VERIFY_EMAIL error=%s",
@@ -357,20 +392,28 @@ def resend_verification():
         )
     else:
         flash("Enviamos un nuevo enlace de verificación.", "success")
-    return redirect(url_for("auth.verification_pending"))
+    return redirect(
+        url_for("auth.verification_pending", next=next_url)
+    )
 
 
 @auth.get("/verificar-correo/<string:token>")
 def verify_email(token: str):
+    next_url = safe_local_redirect(
+        request.args.get("next"),
+        fallback=url_for("account.profile"),
+    )
     try:
         with db.session.begin():
             user = verify_customer_email(session=db.session, token=token)
         _login_user_preserving_session(user)
         flash("Correo verificado. Tu cuenta está activa.", "success")
-        return redirect(url_for("account.profile"))
+        return redirect(next_url)
     except AuthenticationError as exc:
         flash(str(exc), "error")
-        return redirect(url_for("auth.verification_pending"))
+        return redirect(
+            url_for("auth.verification_pending", next=next_url)
+        )
 
 
 @auth.get("/recuperar-contrasena")

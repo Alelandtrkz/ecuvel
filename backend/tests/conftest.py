@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging.config
 import os
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -39,6 +40,16 @@ def _database_name() -> str:
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     _database_name()
+
+
+@pytest.fixture(autouse=True)
+def isolate_alembic_logging_configuration(monkeypatch):
+    """Keep in-process migration tests from reconfiguring pytest logging."""
+    monkeypatch.setattr(
+        logging.config,
+        "fileConfig",
+        lambda *_args, **_kwargs: None,
+    )
 
 
 @pytest.fixture(scope="session")
