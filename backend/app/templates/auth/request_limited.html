@@ -1,0 +1,8 @@
+{% extends "auth/auth_base.html" %}
+
+{% block title %}Demasiados intentos | Ecuvel{% endblock %}
+{% block auth_content %}
+<h1 id="auth-title">Demasiados intentos</h1>
+<p class="auth-card__intro">Has realizado varios intentos en poco tiempo. Espera un momento y vuelve a intentarlo.</p>
+<a class="button button--primary auth-submit" href="{{ recovery_url }}">Intentar nuevamente</a>
+{% endblock %}

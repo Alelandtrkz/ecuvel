@@ -4,6 +4,7 @@ from flask import (
     Blueprint,
     current_app,
     flash,
+    make_response,
     redirect,
     render_template,
     request,
@@ -11,6 +12,8 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required, login_user, logout_user
+from flask_limiter.errors import RateLimitExceeded
+from flask_wtf.csrf import CSRFError
 
 from app.extensions import db, limiter
 from app.models import PhoneOtpChallenge
@@ -59,6 +62,67 @@ PHONE_CHALLENGE_SESSION_KEY = "phone_otp_challenge_id"
 PHONE_PURPOSE_SESSION_KEY = "phone_otp_purpose"
 PHONE_NEXT_SESSION_KEY = "phone_otp_next"
 PHONE_REGISTRATION_CHALLENGE_SESSION_KEY = "phone_registration_challenge_id"
+
+CSRF_RECOVERY_MESSAGE = (
+    "Tu formulario venció por seguridad. Inténtalo nuevamente."
+)
+
+
+def _auth_recovery_url() -> str | None:
+    endpoint = request.endpoint
+    view_args = request.view_args or {}
+
+    if endpoint in {"auth.login", "auth.register"}:
+        next_url = safe_local_redirect(
+            request.form.get("next") or request.args.get("next"),
+            fallback=url_for("storefront.home"),
+        )
+        form_endpoint = (
+            "auth.login_form" if endpoint == "auth.login" else "auth.register_form"
+        )
+        return url_for(form_endpoint, next=next_url)
+    if endpoint == "auth.forgot_password":
+        return url_for("auth.forgot_password_form")
+    if endpoint == "auth.reset_password_post":
+        return url_for("auth.reset_password_form", token=view_args.get("token", ""))
+    if endpoint == "auth.resend_verification":
+        next_url = safe_local_redirect(
+            request.form.get("next") or request.args.get("next"),
+            fallback=url_for("account.profile"),
+        )
+        return url_for("auth.verification_pending", next=next_url)
+    if endpoint == "auth.staff_invitation":
+        return url_for("auth.staff_invitation", token=view_args.get("token", ""))
+    if endpoint == "auth.logout":
+        return url_for("storefront.home")
+    return None
+
+
+@auth.errorhandler(CSRFError)
+def handle_auth_csrf_error(error: CSRFError):
+    recovery_url = _auth_recovery_url()
+    if recovery_url is None:
+        return error.get_response()
+    flash(CSRF_RECOVERY_MESSAGE, "warning")
+    return redirect(recovery_url)
+
+
+@auth.errorhandler(RateLimitExceeded)
+def handle_auth_rate_limit(error: RateLimitExceeded):
+    recovery_url = _auth_recovery_url()
+    if recovery_url is None:
+        return error.get_response()
+    response = make_response(
+        render_template(
+            "auth/request_limited.html",
+            recovery_url=recovery_url,
+        ),
+        429,
+    )
+    retry_after = error.get_response().headers.get("Retry-After")
+    if retry_after is not None:
+        response.headers["Retry-After"] = retry_after
+    return response
 
 
 def _claim_orders_for_user(user_id, database_session=None) -> None:

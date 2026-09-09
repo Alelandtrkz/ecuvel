@@ -16,6 +16,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import create_app
+from app.config import Config
 from app.extensions import db, limiter
 from app.services.mail import mail_service
 
@@ -55,7 +56,12 @@ def isolate_alembic_logging_configuration(monkeypatch):
 @pytest.fixture(scope="session")
 def app():
     expected_database = _database_name()
-    application = create_app()
+    previous_ratelimit_enabled = Config.RATELIMIT_ENABLED
+    Config.RATELIMIT_ENABLED = True
+    try:
+        application = create_app()
+    finally:
+        Config.RATELIMIT_ENABLED = previous_ratelimit_enabled
     application.config["TESTING"] = True
     application.config["WTF_CSRF_ENABLED"] = False
     application.config["RATELIMIT_ENABLED"] = False
