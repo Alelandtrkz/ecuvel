@@ -192,8 +192,9 @@ def register():
         request.form.get("next"),
         fallback=url_for("storefront.home"),
     )
+    submitted_email = request.form.get("email", "")
     form = {
-        "email": request.form.get("email", "").strip(),
+        "email": submitted_email.strip(),
         "full_name": request.form.get("full_name", "").strip(),
     }
     try:
@@ -202,7 +203,7 @@ def register():
         with database_session.begin():
             result = register_customer(
                 session=database_session,
-                email=form["email"],
+                email=submitted_email,
                 full_name=form["full_name"],
                 password=request.form.get("password", ""),
                 password_confirmation=request.form.get(

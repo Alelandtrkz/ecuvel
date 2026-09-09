@@ -15,13 +15,17 @@
   <input id="register-name" name="full_name" type="text" autocomplete="name" maxlength="120" value="{{ form.full_name|default('') }}" required>
 
   <label for="register-password">Contraseña</label>
-  <input id="register-password" name="password" type="password" autocomplete="new-password" maxlength="128" required>
+  <input id="register-password" name="password" type="password" autocomplete="new-password" minlength="{{ config.AUTH_PASSWORD_MIN_LENGTH }}" maxlength="128" required>
 
   <label for="register-password-confirmation">Vuelva a escribir la contraseña</label>
-  <input id="register-password-confirmation" name="password_confirmation" type="password" autocomplete="new-password" maxlength="128" required>
+  <input id="register-password-confirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="{{ config.AUTH_PASSWORD_MIN_LENGTH }}" maxlength="128" required>
 
   <button class="button button--primary auth-submit" type="submit">Verificar correo electrónico</button>
 </form>
+{% if config.PHONE_OTP_ENABLED %}
 <p class="auth-card__switch"><a href="{{ url_for('auth.phone_login_form', next=next_url) }}">Registrarme con número telefónico</a></p>
+{% else %}
+<p class="auth-card__switch">Registro por teléfono — Próximamente</p>
+{% endif %}
 <p class="auth-card__switch"><a href="{{ url_for('auth.login_form', next=next_url) }}">Ya tengo una cuenta</a></p>
 {% endblock %}

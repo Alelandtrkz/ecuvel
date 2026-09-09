@@ -170,14 +170,14 @@ def test_invitation_is_single_use_and_enables_same_user(session):
     ); session.commit()
     user_id = created.profile.user_id
     user = accept_staff_invitation(
-        session, token=created.invitation_token, password="SecurePassword123!",
-        confirmation="SecurePassword123!", password_min_length=12,
+        session, token=created.invitation_token, password="123456",
+        confirmation="123456", password_min_length=6,
     ); session.commit()
     assert user.id == user_id and user.is_active and user.status == UserStatus.ACTIVE
     with pytest.raises(AdminUserError, match="no es válida"):
         accept_staff_invitation(
-            session, token=created.invitation_token, password="SecurePassword123!",
-            confirmation="SecurePassword123!", password_min_length=12,
+            session, token=created.invitation_token, password="123456",
+            confirmation="123456", password_min_length=6,
         )
 
 

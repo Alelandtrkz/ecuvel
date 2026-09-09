@@ -244,8 +244,8 @@ class Config:
     )
     AUTH_PASSWORD_MIN_LENGTH = _environment_int_range(
         "AUTH_PASSWORD_MIN_LENGTH",
-        12,
-        8,
+        6,
+        6,
         128,
     )
     MAIL_BACKEND = os.getenv("MAIL_BACKEND", "console").strip().lower()

@@ -683,10 +683,12 @@ def revoke_staff_invitations(
 def accept_staff_invitation(
     session: Session, *, token: str, password: str, confirmation: str, password_min_length: int,
 ) -> User:
-    if password != confirmation:
-        raise AdminUserError("Las contraseñas no coinciden.")
     try:
-        validate_password(password, min_length=password_min_length)
+        validate_password(
+            password,
+            min_length=password_min_length,
+            confirmation=confirmation,
+        )
     except PasswordPolicyError as exc:
         raise AdminUserError(str(exc)) from exc
     now = datetime.now(timezone.utc)

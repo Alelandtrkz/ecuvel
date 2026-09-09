@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -16,6 +18,7 @@ from app.services.account_tokens import (
     create_account_token,
     consume_account_token,
 )
+from app.services.user_email_constraints import is_user_email_unique_violation
 
 
 DUMMY_PASSWORD_HASH = generate_password_hash(
@@ -23,6 +26,14 @@ DUMMY_PASSWORD_HASH = generate_password_hash(
 )
 AUTH_IDENTITY_PREFIX = "v1"
 AUTH_IDENTITY_MAX_LENGTH = 64
+_EMAIL_LOCAL_PATTERN = re.compile(
+    r"[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+",
+    re.IGNORECASE | re.ASCII,
+)
+_EMAIL_DOMAIN_LABEL_PATTERN = re.compile(
+    r"[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?",
+    re.IGNORECASE | re.ASCII,
+)
 
 
 class AuthenticationError(Exception):
@@ -58,7 +69,14 @@ def normalize_full_name(value: str) -> str:
     return " ".join(value.strip().split())
 
 
-def validate_password(password: str, *, min_length: int) -> None:
+def validate_password(
+    password: str,
+    *,
+    min_length: int,
+    confirmation: str | None = None,
+) -> None:
+    if confirmation is not None and password != confirmation:
+        raise PasswordPolicyError("Las contraseñas no coinciden.")
     if len(password) < min_length:
         raise PasswordPolicyError(
             f"La contraseña debe tener al menos {min_length} caracteres."
@@ -67,6 +85,43 @@ def validate_password(password: str, *, min_length: int) -> None:
         raise PasswordPolicyError(
             "La contraseña no puede superar 128 caracteres."
         )
+
+
+def validate_registration_email(value: str) -> str:
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise RegistrationError("Ingresa un correo electrónico válido.")
+
+    display_email = value.strip()
+    if (
+        not display_email
+        or len(display_email) > 254
+        or display_email.count("@") != 1
+        or any(character.isspace() for character in display_email)
+    ):
+        raise RegistrationError("Ingresa un correo electrónico válido.")
+
+    local_part, domain = display_email.rsplit("@", 1)
+    if (
+        not 1 <= len(local_part) <= 64
+        or local_part.startswith(".")
+        or local_part.endswith(".")
+        or ".." in local_part
+        or _EMAIL_LOCAL_PATTERN.fullmatch(local_part) is None
+    ):
+        raise RegistrationError("Ingresa un correo electrónico válido.")
+
+    domain_labels = domain.split(".")
+    if (
+        len(domain) > 253
+        or len(domain_labels) < 2
+        or any(
+            _EMAIL_DOMAIN_LABEL_PATTERN.fullmatch(label) is None
+            for label in domain_labels
+        )
+    ):
+        raise RegistrationError("Ingresa un correo electrónico válido.")
+
+    return display_email
 
 
 def public_user_code() -> str:
@@ -136,16 +191,16 @@ def register_customer(
     password_min_length: int,
     verification_ttl_minutes: int,
 ) -> RegisteredUserResult:
-    normalized_email = normalize_email(email)
-    display_email = email.strip()
+    display_email = validate_registration_email(email)
+    normalized_email = normalize_email(display_email)
     name = normalize_full_name(full_name)
-    if not display_email or "@" not in display_email or len(display_email) > 254:
-        raise RegistrationError("Ingresa un correo electrónico válido.")
     if len(name) < 2 or len(name) > 120:
         raise RegistrationError("Ingresa tu nombre y apellido.")
-    if password != password_confirmation:
-        raise RegistrationError("Las contraseñas no coinciden.")
-    validate_password(password, min_length=password_min_length)
+    validate_password(
+        password,
+        min_length=password_min_length,
+        confirmation=password_confirmation,
+    )
     existing = session.scalar(
         select(User).where(User.email_normalized == normalized_email)
     )
@@ -161,7 +216,14 @@ def register_customer(
         is_active=True,
     )
     session.add(user)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        if is_user_email_unique_violation(exc):
+            raise RegistrationError(
+                "Ya existe una cuenta con este correo."
+            ) from exc
+        raise
     token = create_account_token(
         session=session,
         user_id=user.id,
@@ -251,9 +313,11 @@ def reset_password(
     password_confirmation: str,
     password_min_length: int,
 ) -> User:
-    if password != password_confirmation:
-        raise PasswordPolicyError("Las contraseñas no coinciden.")
-    validate_password(password, min_length=password_min_length)
+    validate_password(
+        password,
+        min_length=password_min_length,
+        confirmation=password_confirmation,
+    )
     try:
         account_token = consume_account_token(
             session=session,

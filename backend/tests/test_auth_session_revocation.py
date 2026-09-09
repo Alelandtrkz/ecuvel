@@ -31,7 +31,7 @@ from app.services.authentication import (
 pytestmark = pytest.mark.integration
 
 OLD_PASSWORD = "correct horse battery staple"
-NEW_PASSWORD = "another correct horse"
+NEW_PASSWORD = "123456"
 
 
 @pytest.fixture

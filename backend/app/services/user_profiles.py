@@ -23,6 +23,7 @@ from app.services.authentication import (
     validate_password,
 )
 from app.services.delivery_eta import ecuador_local_date
+from app.services.user_email_constraints import is_user_email_unique_violation
 
 
 class ProfileError(Exception):
@@ -30,10 +31,6 @@ class ProfileError(Exception):
 
 
 VALID_GENDERS = {"male", "female", "other", "prefer_not_to_say", ""}
-_EMAIL_UNIQUE_CONSTRAINTS = {
-    "ix_users_email",
-    "ix_users_email_normalized",
-}
 _PASSWORDLESS_EMAIL_CHANGE_MESSAGE = (
     "Por seguridad, el cambio de correo para cuentas sin contraseña "
     "requiere una nueva verificación telefónica. Esta función estará "
@@ -212,12 +209,7 @@ def confirm_email_change(
     try:
         session.flush()
     except IntegrityError as exc:
-        constraint_name = getattr(
-            getattr(exc.orig, "diag", None),
-            "constraint_name",
-            None,
-        )
-        if constraint_name in _EMAIL_UNIQUE_CONSTRAINTS:
+        if is_user_email_unique_violation(exc):
             raise ProfileError(
                 "Ya existe una cuenta con este correo. Prueba con otro."
             ) from exc
@@ -241,9 +233,11 @@ def change_password(
         or not check_password_hash(user.password_hash, current_password)
     ):
         raise ProfileError("La contraseña actual no es correcta.")
-    if new_password != new_password_confirmation:
-        raise PasswordPolicyError("Las contraseñas no coinciden.")
-    validate_password(new_password, min_length=password_min_length)
+    validate_password(
+        new_password,
+        min_length=password_min_length,
+        confirmation=new_password_confirmation,
+    )
     user.password_hash = generate_password_hash(new_password)
     bump_auth_version(user)
     session.flush()
@@ -263,9 +257,11 @@ def create_password(
         raise ProfileError("No se encontró la cuenta.")
     if user.password_hash:
         raise ProfileError("Tu cuenta ya tiene una contraseña.")
-    if new_password != new_password_confirmation:
-        raise PasswordPolicyError("Las contraseñas no coinciden.")
-    validate_password(new_password, min_length=password_min_length)
+    validate_password(
+        new_password,
+        min_length=password_min_length,
+        confirmation=new_password_confirmation,
+    )
     user.password_hash = generate_password_hash(new_password)
     bump_auth_version(user)
     session.flush()

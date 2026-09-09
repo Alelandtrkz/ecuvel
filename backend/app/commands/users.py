@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import click
+from flask import current_app
 from sqlalchemy import select
 from werkzeug.security import generate_password_hash
 
@@ -10,7 +11,11 @@ from app.extensions import db
 from app.models import User
 from app.models.enums import UserStatus
 from app.models.user import normalize_email
-from app.services.authentication import public_user_code
+from app.services.authentication import (
+    PasswordPolicyError,
+    public_user_code,
+    validate_password,
+)
 
 
 @click.command("create-customer-user")
@@ -23,6 +28,13 @@ def create_customer_user_command(email: str, name: str, verified: bool) -> None:
         hide_input=True,
         confirmation_prompt=True,
     )
+    try:
+        validate_password(
+            password,
+            min_length=current_app.config["AUTH_PASSWORD_MIN_LENGTH"],
+        )
+    except PasswordPolicyError as exc:
+        raise click.ClickException(str(exc)) from exc
     with db.session.begin():
         normalized = normalize_email(email)
         existing = db.session.scalar(

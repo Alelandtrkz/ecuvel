@@ -134,7 +134,10 @@ def test_registration_rejects_duplicate_email_case_insensitive(client, session):
     )
 
     assert response.status_code == 400
+    assert "Ya existe una cuenta con este correo" in response.get_data(as_text=True)
     assert session.scalar(select(func.count(User.id))) == 1
+    assert session.scalar(select(func.count(UserAccountToken.id))) == 0
+    assert mail_service.outbox == []
 
 
 def test_login_is_case_insensitive_and_rejects_open_redirect(client, session):
@@ -258,8 +261,8 @@ def test_password_reset_updates_hash_and_is_one_time(client, session):
     response = client.post(
         f"/restablecer-contrasena/{created.token}",
         data={
-            "password": "another correct horse",
-            "password_confirmation": "another correct horse",
+            "password": "123456",
+            "password_confirmation": "123456",
         },
     )
     session.expire_all()
@@ -269,8 +272,8 @@ def test_password_reset_updates_hash_and_is_one_time(client, session):
     second = client.post(
         f"/restablecer-contrasena/{created.token}",
         data={
-            "password": "another correct horse",
-            "password_confirmation": "another correct horse",
+            "password": "123456",
+            "password_confirmation": "123456",
         },
     )
     assert second.status_code == 400
