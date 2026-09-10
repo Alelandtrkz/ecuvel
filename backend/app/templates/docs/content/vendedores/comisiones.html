@@ -1,0 +1,41 @@
+<section id="estado-y-alcance">
+  <h2>Estado y alcance</h2>
+  <div class="docs-callout">
+    <strong>Borrador para revisión; no vigente</strong>
+    <p>Esta explicación refleja el resolver actual y no sustituye el contrato o anexo comercial aceptado en ECUVEL Partners.</p>
+  </div>
+  <p>ECUVEL calcula en USD una comisión de servicio sobre cada presentación. La regla depende del precio y, desde cierto rango, de la categoría administrada en la plataforma.</p>
+</section>
+
+<section id="precio-minimo">
+  <h2>Precio mínimo</h2>
+  <p>El precio Seller debe ser <strong>superior a USD 0,25</strong>. Un valor igual o inferior no es válido porque impediría un neto positivo bajo la tarifa fija de productos de bajo precio.</p>
+</section>
+
+<section id="tarifa-fija">
+  <h2>Tarifa fija</h2>
+  <p>Cuando el precio es <strong>menor a USD 3,00</strong>, el resolver aplica una tarifa fija de servicio de <strong>USD 0,25</strong>. Por ejemplo, un precio de USD 2,99 genera una comisión de USD 0,25 antes de cualquier otro ajuste financiero aplicable.</p>
+</section>
+
+<section id="comision-porcentual">
+  <h2>Comisión porcentual</h2>
+  <p>Desde <strong>USD 3,00</strong>, se aplica un porcentaje. El resolver busca primero una regla activa para la categoría concreta o su linaje y, si no existe, utiliza la regla global activa. Si falta toda regla aplicable, la presentación no puede continuar como si tuviera comisión cero.</p>
+  <p>Los porcentajes son administrables y no se reproducen como una tabla estática en este documento. El resolver actual ignora el identificador de Tienda y no aplica tarifas negociadas individualmente por Store.</p>
+</section>
+
+<section id="snapshot">
+  <h2>Snapshot de comisión</h2>
+  <p>Al enviar una publicación a revisión se captura un snapshot por presentación. Conserva versión y fecha de captura, categoría y su ruta, precio, moneda, modo fijo o porcentual, porcentaje o tarifa fija, comisión calculada, neto Seller, identificador de regla y origen —tarifa baja, categoría o regla global—.</p>
+  <p>Al publicar, el sistema valida y lleva los datos aprobados a la oferta. En checkout, cada artículo vuelve a conservar la comisión económica aplicable. Los cambios posteriores de reglas no deben reescribir retroactivamente los snapshots ya fijados para una operación.</p>
+</section>
+
+<section id="neto-seller">
+  <h2>Neto Seller</h2>
+  <p>El neto de la presentación es el precio menos la comisión, redondeado a centavos. En una liquidación se concilian ventas brutas, descuentos, comisiones y neto; el total debe satisfacer <strong>neto = bruto − descuentos − comisión</strong>.</p>
+</section>
+
+<section id="cambios-y-anexos">
+  <h2>Cambios y anexos</h2>
+  <p>ECUVEL debe mostrar al Seller la regla aplicable antes de que envíe la publicación y reflejarla en el contrato o anexo comercial pertinente. Un cambio futuro requiere comunicación y, cuando jurídica u operativamente corresponda, nueva aceptación en ECUVEL Partners.</p>
+  <p>Este borrador no inventa una versión contractual, una fecha de vigencia ni porcentajes por categoría.</p>
+</section>

@@ -1,0 +1,53 @@
+<section id="estado-y-alcance">
+  <h2>Estado y alcance</h2>
+  <div class="docs-callout">
+    <strong>Borrador para revisión; no vigente</strong>
+    <p>Esta guía describe las condiciones financieras aplicables a pagos y liquidaciones de la Tienda.</p>
+  </div>
+  <p>Una venta no se liquida por el solo hecho de existir un Pedido. Debe cumplir las condiciones de entrega, liberación, pago, conciliación, incidencias y banca indicadas a continuación.</p>
+</section>
+
+<section id="pmt-y-pay">
+  <h2>PMT- y PAY-</h2>
+  <p><strong>PMT-</strong> identifica un intento de pago del Comprador a ECUVEL. <strong>PAY-</strong> identifica una liquidación de ECUVEL a una Tienda. Son dominios y registros diferentes: un PMT- no es una liquidación Seller y un PAY- no es un pago del Comprador.</p>
+</section>
+
+<section id="elegibilidad">
+  <h2>Elegibilidad</h2>
+  <p>Un Subpedido Seller sólo puede ser elegible cuando todos sus artículos tienen evidencia de entrega completa al Comprador, el Subpedido está <code>COMPLETED</code>, existe un PMT- aprobado, la moneda es USD y no hay una resolución de reembolso pendiente.</p>
+</section>
+
+<section id="liberacion-y-conciliacion">
+  <h2>Liberación y conciliación</h2>
+  <p>La elegibilidad financiera se abre <strong>cuatro días después</strong> de la entrega completa. Antes de incluir o pagar un PAY-, ECUVEL reconcilia los artículos, snapshots de precio, descuentos, comisión y neto, y vuelve a comprobar la evidencia de entrega y el PMT- aprobado.</p>
+  <p>Una inconsistencia financiera o de entrega impide continuar hasta revisión. La espera de cuatro días y el ciclo de programación son condiciones distintas.</p>
+</section>
+
+<section id="cuenta-bancaria">
+  <h2>Cuenta bancaria</h2>
+  <p>La Tienda necesita una versión bancaria aprobada, utilizable y en USD. ECUVEL conserva en el PAY- la versión usada, el banco y los últimos cuatro dígitos. Un cambio crea otra versión; no reescribe el destino histórico de una liquidación ya creada.</p>
+</section>
+
+<section id="ciclos">
+  <h2>Ciclos</h2>
+  <p>ECUVEL programa ciclos el <strong>día 15</strong> y el <strong>último día hábil del mes</strong>, con zona <strong>America/Guayaquil</strong>. El ciclo del 15 incluye elegibilidad acumulada hasta el día 14 a las 23:59:59 local. El ciclo de fin de mes usa como corte el día calendario anterior al último día hábil, conforme a la implementación.</p>
+  <p>Actualmente, “día hábil” significa lunes a viernes. Los feriados bancarios ecuatorianos <strong>no están modelados</strong>; por eso el calendario no promete ajuste automático por feriados.</p>
+</section>
+
+<section id="calculo-y-evidencia">
+  <h2>Cálculo y evidencia</h2>
+  <p>El PAY- suma ventas brutas, descuentos, comisiones y netos de los Subpedidos elegibles. Cada ítem de liquidación conserva snapshots de esos importes y la fecha de elegibilidad. El total neto debe coincidir con bruto menos descuentos y comisiones.</p>
+  <p>Al marcar una liquidación pagada, ECUVEL registra referencia externa y fecha; puede adjuntar un comprobante privado con metadatos de integridad. Esos registros no sustituyen las obligaciones tributarias de la Tienda.</p>
+</section>
+
+<section id="estados-e-incidencias">
+  <h2>Estados e incidencias</h2>
+  <p>Un PAY- puede estar <code>SCHEDULED</code>, <code>ON_HOLD</code>, <code>PAID</code> o <code>CANCELLED</code>. Una retención permite revisar una incidencia y, al reanudar, ECUVEL vuelve a validar banca, entrega, pago y conciliación.</p>
+  <p>Un reembolso pendiente excluye el Subpedido. La falta de stock físico y la falta de retiro son causas operativas separadas; los reembolsos al Comprador se rigen por la política de Devoluciones y reembolsos aplicable. Esta guía no crea un plazo adicional de reintegro a cargo de la Tienda.</p>
+</section>
+
+<section id="acreditacion-bancaria">
+  <h2>Acreditación bancaria</h2>
+  <p>La fecha del ciclo y el estado <code>SCHEDULED</code> indican programación interna de ECUVEL; no garantizan que el banco acredite inmediatamente ni a una hora específica. La acreditación efectiva depende además del procesamiento de las entidades financieras.</p>
+  <p>Consultas operativas: <a href="mailto:ecuvel.help@hotmail.com">ecuvel.help@hotmail.com</a>. Un reclamo de consumo se atiende en <a href="mailto:ecuvel.reclamos@hotmail.com">ecuvel.reclamos@hotmail.com</a>.</p>
+</section>

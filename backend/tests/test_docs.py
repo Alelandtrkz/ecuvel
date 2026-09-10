@@ -55,6 +55,23 @@ LR5_2C_DOCUMENTS = {
     ),
 }
 
+LR5_2D_DOCUMENTS = {
+    "como-vender": "docs/content/vendedores/como_vender.html",
+    "politicas": "docs/content/vendedores/politicas.html",
+    "productos-permitidos-y-prohibidos": (
+        "docs/content/vendedores/productos_permitidos_y_prohibidos.html"
+    ),
+    "comisiones": "docs/content/vendedores/comisiones.html",
+    "pagos-y-liquidaciones": (
+        "docs/content/vendedores/pagos_y_liquidaciones.html"
+    ),
+    "logistica": "docs/content/vendedores/logistica.html",
+    "contrato": "docs/content/vendedores/contrato.html",
+    "proteccion-de-datos-seller": (
+        "docs/content/vendedores/proteccion_de_datos_seller.html"
+    ),
+}
+
 
 @pytest.fixture
 def client(app):
@@ -207,6 +224,7 @@ def test_registry_owns_all_template_resolution():
         ("privacidad", "politica-de-privacidad"),
         *(("compradores", slug) for slug in LR5_2B_DOCUMENTS),
         *LR5_2C_DOCUMENTS,
+        *(("vendedores", slug) for slug in LR5_2D_DOCUMENTS),
     }
 
     assert document_by_path("ecuvel", "../config") is None
@@ -402,14 +420,14 @@ def test_lr5_2b_warranty_policy_keeps_ecuvel_in_the_case(app):
     assert "aprobación automática" in warranty
 
 
-def test_lr5_2b_does_not_activate_seller_contract_document():
+def test_lr5_2b_does_not_publish_or_add_acceptance_to_seller_contract_document():
     seller_contract = document_by_path(
         "vendedores", "contrato", published_only=False
     )
 
     assert seller_contract is not None
     assert seller_contract.status == DocumentStatus.DRAFT
-    assert seller_contract.template_name is None
+    assert seller_contract.template_name == "docs/content/vendedores/contrato.html"
     assert seller_contract.requires_acceptance is False
 
 
@@ -588,7 +606,7 @@ def test_lr5_2c_review_ip_fraud_and_suspension_match_product_truth(app):
     assert "derechos de privacidad" in suspension
 
 
-def test_lr5_2c_does_not_activate_seller_docs_or_change_acceptance_model():
+def test_lr5_2c_does_not_publish_seller_docs_or_change_acceptance_model():
     terms = document_by_path(
         "compradores", "terminos-y-condiciones", published_only=False
     )
@@ -607,8 +625,242 @@ def test_lr5_2c_does_not_activate_seller_docs_or_change_acceptance_model():
         seller_document = document_by_path("vendedores", slug, published_only=False)
         assert seller_document is not None
         assert seller_document.status == DocumentStatus.DRAFT
-        assert seller_document.template_name is None
+        assert seller_document.template_name == LR5_2D_DOCUMENTS[slug]
         assert seller_document.historical_versions == ()
+
+
+def test_lr5_2d_documents_are_complete_non_public_drafts(app, client):
+    seller_family = next(family for family in all_families() if family.slug == "vendedores")
+
+    assert tuple(document.slug for document in seller_family.documents) == tuple(
+        LR5_2D_DOCUMENTS
+    )
+    assert tuple(document.navigation_order for document in seller_family.documents) == (
+        10, 20, 30, 40, 50, 60, 70, 80
+    )
+
+    for slug, template_name in LR5_2D_DOCUMENTS.items():
+        document = document_by_path("vendedores", slug, published_only=False)
+
+        assert document is not None
+        assert document.status == DocumentStatus.DRAFT
+        assert document.template_name == template_name
+        assert document.requires_acceptance is False
+        assert document.version_identifier is None
+        assert document.published_at is None
+        assert document.effective_at is None
+        assert document.historical_versions == ()
+        assert document.sections
+        assert tuple(section.anchor for section in document.sections) == tuple(
+            dict.fromkeys(section.anchor for section in document.sections)
+        )
+        assert document_by_path("vendedores", slug) is None
+        assert client.get(f"/docs/vendedores/{slug}").status_code == 404
+
+        with app.app_context():
+            source, _filename, _uptodate = app.jinja_env.loader.get_source(
+                app.jinja_env, template_name
+            )
+        assert "Borrador para revisión; no vigente" in source
+        for section in document.sections:
+            assert f'id="{section.anchor}"' in source
+
+
+def test_lr5_2d_onboarding_and_seller_obligations_match_product(app):
+    with app.app_context():
+        onboarding, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2D_DOCUMENTS["como-vender"]
+        )
+        policies, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2D_DOCUMENTS["politicas"]
+        )
+
+    for expected in (
+        "Revisión de detalles",
+        "Dirección de la entidad legal",
+        "Contacto:",
+        "Documentos:",
+        "Datos para pago:",
+        "CORRECTIONS_REQUESTED",
+        "CONTRACT_PENDING",
+        "COMPLETED",
+        "ACTIVE",
+    ):
+        assert expected in onboarding
+    assert "personas naturales o jurídicas" in onboarding
+    assert "no significa que toda Tienda deba presentar exactamente los mismos" in onboarding
+    assert "únicamente en ECUVEL Partners" in onboarding
+
+    for obligation in (
+        "licitud, autenticidad, seguridad y conformidad",
+        "stock físico real",
+        "factura o comprobante de la Tienda",
+        "garantías",
+        "Fraude",
+        "colaborar con ECUVEL",
+    ):
+        assert obligation in policies
+    assert "sanciones automáticas" in policies
+    assert "Tienda sea la vendedora" in policies
+    assert "recibo o registro de compra de ECUVEL no reemplaza" in policies
+
+
+def test_lr5_2d_restricted_products_preserve_four_classes_and_arcsa_boundary(app):
+    with app.app_context():
+        source, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2D_DOCUMENTS["productos-permitidos-y-prohibidos"],
+        )
+
+    for classification in (
+        "Prohibido:",
+        "No soportado actualmente:",
+        "Soporte regulado o condicional futuro:",
+        "Mercancía general ordinaria:",
+    ):
+        assert classification in source
+    assert "política comercial de lanzamiento" in source
+    assert "no afirma que toda la categoría sea intrínsecamente ilegal" in source
+    assert "Notificación Sanitaria Obligatoria" in source
+    assert "sólo podrá habilitarse después de definir y verificar" in source
+    assert "Los documentos exigibles dependerán del producto" in source
+    assert "no convierte un requisito de cosméticos" in source
+    assert "producto ilícito o inseguro" in source
+
+
+def test_lr5_2d_commission_policy_matches_resolver(app):
+    with app.app_context():
+        source, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2D_DOCUMENTS["comisiones"]
+        )
+
+    assert "superior a USD 0,25" in source
+    assert "menor a USD 3,00" in source
+    assert "USD 0,25" in source
+    assert "Desde <strong>USD 3,00</strong>" in source
+    assert "categoría concreta o su linaje" in source
+    assert "regla global activa" in source
+    assert "ignora el identificador de Tienda" in source
+    assert "no aplica tarifas negociadas individualmente" in source
+    for snapshot_field in (
+        "categoría y su ruta",
+        "precio",
+        "modo fijo o porcentual",
+        "porcentaje o tarifa fija",
+        "comisión calculada",
+        "neto Seller",
+        "identificador de regla",
+        "origen",
+    ):
+        assert snapshot_field in source
+    assert "neto = bruto − descuentos − comisión" in source
+
+
+def test_lr5_2d_payout_policy_protects_pmt_pay_and_real_calendar(app):
+    with app.app_context():
+        source, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2D_DOCUMENTS["pagos-y-liquidaciones"]
+        )
+
+    pmt_pay = source.split('id="pmt-y-pay"', 1)[1].split("</section>", 1)[0]
+    assert "PMT-" in pmt_pay and "pago del Comprador" in pmt_pay
+    assert "PAY-" in pmt_pay and "liquidación de ECUVEL a una Tienda" in pmt_pay
+    assert "entrega completa" in source
+    assert "cuatro días después" in source
+    assert "PMT- aprobado" in source
+    assert "resolución de reembolso pendiente" in source
+    assert "versión bancaria aprobada" in source
+    assert "día 15" in source
+    assert "último día hábil del mes" in source
+    assert "America/Guayaquil" in source
+    assert "hasta el día 14" in source
+    assert "lunes a viernes" in source
+    assert "feriados bancarios ecuatorianos <strong>no están modelados</strong>" in source
+    assert "no garantizan que el banco acredite inmediatamente" in source
+    assert "política de Devoluciones y reembolsos aplicable" in source
+    assert "no crea un plazo adicional de reintegro a cargo de la Tienda" in source
+
+
+def test_lr5_2d_logistics_marks_future_auto_confirmation_and_separate_remedies(app):
+    with app.app_context():
+        source, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2D_DOCUMENTS["logistica"]
+        )
+
+    assert "Cuando esta política entre en vigor" in source
+    assert "sin un veto tardío discrecional del Seller" in source
+    assert "siete días calendario" in source
+    assert "producto vuelve a la Tienda" in source
+    assert "reembolso completo" in source
+    assert "penalidad ni deducción" in source
+    assert "política de Devoluciones y reembolsos aplicable" in source
+    assert "no establece un plazo de pago o reintegro a cargo de la Tienda" in source
+    assert "derecho legal de devolución o cambio del artículo 45" in source
+    assert "garantía por defecto" in source
+
+
+def test_lr5_2d_contract_is_informational_and_not_a_second_acceptance(app):
+    document = document_by_path("vendedores", "contrato", published_only=False)
+    with app.app_context():
+        source, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2D_DOCUMENTS["contrato"]
+        )
+
+    assert document is not None and document.requires_acceptance is False
+    assert "exclusivamente informativo" in source
+    assert "no crea una segunda aceptación" in source
+    assert "únicamente al validar el OTP" in source
+    assert "Docs no presenta un checkbox" in source
+    assert "el texto contractual presentado en ECUVEL Partners" in source
+    assert "su copia descargable y la versión registrada" in source
+    assert "misma versión contractual aplicable" in source
+    assert "no reproduce esos identificadores ni les asigna vigencia" in source
+
+
+def test_lr5_2d_seller_privacy_has_differentiated_retention_and_channels(app):
+    with app.app_context():
+        source, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2D_DOCUMENTS["proteccion-de-datos-seller"]
+        )
+
+    for category in (
+        "cédula, RUC u otra identificación",
+        "datos bancarios",
+        "miembros y roles",
+        "productos",
+        "PAY-",
+        "auditoría",
+        "IP, agente de usuario",
+    ):
+        assert category in source
+    assert "No todos los datos se conservan siete años" in source
+    for short_lived in ("OTP vencidos", "sesiones", "tokens", "carritos", "telemetría"):
+        assert short_lived in source
+    assert "canal principal habilitado" in source
+    assert "no el único medio legalmente válido" in source
+    assert "ecuvel.help@hotmail.com" in source
+    assert "ecuvel.reclamos@hotmail.com" in source
+    assert "ecuvel.privacidad@hotmail.com" in source
+
+
+def test_lr5_2d_public_templates_hide_internal_review_labels(app):
+    forbidden = (
+        "PENDING COUNSEL VALIDATION",
+        "PENDING PRODUCT/LEGAL DESIGN",
+        "Seller Contract Canonicalization",
+        "SellerOrderDecisionStatus.APPROVED",
+        "LR5.2C",
+        "decisión de producto",
+    )
+
+    with app.app_context():
+        sources = [
+            app.jinja_env.loader.get_source(app.jinja_env, template_name)[0]
+            for template_name in LR5_2D_DOCUMENTS.values()
+        ]
+
+    for source in sources:
+        assert all(label not in source for label in forbidden)
 
 
 def test_docs_requests_do_not_mutate_database(app, client):
