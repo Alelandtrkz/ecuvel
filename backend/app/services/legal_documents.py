@@ -86,7 +86,9 @@ OPERATOR_INFORMATION = OperatorInformation(
     privacy_email="ecuvel.privacidad@hotmail.com",
     controller_representative="Edison Alejandro Campos Leines",
     data_protection_officer=(
-        "No corresponde según la determinación actual de Ecuvel."
+        "La asesoría jurídica concluye que la designación no corresponde a la "
+        "operación actual de ECUVEL; debe reevaluarse si cambian la escala, el "
+        "monitoreo, las categorías tratadas o las condiciones regulatorias."
     ),
 )
 
@@ -98,6 +100,8 @@ def _draft(
     description: str,
     order: int,
     *,
+    template_name: str | None = None,
+    sections: tuple[tuple[str, str], ...] = (),
     requires_acceptance: bool = False,
 ) -> DocumentDefinition:
     return DocumentDefinition(
@@ -107,6 +111,11 @@ def _draft(
         description=description,
         status=DocumentStatus.DRAFT,
         navigation_order=order,
+        template_name=template_name,
+        sections=tuple(
+            DocumentSection(anchor=anchor, title=section_title)
+            for anchor, section_title in sections
+        ),
         requires_acceptance=requires_acceptance,
     )
 
@@ -202,7 +211,38 @@ FAMILIES: tuple[FamilyDefinition, ...] = (
         description="Documentación para comprar, pagar, retirar y ejercer derechos.",
         navigation_order=20,
         documents=(
-            _draft("compradores", "terminos-y-condiciones", "Términos y Condiciones", "Reglas generales aplicables al uso de ECUVEL.", 10, requires_acceptance=True),
+            _draft(
+                "compradores",
+                "terminos-y-condiciones",
+                "Términos y Condiciones",
+                "Reglas generales aplicables al uso de ECUVEL.",
+                10,
+                template_name="docs/content/compradores/terminos_y_condiciones.html",
+                sections=(
+                    ("estado-del-borrador", "Estado y alcance del borrador"),
+                    ("identificacion-y-definiciones", "Identificación y definiciones"),
+                    ("acceso-y-cuentas", "Acceso, registro y cuentas"),
+                    ("capacidad-y-edad", "Capacidad y reglas de edad"),
+                    ("modelo-marketplace", "Modelo de marketplace y vendedores"),
+                    ("publicaciones-y-ofertas", "Productos, ofertas, precios y disponibilidad"),
+                    ("carrito-y-pedidos", "Carrito y formación de pedidos"),
+                    ("pago-y-comprobante", "Transferencia, comprobante y revisión"),
+                    ("estados-y-cancelacion", "Estados, fallos y cancelación"),
+                    ("preparacion-y-retiro", "Preparación y retiro"),
+                    ("devoluciones-reembolsos-garantias", "Devoluciones, reembolsos y garantías"),
+                    ("reclamos-y-derechos", "Reclamos y derechos del consumidor"),
+                    ("productos-restringidos", "Productos restringidos y controles futuros"),
+                    ("resenas-y-contenido", "Reseñas, contenido y moderación"),
+                    ("propiedad-intelectual", "Propiedad intelectual"),
+                    ("uso-aceptable", "Uso aceptable, fraude y suspensión"),
+                    ("comunicaciones-y-privacidad", "Comunicaciones y privacidad"),
+                    ("cambios-y-evidencia", "Cambios, versiones y evidencia electrónica"),
+                    ("responsabilidad-y-fuerza-mayor", "Responsabilidad y fuerza mayor"),
+                    ("ley-y-controversias", "Ley aplicable y controversias"),
+                    ("contacto-y-disposiciones-finales", "Contacto y disposiciones finales"),
+                ),
+                requires_acceptance=True,
+            ),
             _draft("compradores", "condiciones-de-compra", "Condiciones de compra", "Formación y ejecución de compras en la plataforma.", 20),
             _draft("compradores", "pagos", "Pagos", "Métodos, comprobantes y revisión de pagos.", 30),
             _draft("compradores", "entregas", "Entregas", "Preparación, conservación y retiro de pedidos.", 40),
@@ -218,7 +258,36 @@ FAMILIES: tuple[FamilyDefinition, ...] = (
         description="Información sobre datos personales, tecnologías y derechos.",
         navigation_order=30,
         documents=(
-            _draft("privacidad", "politica-de-privacidad", "Política de Privacidad", "Información sobre los tratamientos de datos personales de ECUVEL.", 10),
+            _draft(
+                "privacidad",
+                "politica-de-privacidad",
+                "Política de Privacidad",
+                "Información sobre los tratamientos de datos personales de ECUVEL.",
+                10,
+                template_name="docs/content/privacidad/politica_de_privacidad.html",
+                sections=(
+                    ("estado-y-responsable", "Estado, alcance y responsable"),
+                    ("principios-y-fuentes", "Principios y fuentes"),
+                    ("datos-que-tratamos", "Datos que tratamos"),
+                    ("finalidades-y-bases", "Finalidades y bases jurídicas"),
+                    ("cuenta-perfil-y-edad", "Cuenta, perfil y edad"),
+                    ("compras-y-pagos", "Compras, pagos y comprobantes"),
+                    ("ocr-y-decisiones", "OCR, preanálisis y decisiones"),
+                    ("cumplimiento-y-resenas", "Cumplimiento, reseñas y moderación"),
+                    ("vendedores-y-personal", "Vendedores y personal"),
+                    ("telemetria-y-ranking", "Telemetría y ranking"),
+                    ("comunicaciones", "Comunicaciones"),
+                    ("cookies-y-sesion", "Cookies y tecnologías de sesión"),
+                    ("destinatarios-y-encargados", "Destinatarios y encargados"),
+                    ("transferencias", "Transferencias de datos"),
+                    ("conservacion", "Conservación"),
+                    ("seguridad", "Seguridad"),
+                    ("derechos", "Derechos de las personas"),
+                    ("ejercicio-de-derechos", "Cómo ejercer sus derechos"),
+                    ("menores", "Niñas, niños y adolescentes"),
+                    ("cambios-y-reclamos", "Cambios y reclamos"),
+                ),
+            ),
             _draft("privacidad", "cookies-y-tecnologias-similares", "Cookies y tecnologías similares", "Tecnologías utilizadas por la plataforma y sus finalidades.", 20),
             _draft("privacidad", "derechos-del-titular", "Derechos del titular", "Cómo ejercer derechos relacionados con datos personales.", 30),
             _draft("privacidad", "comunicaciones-y-marketing", "Comunicaciones y marketing", "Diferencia entre mensajes operativos y comunicaciones comerciales.", 40),
@@ -310,6 +379,17 @@ def _validate_registry() -> None:
                 raise RuntimeError("Un documento de Docs pertenece a una familia incorrecta.")
             if document.is_published and document.template_name is None:
                 raise RuntimeError("Un documento publicado requiere una plantilla registrada.")
+            if document.status == DocumentStatus.DRAFT and any(
+                (
+                    document.version_identifier,
+                    document.published_at,
+                    document.effective_at,
+                    document.historical_versions,
+                )
+            ):
+                raise RuntimeError(
+                    "Un borrador de Docs no puede aparentar versión o vigencia oficial."
+                )
             if document.template_name is not None and (
                 ".." in document.template_name
                 or not _SAFE_TEMPLATE.fullmatch(document.template_name)
