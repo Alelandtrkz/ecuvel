@@ -17,6 +17,17 @@ from app.services.legal_documents import (
 pytestmark = pytest.mark.integration
 
 
+LR5_2B_DOCUMENTS = {
+    "condiciones-de-compra": "docs/content/compradores/condiciones_de_compra.html",
+    "pagos": "docs/content/compradores/pagos.html",
+    "entregas": "docs/content/compradores/entregas.html",
+    "devoluciones-y-reembolsos": (
+        "docs/content/compradores/devoluciones_y_reembolsos.html"
+    ),
+    "garantias": "docs/content/compradores/garantias.html",
+}
+
+
 @pytest.fixture
 def client(app):
     with app.test_client() as test_client:
@@ -76,7 +87,11 @@ def test_unknown_family_and_document_return_404(client):
     [
         "/docs/compradores/terminos-y-condiciones",
         "/docs/privacidad/politica-de-privacidad",
+        "/docs/compradores/condiciones-de-compra",
+        "/docs/compradores/pagos",
+        "/docs/compradores/entregas",
         "/docs/compradores/devoluciones-y-reembolsos",
+        "/docs/compradores/garantias",
         "/docs/vendedores/contrato",
     ],
 )
@@ -162,6 +177,7 @@ def test_registry_owns_all_template_resolution():
     prepared_drafts = {
         ("compradores", "terminos-y-condiciones"),
         ("privacidad", "politica-de-privacidad"),
+        *(("compradores", slug) for slug in LR5_2B_DOCUMENTS),
     }
 
     assert document_by_path("ecuvel", "../config") is None
@@ -247,6 +263,125 @@ def test_lr5_2a_reconciled_terms_source_matches_approved_target_policy(app):
     assert "quince días hábiles" in source
     assert "le corresponde emitir la factura tributaria" in source
     assert "no reemplaza la factura de la Tienda" in source
+    assert "bienes o servicios por cualquier medio" in source
+    assert "por medios distintos a una venta directa presencial" not in source
+
+
+def test_lr5_2b_documents_are_complete_non_public_drafts(app, client):
+    for slug, template_name in LR5_2B_DOCUMENTS.items():
+        document = document_by_path("compradores", slug, published_only=False)
+
+        assert document is not None
+        assert document.status == DocumentStatus.DRAFT
+        assert document.template_name == template_name
+        assert document.requires_acceptance is False
+        assert document.version_identifier is None
+        assert document.published_at is None
+        assert document.effective_at is None
+        assert document.historical_versions == ()
+        assert document.sections
+        assert tuple(section.anchor for section in document.sections) == tuple(
+            dict.fromkeys(section.anchor for section in document.sections)
+        )
+        assert document_by_path("compradores", slug) is None
+        assert client.get(f"/docs/compradores/{slug}").status_code == 404
+
+        with app.app_context():
+            source, _filename, _uptodate = app.jinja_env.loader.get_source(
+                app.jinja_env, template_name
+            )
+        for section in document.sections:
+            assert f'id="{section.anchor}"' in source
+
+
+def test_lr5_2b_purchase_and_payment_policies_match_current_payment_model(app):
+    with app.app_context():
+        purchase, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2B_DOCUMENTS["condiciones-de-compra"]
+        )
+        payments, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2B_DOCUMENTS["pagos"]
+        )
+
+    for source in (purchase, payments):
+        assert "único método" in source
+        assert "transferencia bancaria" in source
+        assert "factura" in source
+    assert "no reemplaza" in purchase
+    assert "no sustituye" in payments
+    assert "no ofrece actualmente pagos con tarjeta" in payments
+    assert "no aprueba ni rechaza el pago por sí solo" in payments
+    assert "Personal ECUVEL autorizado" in payments
+    assert "automáticamente" in purchase
+    assert "segunda aceptación discrecional" in purchase
+
+
+def test_lr5_2b_delivery_and_refund_policies_keep_approved_limits(app):
+    with app.app_context():
+        delivery, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2B_DOCUMENTS["entregas"]
+        )
+        refunds, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2B_DOCUMENTS["devoluciones-y-reembolsos"]
+        )
+
+    delivery_non_pickup = delivery.split('id="plazo-de-siete-dias"', 1)[1].split(
+        "</section>", 1
+    )[0]
+    stock_refund = refunds.split('id="falta-de-stock"', 1)[1].split(
+        "</section>", 1
+    )[0]
+    non_pickup_refund = refunds.split('id="pedido-no-retirado"', 1)[1].split(
+        "</section>", 1
+    )[0]
+    statutory_return = refunds.split(
+        'id="devolucion-o-cambio-legal"', 1
+    )[1].split("</section>", 1)[0]
+
+    assert "siete días calendario" in delivery_non_pickup
+    assert "no ofrece en este documento entrega a domicilio" in delivery
+    assert "reembolso completo" in delivery_non_pickup
+    assert "100 % del valor pagado" in delivery_non_pickup
+    assert "plazo máximo" in delivery_non_pickup
+    assert "quince días hábiles" in delivery_non_pickup
+    assert "penalidad ni deducción" in delivery_non_pickup
+
+    for operational_cause in (stock_refund, non_pickup_refund):
+        assert "100 % del valor pagado" in operational_cause
+        assert "plazo máximo" in operational_cause
+        assert "quince días hábiles" in operational_cause
+    assert "penalidad ni deducción" in stock_refund
+    assert "cargo de almacenamiento, reposición, penalidad ni deducción" in non_pickup_refund
+
+    assert "bienes o servicios por cualquier medio" in statutory_return
+    assert "quince días posteriores a la recepción" in statutory_return
+    assert "quince días hábiles" not in statutory_return
+    assert "plazo operativo final permanece pendiente" not in refunds
+    assert "debe confirmarse con el propietario" not in refunds
+
+
+def test_lr5_2b_warranty_policy_keeps_ecuvel_in_the_case(app):
+    with app.app_context():
+        warranty, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2B_DOCUMENTS["garantias"]
+        )
+
+    assert "ECUVEL actúa como punto de contacto y coordinación" in warranty
+    assert "ECUVEL registra el caso" in warranty
+    assert "reseña pública" in warranty
+    assert "métrica interna" in warranty
+    assert "aprobación automática" in warranty
+
+
+def test_lr5_2b_does_not_activate_seller_contract_document():
+    seller_contract = document_by_path(
+        "vendedores", "contrato", published_only=False
+    )
+
+    assert seller_contract is not None
+    assert seller_contract.status == DocumentStatus.DRAFT
+    assert seller_contract.template_name is None
+    assert seller_contract.requires_acceptance is False
 
 
 def test_lr5_2a_reconciled_privacy_source_is_specific_and_not_universal(app):
