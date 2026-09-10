@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ page_description }}">
+  {% if robots_content %}<meta name="robots" content="{{ robots_content }}">{% endif %}
+  {% if canonical_url %}<link rel="canonical" href="{{ canonical_url }}">{% endif %}
+  <title>{{ page_title }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='images/placeholders/ecuvel-favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/docs.css') }}">
+</head>
+<body class="docs-page">
+  <a class="skip-link" href="#contenido-principal">Ir al contenido principal</a>
+  <header class="docs-header">
+    <div class="docs-header__inner">
+      <button class="docs-menu-button" type="button" aria-controls="docs-mobile-navigation" aria-expanded="false" data-docs-menu-open>
+        <span aria-hidden="true">☰</span>
+        <span>Documentos</span>
+      </button>
+      <a class="docs-brand" href="{{ url_for('docs.home') }}" aria-label="ECUVEL Docs, inicio">
+        <strong>ECUVEL</strong>
+        <span aria-hidden="true"></span>
+        <em>Docs</em>
+      </a>
+      <a class="docs-marketplace-link" href="{{ url_for('storefront.home') }}">
+        <span aria-hidden="true">←</span>
+        <span>Volver a ECUVEL</span>
+      </a>
+    </div>
+  </header>
+
+  {% include "docs/partials/mobile_nav.html" %}
+
+  <main id="contenido-principal" tabindex="-1">
+    {% block docs_content %}{% endblock %}
+  </main>
+
+  <footer class="docs-footer">
+    <div>
+      <span>ECUVEL Docs</span>
+      <a href="{{ url_for('docs.article', family_slug='ecuvel', document_slug='contacto') }}">Contacto</a>
+      <a href="{{ url_for('docs.article', family_slug='legal', document_slug='operador') }}">Datos del operador</a>
+    </div>
+  </footer>
+  <script src="{{ url_for('static', filename='js/docs.js') }}" defer></script>
+</body>
+</html>

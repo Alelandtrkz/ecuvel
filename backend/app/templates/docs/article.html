@@ -1,0 +1,39 @@
+{% extends "docs/base.html" %}
+
+{% block docs_content %}
+  <div class="docs-layout docs-layout--article">
+    <aside class="docs-sidebar" aria-label="Navegación de Docs">
+      {% set nav_context = "desktop" %}
+      {% include "docs/partials/sidebar.html" %}
+    </aside>
+
+    <article class="docs-article">
+      {% include "docs/partials/breadcrumbs.html" %}
+      <header class="docs-article__header">
+        <p class="docs-eyebrow">{{ current_family.title }}</p>
+        <h1>{{ current_document.title }}</h1>
+        <p>{{ current_document.description }}</p>
+        {% include "docs/partials/document_meta.html" %}
+      </header>
+
+      {% if current_document.sections|length >= 3 %}
+        <details class="docs-mobile-toc">
+          <summary>En esta página</summary>
+          <ol>
+            {% for section in current_document.sections %}
+              <li><a href="#{{ section.anchor }}">{{ section.title }}</a></li>
+            {% endfor %}
+          </ol>
+        </details>
+      {% endif %}
+
+      <div class="docs-article__body">
+        {% include current_document.template_name %}
+      </div>
+    </article>
+
+    <aside class="docs-toc-column">
+      {% include "docs/partials/toc.html" %}
+    </aside>
+  </div>
+{% endblock %}

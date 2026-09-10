@@ -1,0 +1,14 @@
+<nav class="docs-breadcrumbs" aria-label="Ruta de navegación">
+  <ol>
+    {% for crumb in breadcrumbs %}
+      <li>
+        {% if crumb.url %}
+          <a href="{{ crumb.url }}">{{ crumb.label }}</a>
+          <span aria-hidden="true">/</span>
+        {% else %}
+          <span aria-current="page">{{ crumb.label }}</span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+</nav>

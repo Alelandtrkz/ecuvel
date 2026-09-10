@@ -1,0 +1,10 @@
+{% if current_document and current_document.sections|length >= 3 %}
+  <nav class="docs-toc" aria-label="En esta página">
+    <strong>En esta página</strong>
+    <ol>
+      {% for section in current_document.sections %}
+        <li><a href="#{{ section.anchor }}">{{ section.title }}</a></li>
+      {% endfor %}
+    </ol>
+  </nav>
+{% endif %}

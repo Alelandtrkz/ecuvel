@@ -1,0 +1,9 @@
+<div class="docs-document-meta" aria-label="Estado del documento">
+  {% if current_document.version_identifier %}
+    <span>Versión {{ current_document.version_identifier }}</span>
+  {% else %}
+    <span>Información pública</span>
+  {% endif %}
+  {% if current_document.published_at %}<span>Publicado {{ current_document.published_at }}</span>{% endif %}
+  {% if current_document.effective_at %}<span>Vigente desde {{ current_document.effective_at }}</span>{% endif %}
+</div>

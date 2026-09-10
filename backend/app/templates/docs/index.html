@@ -1,0 +1,33 @@
+{% extends "docs/base.html" %}
+
+{% block docs_content %}
+  <section class="docs-home">
+    <div class="docs-home__intro">
+      <p class="docs-eyebrow">Centro de documentación</p>
+      <h1>ECUVEL Docs</h1>
+      <p>Información, políticas y documentación de ECUVEL.</p>
+      <div class="docs-notice" role="note">
+        <strong>Publicación gradual</strong>
+        <p>Los documentos contractuales y las políticas que continúan en preparación no se muestran como publicaciones vigentes.</p>
+      </div>
+    </div>
+
+    <div class="docs-family-grid" aria-label="Familias de documentación">
+      {% for family in docs_families %}
+        <a class="docs-family-card" href="{{ url_for('docs.family', family_slug=family.slug) }}">
+          <span class="docs-family-card__index" aria-hidden="true">{{ "%02d"|format(loop.index) }}</span>
+          <h2>{{ family.title }}</h2>
+          <p>{{ family.description }}</p>
+          <span class="docs-family-card__meta">
+            {% if family.published_documents %}
+              {{ family.published_documents|length }} recurso{{ '' if family.published_documents|length == 1 else 's' }} disponible{{ '' if family.published_documents|length == 1 else 's' }}
+            {% else %}
+              Documentación en preparación
+            {% endif %}
+          </span>
+          <span class="docs-family-card__arrow" aria-hidden="true">→</span>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+{% endblock %}

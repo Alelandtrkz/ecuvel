@@ -74,6 +74,7 @@ def create_app() -> Flask:
     from app.blueprints.account import account
     from app.blueprints.partners import partners
     from app.blueprints.admin import admin
+    from app.blueprints.docs import docs
     from app.storefront import storefront
 
     from app.models import User
@@ -147,6 +148,7 @@ def create_app() -> Flask:
     app.register_blueprint(account)
     app.register_blueprint(partners)
     app.register_blueprint(admin)
+    app.register_blueprint(docs)
     app.register_blueprint(storefront)
 
     @app.get("/health")

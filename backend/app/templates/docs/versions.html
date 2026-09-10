@@ -1,0 +1,39 @@
+{% extends "docs/base.html" %}
+
+{% block docs_content %}
+  <div class="docs-layout docs-layout--family">
+    <aside class="docs-sidebar" aria-label="Navegación de Docs">
+      {% set nav_context = "desktop" %}
+      {% include "docs/partials/sidebar.html" %}
+    </aside>
+
+    <article class="docs-family-page">
+      {% include "docs/partials/breadcrumbs.html" %}
+      <header class="docs-family-page__header">
+        <p class="docs-eyebrow">Archivo legal</p>
+        <h1>Versiones anteriores</h1>
+        <p>Este espacio conservará el acceso a las versiones legales que hayan sido publicadas y posteriormente sustituidas.</p>
+      </header>
+
+      {% if legal_history %}
+        <div class="docs-table-scroll" role="region" aria-label="Versiones legales publicadas" tabindex="0">
+          <table>
+            <caption>Historial de documentos legales</caption>
+            <thead><tr><th>Documento</th><th>Versión</th><th>Publicación</th><th>Vigencia</th></tr></thead>
+            <tbody>
+              {% for document, version in legal_history %}
+                <tr><th scope="row">{{ document.title }}</th><td>{{ version.version_identifier }}</td><td>{{ version.published_at }}</td><td>{{ version.effective_at }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <section class="docs-empty-state" aria-labelledby="versions-empty-title">
+          <span aria-hidden="true">00</span>
+          <h2 id="versions-empty-title">Aún no hay versiones legales publicadas.</h2>
+          <p>No se han creado versiones ficticias para completar este archivo.</p>
+        </section>
+      {% endif %}
+    </article>
+  </div>
+{% endblock %}

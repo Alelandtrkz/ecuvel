@@ -1,0 +1,11 @@
+<div class="docs-drawer-overlay" data-docs-menu-overlay hidden></div>
+<aside class="docs-drawer" id="docs-mobile-navigation" role="dialog" aria-modal="true" aria-label="Navegación móvil de ECUVEL Docs" aria-hidden="true" data-docs-menu inert>
+  <div class="docs-drawer__header">
+    <strong>ECUVEL Docs</strong>
+    <button type="button" aria-label="Cerrar navegación de documentos" data-docs-menu-close>×</button>
+  </div>
+  <div class="docs-drawer__body">
+    {% set nav_context = "mobile" %}
+    {% include "docs/partials/sidebar.html" %}
+  </div>
+</aside>

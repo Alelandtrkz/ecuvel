@@ -1,0 +1,50 @@
+{% extends "docs/base.html" %}
+
+{% block docs_content %}
+  <div class="docs-layout docs-layout--family">
+    <aside class="docs-sidebar" aria-label="Navegación de Docs">
+      {% set nav_context = "desktop" %}
+      {% include "docs/partials/sidebar.html" %}
+    </aside>
+
+    <article class="docs-family-page">
+      {% include "docs/partials/breadcrumbs.html" %}
+      <header class="docs-family-page__header">
+        <p class="docs-eyebrow">Familia documental</p>
+        <h1>{{ current_family.title }}</h1>
+        <p>{{ current_family.description }}</p>
+      </header>
+
+      {% if current_family.published_documents %}
+        <section class="docs-resource-section" aria-labelledby="available-documents">
+          <h2 id="available-documents">Disponibles</h2>
+          <div class="docs-resource-list">
+            {% for document in current_family.published_documents %}
+              {% if document.kind == "archive" %}
+                {% set document_url = url_for('docs.versions') %}
+              {% else %}
+                {% set document_url = url_for('docs.article', family_slug=current_family.slug, document_slug=document.slug) %}
+              {% endif %}
+              <a href="{{ document_url }}">
+                <span><strong>{{ document.title }}</strong><small>{{ document.description }}</small></span>
+                <span aria-hidden="true">→</span>
+              </a>
+            {% endfor %}
+          </div>
+        </section>
+      {% endif %}
+
+      {% if current_family.draft_documents %}
+        <section class="docs-resource-section" aria-labelledby="draft-documents">
+          <h2 id="draft-documents">En preparación</h2>
+          <p class="docs-section-intro">Estos títulos forman parte de la arquitectura prevista, pero todavía no son documentos publicados ni vigentes.</p>
+          <ul class="docs-draft-list">
+            {% for document in current_family.draft_documents %}
+              <li><span>{{ document.title }}</span><small>Borrador no publicado</small></li>
+            {% endfor %}
+          </ul>
+        </section>
+      {% endif %}
+    </article>
+  </div>
+{% endblock %}

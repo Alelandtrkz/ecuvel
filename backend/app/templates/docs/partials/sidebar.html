@@ -1,0 +1,30 @@
+<nav class="docs-tree" aria-label="Documentación de ECUVEL">
+  <a class="docs-tree__home{% if not current_family %} is-active{% endif %}" href="{{ url_for('docs.home') }}"{% if not current_family %} aria-current="page"{% endif %}>Inicio de Docs</a>
+  {% for family in docs_families %}
+    <details class="docs-tree__family{% if current_family and current_family.slug == family.slug %} is-current{% endif %}"{% if current_family and current_family.slug == family.slug %} open{% endif %}>
+      <summary id="docs-nav-{{ nav_context }}-{{ family.slug }}">{{ family.title }}</summary>
+      <ul aria-labelledby="docs-nav-{{ nav_context }}-{{ family.slug }}">
+        <li>
+          <a href="{{ url_for('docs.family', family_slug=family.slug) }}"{% if current_family and current_family.slug == family.slug and not current_document %} class="is-active" aria-current="page"{% endif %}>Resumen</a>
+        </li>
+        {% for document in family.documents %}
+          <li>
+            {% if document.is_published %}
+              {% if document.kind == "archive" %}
+                {% set document_url = url_for('docs.versions') %}
+              {% else %}
+                {% set document_url = url_for('docs.article', family_slug=family.slug, document_slug=document.slug) %}
+              {% endif %}
+              <a href="{{ document_url }}"{% if current_document and current_document.slug == document.slug and current_document.family == document.family %} class="is-active" aria-current="page"{% endif %}>{{ document.title }}</a>
+            {% else %}
+              <span class="docs-tree__draft">
+                <span>{{ document.title }}</span>
+                <small>En preparación</small>
+              </span>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endfor %}
+</nav>

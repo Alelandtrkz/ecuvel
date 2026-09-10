@@ -1,0 +1,31 @@
+<section id="identificacion">
+  <h2>Identificación</h2>
+  <dl class="docs-definition-list">
+    <div><dt>Operador / nombre</dt><dd>{{ operator.name }}</dd></div>
+    <div><dt>RUC</dt><dd>{{ operator.ruc }}</dd></div>
+    <div><dt>Dirección legal</dt><dd>{{ operator.legal_address }}</dd></div>
+    <div><dt>Teléfono institucional/legal</dt><dd><a href="tel:{{ operator.legal_phone }}">{{ operator.legal_phone }}</a></dd></div>
+  </dl>
+</section>
+
+<section id="canales-institucionales">
+  <h2>Canales institucionales</h2>
+  <dl class="docs-definition-list">
+    <div><dt>Ayuda general</dt><dd><a href="mailto:{{ operator.help_email }}">{{ operator.help_email }}</a></dd></div>
+    <div><dt>Reclamos</dt><dd><a href="mailto:{{ operator.claims_email }}">{{ operator.claims_email }}</a></dd></div>
+    <div><dt>Privacidad y datos personales</dt><dd><a href="mailto:{{ operator.privacy_email }}">{{ operator.privacy_email }}</a></dd></div>
+  </dl>
+  <p>Cada canal tiene una finalidad distinta. El correo de ayuda general no sustituye al canal de privacidad ni al de reclamos.</p>
+</section>
+
+<section id="responsable-del-tratamiento">
+  <h2>Responsable del tratamiento</h2>
+  <dl class="docs-definition-list">
+    <div><dt>Representante del responsable</dt><dd>{{ operator.controller_representative }}</dd></div>
+    <div><dt>Delegado de Protección de Datos</dt><dd>{{ operator.data_protection_officer }}</dd></div>
+  </dl>
+  <div class="docs-callout">
+    <strong>Alcance de esta página</strong>
+    <p>Esta página reúne información factual comunicada por ECUVEL. No sustituye los Términos y Condiciones ni la Política de Privacidad, que permanecen en preparación.</p>
+  </div>
+</section>
