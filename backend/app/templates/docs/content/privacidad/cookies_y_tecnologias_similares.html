@@ -1,0 +1,58 @@
+<section id="estado-y-alcance">
+  <h2>Estado y alcance</h2>
+  <div class="docs-callout">
+    <strong>Borrador para revisión; no vigente</strong>
+    <p>Este documento no está publicado. El control de preferencias descrito como requisito previo todavía no está implementado.</p>
+  </div>
+  <p>Esta información complementa la Política de Privacidad y distingue cookies, estado de sesión, identificadores, telemetría del servidor y solicitudes a recursos externos.</p>
+</section>
+
+<section id="conceptos">
+  <h2>Cookies y otras tecnologías</h2>
+  <p>Una cookie es un dato que el sitio solicita conservar y devolver mediante el navegador. No toda tecnología descrita aquí es una cookie: un valor dentro de la sesión, un contexto firmado, un evento guardado en el servidor o una solicitud a un tercero son mecanismos distintos.</p>
+</section>
+
+<section id="estado-necesario">
+  <h2>Estado estrictamente necesario</h2>
+  <div class="docs-table-scroll">
+    <table>
+      <thead><tr><th>Mecanismo</th><th>Control y finalidad</th><th>Duración</th><th>Clasificación</th></tr></thead>
+      <tbody>
+        <tr><td>Cookie de sesión de ECUVEL</td><td>Primera parte; autenticación, protección CSRF, carrito invitado y continuidad de funciones solicitadas.</td><td>Normalmente termina con la sesión del navegador; la configuración efectiva puede variar.</td><td>Estrictamente necesaria para las funciones utilizadas.</td></tr>
+        <tr><td>Cookie de recuerdo</td><td>Primera parte; mantiene el acceso sólo si la persona elige recordar sesión.</td><td>Catorce días por defecto; configurable entre cinco minutos y noventa días.</td><td>Funcional y solicitada por la persona.</td></tr>
+        <tr><td>Estado dentro de la sesión</td><td>Carrito invitado, identificadores de Pedidos o flujos en curso y controles de seguridad.</td><td>Vinculado a la sesión o al vencimiento específico del flujo.</td><td>Necesario cuando sostiene la función solicitada.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Las cookies de ECUVEL se configuran con acceso restringido desde JavaScript y SameSite; el atributo de transporte seguro depende del entorno y debe estar activo en producción.</p>
+</section>
+
+<section id="identificadores-y-contextos">
+  <h2>Identificadores y contextos</h2>
+  <p>El sistema crea un UUID de catálogo para una sesión sin usuario autenticado. Aunque se denomine «sanónimo» en el código, se trata conservadoramente como un identificador seudónimo o potencial dato personal: no acredita anonimato irreversible.</p>
+  <p>Los cursores del catálogo y contextos de ranking son valores firmados enviados con determinadas solicitudes, no cookies independientes. Su vigencia técnica es configurable, con valor predeterminado de una hora y rango admitido entre cinco minutos y veinticuatro horas.</p>
+</section>
+
+<section id="telemetria">
+  <h2>Telemetría de catálogo</h2>
+  <p>El código actual puede registrar automáticamente en el servidor impresiones, clics, favoritos, adiciones al carrito, compras y entregas, junto con producto, variante u oferta, superficie, posiciones o puntuaciones de ranking, contexto y fecha. Con sesión iniciada puede asociarse a la cuenta; sin ella utiliza el UUID de sesión.</p>
+  <p>La telemetría destinada principalmente a medir interacciones, intereses, recomendaciones o personalización es <strong>no esencial</strong> para navegar, usar la cuenta, el carrito o comprar. La decisión aprobada exige que permanezca desactivada por defecto y sólo opere después de una elección previa, informada, opcional y no preseleccionada.</p>
+</section>
+
+<section id="recursos-externos">
+  <h2>Recursos externos</h2>
+  <p>Las páginas generales del marketplace pueden solicitar la fuente Onest a Google Fonts y la biblioteca Lucide desde unpkg. La solicitud puede comunicar datos técnicos habituales, como dirección IP y datos del navegador, a esos proveedores. Esto no significa por sí solo que instalen una cookie de ECUVEL.</p>
+  <p>ECUVEL Docs utiliza recursos locales y no carga el script de telemetría del catálogo.</p>
+</section>
+
+<section id="duracion-y-control">
+  <h2>Duración y control</h2>
+  <p>Los vencimientos técnicos limitan la validez de una sesión o token, pero no equivalen a un programa general de eliminación de registros. El producto no contiene todavía un plazo automático de conservación para los eventos de telemetría; debe definirse un período breve y justificado antes de activarlos en producción.</p>
+  <p>La persona puede borrar cookies mediante su navegador, aunque hacerlo puede cerrar la sesión o vaciar el carrito invitado. Ese control no sustituye la elección previa exigida para telemetría no esencial.</p>
+</section>
+
+<section id="eleccion-previa">
+  <h2>Elección previa</h2>
+  <p>Antes de la publicación final, ECUVEL debe implementar un control que permita aceptar o rechazar la telemetría no esencial, cambiar la preferencia y retirar el consentimiento para detener su recopilación futura. Rechazarla no impedirá navegar, usar la cuenta, conservar el carrito ni comprar.</p>
+  <p>No existe actualmente ese control de preferencias ni se afirma que exista un banner. ECUVEL no utilizará interés legítimo como base para esta telemetría opcional en el modelo aprobado. Mientras el código y la documentación no coincidan, la publicación final permanece bloqueada.</p>
+</section>

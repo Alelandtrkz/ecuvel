@@ -36,7 +36,7 @@
   <h3>Sesión y preferencias comerciales</h3>
   <ul>
     <li>estado de inicio de sesión, protección contra solicitudes falsificadas y preferencia de sesión recordada;</li>
-    <li>carrito de invitado, pedidos asociados temporalmente a una sesión y UUID anónimo de catálogo;</li>
+    <li>carrito de invitado, pedidos asociados temporalmente a una sesión y UUID seudónimo de catálogo;</li>
     <li>carrito autenticado, favoritos y adopción de un carrito previo al iniciar sesión.</li>
   </ul>
   <h3>Compras, pagos y cumplimiento</h3>
@@ -69,7 +69,7 @@
         <tr><td>Carrito, Pedido, pago y retiro</td><td>Preparar, registrar, cobrar, revisar, cumplir y documentar una compra.</td><td>Medidas precontractuales y ejecución contractual; obligaciones legales aplicables cuando estén identificadas.</td></tr>
         <tr><td>Prevención de fraude y seguridad</td><td>Proteger cuentas, pagos, inventario y Plataforma; investigar incidentes.</td><td>Interés legítimo sujeto a prueba de finalidad, necesidad y ponderación; obligación legal cuando corresponda.</td></tr>
         <tr><td>Reseñas y moderación</td><td>Publicar experiencias verificadas, mantener calidad y prevenir contenido ilícito o abusivo.</td><td>Ejecución de la función solicitada e interés legítimo documentado para moderación y trazabilidad.</td></tr>
-        <tr><td>Telemetría y ranking</td><td>Medir interacción, evaluar posiciones y mejorar el orden del catálogo.</td><td>Interés legítimo sólo si la evaluación confirma necesidad, proporcionalidad y expectativas; de lo contrario deberá recabarse consentimiento o rediseñarse.</td></tr>
+        <tr><td>Telemetría y ranking</td><td>Medir interacción, evaluar posiciones y mejorar el orden del catálogo.</td><td>Consentimiento previo, opcional y revocable para la telemetría conductual no esencial. ECUVEL no adopta interés legítimo como base para esta finalidad.</td></tr>
         <tr><td>Onboarding, contrato y liquidación de Tiendas</td><td>Evaluar, habilitar, administrar y pagar a vendedores.</td><td>Medidas precontractuales, ejecución contractual y obligaciones legales aplicables.</td></tr>
         <tr><td>Gestión de personal y auditoría</td><td>Administrar accesos, funciones, empleo y responsabilidad operativa.</td><td>Relación contractual, obligaciones legales y seguridad basada en interés legítimo documentado.</td></tr>
         <tr><td>Comunicaciones transaccionales</td><td>Verificar cuenta, recuperar acceso y avisar decisiones o estados.</td><td>Ejecución de la relación, medidas solicitadas y obligaciones legales.</td></tr>
@@ -126,9 +126,9 @@
 <section id="telemetria-y-ranking">
   <h2>Telemetría y ranking</h2>
   <p>ECUVEL registra eventos de <strong>impresión, clic, favorito, adición al carrito, compra y entrega</strong> en superficies como inicio, búsqueda, categoría, Tienda, favoritos y recomendaciones. El registro puede incluir producto, variante, oferta, posición mostrada, versión del ordenamiento, solicitud de ranking y fecha.</p>
-  <p>Si la persona inició sesión, el evento puede vincularse con su cuenta; en otro caso se utiliza un UUID anónimo guardado en la sesión del navegador. “Anónimo” en este contexto significa que el evento no lleva un usuario autenticado, no que sea necesariamente información anónima e irreversible.</p>
+  <p>Si la persona inició sesión, el evento puede vincularse con su cuenta; en otro caso se utiliza un UUID seudónimo de catálogo guardado en la sesión del navegador y denominado “anonymous” internamente. Sin una cuenta autenticada no queda directamente vinculado a un usuario conectado, pero esto no demuestra anonimato jurídico ni irreversibilidad.</p>
   <p>El ordenamiento actual usa reglas y puntuaciones determinísticas, incluida la comparación en sombra de posiciones. La revisión del código no demuestra que el historial individual genere perfiles con efectos jurídicos ni decisiones significativas sobre una persona. Tampoco justifica llamar “inteligencia artificial” a este ranking.</p>
-  <p>No hay un período de retención automático para estos eventos ni una evaluación de interés legítimo documentada en el repositorio. Antes de producción ECUVEL debe aprobar la base, el plazo, la información al usuario y, si fuese necesario, una opción de oposición o consentimiento.</p>
+  <p>No hay un período de retención automático para estos eventos. ECUVEL decidió no utilizar interés legítimo para la telemetría conductual no esencial: antes de activarla en producción debe mantenerla desactivada por defecto, definir un plazo breve e implementar una elección previa, informada, opcional y revocable.</p>
 </section>
 
 <section id="comunicaciones">
@@ -144,7 +144,7 @@
   <p>La Plataforma utiliza una cookie de sesión protegida para mantener inicio de sesión, estado del carrito de invitado, identificadores temporales, protección CSRF y continuidad de procesos. Si la persona elige mantener la sesión, se utiliza una cookie de recuerdo. La configuración actual aplica acceso restringido desde JavaScript, atributo SameSite y seguridad de transporte en producción.</p>
   <p>El UUID de catálogo y el carrito de invitado se guardan dentro de la sesión. Los contextos firmados de ranking y cursores tienen vencimientos técnicos. La cookie ordinaria de sesión no declara una fecha persistente y normalmente depende de la sesión del navegador. La cookie de recuerdo, cuando el usuario elige esa opción, dura catorce días por configuración predeterminada y admite un máximo configurable de noventa días; la configuración efectiva de producción debe confirmarse en el aviso dedicado de cookies.</p>
   <p>Las páginas generales de marketplace solicitan la fuente Onest a Google Fonts y la biblioteca de iconos Lucide desde unpkg. Esos terceros reciben al menos la solicitud técnica habitual, que puede incluir dirección IP y metadatos del navegador. ECUVEL Docs carga recursos locales y no ejecuta la telemetría de catálogo. Mientras esas dependencias se mantengan antes de beta, deben documentarse su base y tratamiento internacional; el alojamiento local podrá evaluarse como mejora futura de privacidad y rendimiento.</p>
-  <p>No se ha implementado un banner de cookies en esta fase. Una política específica posterior deberá inventariar nombres, duración y necesidad de cada tecnología sin presentar categorías hipotéticas.</p>
+  <p>No se ha implementado un banner ni otro control de preferencias en esta fase. Antes de la publicación final debe existir una elección previa para la telemetría conductual no esencial, sin impedir las funciones necesarias cuando la persona la rechace.</p>
 </section>
 
 <section id="destinatarios-y-encargados">

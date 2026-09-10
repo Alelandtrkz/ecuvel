@@ -27,6 +27,34 @@ LR5_2B_DOCUMENTS = {
     "garantias": "docs/content/compradores/garantias.html",
 }
 
+LR5_2C_DOCUMENTS = {
+    ("ecuvel", "seguridad"): "docs/content/ecuvel/seguridad.html",
+    ("compradores", "reclamos"): "docs/content/compradores/reclamos.html",
+    ("compradores", "productos-restringidos"): (
+        "docs/content/compradores/productos_restringidos.html"
+    ),
+    ("privacidad", "cookies-y-tecnologias-similares"): (
+        "docs/content/privacidad/cookies_y_tecnologias_similares.html"
+    ),
+    ("privacidad", "derechos-del-titular"): (
+        "docs/content/privacidad/derechos_del_titular.html"
+    ),
+    ("privacidad", "comunicaciones-y-marketing"): (
+        "docs/content/privacidad/comunicaciones_y_marketing.html"
+    ),
+    ("plataforma", "uso-aceptable"): "docs/content/plataforma/uso_aceptable.html",
+    ("plataforma", "resenas-y-contenido"): (
+        "docs/content/plataforma/resenas_y_contenido.html"
+    ),
+    ("plataforma", "propiedad-intelectual"): (
+        "docs/content/plataforma/propiedad_intelectual.html"
+    ),
+    ("plataforma", "fraude-y-abuso"): "docs/content/plataforma/fraude_y_abuso.html",
+    ("plataforma", "suspension-de-cuentas"): (
+        "docs/content/plataforma/suspension_de_cuentas.html"
+    ),
+}
+
 
 @pytest.fixture
 def client(app):
@@ -178,6 +206,7 @@ def test_registry_owns_all_template_resolution():
         ("compradores", "terminos-y-condiciones"),
         ("privacidad", "politica-de-privacidad"),
         *(("compradores", slug) for slug in LR5_2B_DOCUMENTS),
+        *LR5_2C_DOCUMENTS,
     }
 
     assert document_by_path("ecuvel", "../config") is None
@@ -399,6 +428,187 @@ def test_lr5_2a_reconciled_privacy_source_is_specific_and_not_universal(app):
     assert "no se aplica de forma general a todos los datos" in source
     assert "períodos más breves definidos por su finalidad" in source
     assert "no una aceptación contractual ni un consentimiento general" in source
+    assert "Consentimiento previo, opcional y revocable" in source
+    assert "no adopta interés legítimo como base para esta finalidad" in source
+    assert "UUID seudónimo de catálogo" in source
+    assert "UUID anónimo de catálogo" not in source
+
+
+def test_lr5_2c_documents_are_complete_non_public_drafts(app, client):
+    for (family, slug), template_name in LR5_2C_DOCUMENTS.items():
+        document = document_by_path(family, slug, published_only=False)
+
+        assert document is not None
+        assert document.status == DocumentStatus.DRAFT
+        assert document.template_name == template_name
+        assert document.requires_acceptance is False
+        assert document.version_identifier is None
+        assert document.published_at is None
+        assert document.effective_at is None
+        assert document.historical_versions == ()
+        assert document.sections
+        assert tuple(section.anchor for section in document.sections) == tuple(
+            dict.fromkeys(section.anchor for section in document.sections)
+        )
+        assert document_by_path(family, slug) is None
+        assert client.get(f"/docs/{family}/{slug}").status_code == 404
+
+        with app.app_context():
+            source, _filename, _uptodate = app.jinja_env.loader.get_source(
+                app.jinja_env, template_name
+            )
+        assert "Borrador para revisión; no vigente" in source
+        for section in document.sections:
+            assert f'id="{section.anchor}"' in source
+
+
+def test_lr5_2c_cookie_policy_matches_real_mechanisms_and_approved_choice(app):
+    with app.app_context():
+        source, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2C_DOCUMENTS[("privacidad", "cookies-y-tecnologias-similares")],
+        )
+
+    assert "Cookie de sesión de ECUVEL" in source
+    assert "Cookie de recuerdo" in source
+    assert "UUID de catálogo" in source
+    assert "valores firmados" in source
+    assert "no cookies independientes" in source
+    assert "telemetría" in source
+    assert "desactivada por defecto" in source
+    assert "aceptar o rechazar" in source
+    assert "No existe actualmente ese control" in source
+    assert "banner" in source
+    assert "Esto no significa por sí solo que instalen una cookie de ECUVEL" in source
+
+
+def test_lr5_2c_privacy_rights_and_marketing_are_separate_and_accurate(app):
+    with app.app_context():
+        rights, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2C_DOCUMENTS[("privacidad", "derechos-del-titular")],
+        )
+        marketing, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2C_DOCUMENTS[("privacidad", "comunicaciones-y-marketing")],
+        )
+
+    assert "canal principal habilitado" in rights
+    assert "ecuvel.privacidad@hotmail.com" in rights
+    assert "canal exclusivo" not in rights
+    for right in (
+        "información",
+        "acceso",
+        "rectificación",
+        "eliminación",
+        "oposición",
+        "suspensión",
+        "portabilidad",
+        "decisiones automatizadas",
+    ):
+        assert right in rights
+    assert "quince días" in rights
+    assert "Cerrar o eliminar una cuenta no significa borrar inmediatamente" in rights
+    assert "hasta por siete años el subconjunto necesario" in rights
+
+    assert "no tiene confirmadas campañas ni una captura activa" in marketing
+    assert "Comunicaciones necesarias" in marketing
+    assert "Marketing" in marketing
+    assert "no autoriza ese uso" in marketing
+    assert "no preseleccionada" in marketing
+    assert "No existe segmentación de marketing activa" in marketing
+
+
+def test_lr5_2c_claims_and_restricted_products_keep_approved_boundaries(app):
+    with app.app_context():
+        claims, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2C_DOCUMENTS[("compradores", "reclamos")]
+        )
+        restricted, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2C_DOCUMENTS[("compradores", "productos-restringidos")],
+        )
+
+    assert "ecuvel.reclamos@hotmail.com" in claims
+    assert "no queda obligado a gestionar solo con la Tienda" in claims
+    assert "no es una instancia administrativa ni judicial obligatoria" in claims
+    assert "Ayuda general y asistencia sobre factura" in claims
+    assert "Derechos y asuntos de datos personales" in claims
+
+    for classification in (
+        "Prohibido:",
+        "No soportado actualmente:",
+        "Soporte regulado o condicional futuro:",
+        "Mercancía general ordinaria:",
+    ):
+        assert classification in restricted
+    assert "política comercial de lanzamiento de ECUVEL" in restricted
+    assert "no significa que todas esas categorías sean intrínsecamente ilegales" in restricted
+    assert "Los cosméticos forman parte del catálogo previsto" in restricted
+    assert "no opera actualmente categorías para adultos" in restricted
+    assert "flujo de verificación correspondiente" in restricted
+
+
+def test_lr5_2c_review_ip_fraud_and_suspension_match_product_truth(app):
+    with app.app_context():
+        reviews, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2C_DOCUMENTS[("plataforma", "resenas-y-contenido")],
+        )
+        intellectual_property, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2C_DOCUMENTS[("plataforma", "propiedad-intelectual")],
+        )
+        fraud, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env, LR5_2C_DOCUMENTS[("plataforma", "fraude-y-abuso")]
+        )
+        suspension, _filename, _uptodate = app.jinja_env.loader.get_source(
+            app.jinja_env,
+            LR5_2C_DOCUMENTS[("plataforma", "suspension-de-cuentas")],
+        )
+
+    assert "reglas determinísticas" in reviews
+    assert "no son inteligencia artificial" in reviews
+    assert "corrección/reenvío real" not in reviews
+    assert "corrija y vuelva a enviarla" in reviews
+    assert "función distinta y no modifica las estrellas" in reviews
+    assert "no transfiere la propiedad" in reviews
+
+    assert "no transfiere su propiedad a la plataforma" in intellectual_property
+    assert "no es un procedimiento DMCA" in intellectual_property
+    assert "ecuvel.help@hotmail.com" in intellectual_property
+
+    assert "no revela umbrales" in fraud
+    assert "una señal técnica no implica por sí sola culpabilidad" in fraud
+    assert "ACTIVE" in suspension
+    assert "BLOCKED" in suspension
+    assert "SUSPENDED" in suspension
+    assert "no extingue Pedidos ya pagados" in suspension
+    assert "reembolsos, garantías, reclamos" in suspension
+    assert "derechos de privacidad" in suspension
+
+
+def test_lr5_2c_does_not_activate_seller_docs_or_change_acceptance_model():
+    terms = document_by_path(
+        "compradores", "terminos-y-condiciones", published_only=False
+    )
+    privacy = document_by_path(
+        "privacidad", "politica-de-privacidad", published_only=False
+    )
+
+    assert terms is not None and terms.requires_acceptance is True
+    assert privacy is not None and privacy.requires_acceptance is False
+    for slug in (
+        "como-vender",
+        "politicas",
+        "productos-permitidos-y-prohibidos",
+        "contrato",
+    ):
+        seller_document = document_by_path("vendedores", slug, published_only=False)
+        assert seller_document is not None
+        assert seller_document.status == DocumentStatus.DRAFT
+        assert seller_document.template_name is None
+        assert seller_document.historical_versions == ()
 
 
 def test_docs_requests_do_not_mutate_database(app, client):
