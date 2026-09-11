@@ -7,11 +7,16 @@ from sqlalchemy import event
 
 from app.extensions import db
 from app.services.legal_documents import (
+    DocumentDefinition,
     DocumentStatus,
+    FamilyDefinition,
+    HistoricalVersion,
     OPERATOR_INFORMATION,
     all_families,
     document_by_path,
+    published_legal_history,
 )
+import app.services.legal_documents as legal_documents_service
 
 
 pytestmark = pytest.mark.integration
@@ -191,6 +196,51 @@ def test_version_archive_has_accurate_empty_state(client):
     assert "privacy-2026" not in body
     assert '<meta name="robots" content="noindex,follow">' in body
     assert client.get("/docs/legal/versiones/terms/fake-version").status_code == 404
+
+
+def test_draft_documents_excludes_superseded_documents():
+    documents = tuple(
+        DocumentDefinition(
+            family="test",
+            slug=status.value.lower(),
+            title=status.value,
+            description=status.value,
+            status=status,
+            navigation_order=index,
+        )
+        for index, status in enumerate(DocumentStatus)
+    )
+    family = FamilyDefinition("test", "Test", "Test", 1, documents)
+
+    assert [document.status for document in family.draft_documents] == [
+        DocumentStatus.DRAFT
+    ]
+
+
+def test_static_published_history_does_not_depend_on_current_document_status(
+    monkeypatch,
+):
+    historical = HistoricalVersion(
+        version_identifier="terms-2026-09-20-v1",
+        published_at="2026-09-20",
+        effective_at="2026-09-20",
+    )
+    superseded = DocumentDefinition(
+        family="compradores",
+        slug="terminos-y-condiciones",
+        title="Terms",
+        description="Terms",
+        status=DocumentStatus.SUPERSEDED,
+        navigation_order=1,
+        historical_versions=(historical,),
+    )
+    monkeypatch.setattr(
+        legal_documents_service,
+        "FAMILIES",
+        (FamilyDefinition("compradores", "Compradores", "", 1, (superseded,)),),
+    )
+
+    assert published_legal_history() == ((superseded, historical),)
 
 
 def test_contact_channels_remain_distinct(client):

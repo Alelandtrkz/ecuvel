@@ -71,6 +71,7 @@ from app.models.admin_user import (
     StaffProfile,
     UserMarketingConsent,
 )
+from app.models.legal import LegalDocumentVersion, UserLegalAcceptance
 from app.models.warehouse import Warehouse, WarehouseLocation
 
 
@@ -83,6 +84,8 @@ __all__ = [
     "StaffAccessInvitation",
     "UserMarketingConsent",
     "AdminAuditEvent",
+    "LegalDocumentVersion",
+    "UserLegalAcceptance",
     "Store",
     "StoreMember",
     "StoreProductCounter",

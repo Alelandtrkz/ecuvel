@@ -25,6 +25,24 @@ class MarketingConsentStatus(StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class LegalAcceptanceMode(StrEnum):
+    NONE = "NONE"
+    ACCEPTED = "ACCEPTED"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+
+
+class LegalAcceptanceAction(StrEnum):
+    ACCEPTED = "ACCEPTED"
+    ACKNOWLEDGED = "ACKNOWLEDGED"
+
+
+class LegalAcceptanceSource(StrEnum):
+    REGISTER = "REGISTER"
+    CHECKOUT = "CHECKOUT"
+    ACCOUNT_RECONSENT = "ACCOUNT_RECONSENT"
+    PRIVACY_NOTICE = "PRIVACY_NOTICE"
+
+
 class StaffIdentificationType(StrEnum):
     ECUADOR_CEDULA = "ECUADOR_CEDULA"
     PASSPORT = "PASSPORT"

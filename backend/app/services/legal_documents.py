@@ -60,7 +60,11 @@ class FamilyDefinition:
 
     @property
     def draft_documents(self) -> tuple[DocumentDefinition, ...]:
-        return tuple(document for document in self.documents if not document.is_published)
+        return tuple(
+            document
+            for document in self.documents
+            if document.status == DocumentStatus.DRAFT
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -812,5 +816,4 @@ def published_legal_history() -> tuple[tuple[DocumentDefinition, HistoricalVersi
         for family in FAMILIES
         for document in family.documents
         for version in document.historical_versions
-        if document.is_published
     )
