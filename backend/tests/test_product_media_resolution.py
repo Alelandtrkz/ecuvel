@@ -624,4 +624,6 @@ def test_home_media_query_and_total_query_count_are_constant(
     assert ten_card_queries == one_card_queries
     assert ten_card_queries <= 8
     assert authenticated_media_queries == 1
-    assert authenticated_queries == ten_card_queries + 4 == 12
+    # Authentication adds its fixed account lookups plus one bounded privacy-
+    # preference lookup; neither varies with the number of product cards.
+    assert authenticated_queries == ten_card_queries + 5 == 13

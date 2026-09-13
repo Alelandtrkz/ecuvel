@@ -72,6 +72,7 @@ from app.models.admin_user import (
     UserMarketingConsent,
 )
 from app.models.legal import LegalDocumentVersion, UserLegalAcceptance
+from app.models.privacy_preference import UserPrivacyPreferenceEvent
 from app.models.warehouse import Warehouse, WarehouseLocation
 
 
@@ -86,6 +87,7 @@ __all__ = [
     "AdminAuditEvent",
     "LegalDocumentVersion",
     "UserLegalAcceptance",
+    "UserPrivacyPreferenceEvent",
     "Store",
     "StoreMember",
     "StoreProductCounter",

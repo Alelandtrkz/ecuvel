@@ -1,0 +1,51 @@
+.privacy-preferences,
+.legal-unavailable {
+  max-width: 880px;
+  padding-block: 3rem 4rem;
+}
+
+.privacy-preferences__eyebrow {
+  color: var(--color-primary, #2457d6);
+  font-weight: 700;
+}
+
+.privacy-preferences__card {
+  align-items: flex-start;
+  border: 1px solid var(--color-border, #d9dee8);
+  border-radius: 1rem;
+  display: flex;
+  gap: 1.5rem;
+  justify-content: space-between;
+  margin-top: 1.25rem;
+  padding: 1.5rem;
+}
+
+.privacy-preferences__state {
+  white-space: nowrap;
+}
+
+.privacy-preferences__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.privacy-preferences__choice {
+  min-width: 11rem;
+}
+
+.privacy-preferences__note {
+  flex-basis: 100%;
+  margin-bottom: 0;
+}
+
+@media (max-width: 720px) {
+  .privacy-preferences__card {
+    display: block;
+  }
+
+  .privacy-preferences__actions {
+    margin-top: 1rem;
+  }
+}

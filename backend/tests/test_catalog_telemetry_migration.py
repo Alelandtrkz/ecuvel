@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "da1b2c3d4e5f"
 H4_HEAD = "6499defb2c52"
-CURRENT_HEAD = "9e5f7a8b0c1d"
+CURRENT_HEAD = "a9b0c1d2e3f4"
 TABLE = "catalog_interaction_events"
 
 

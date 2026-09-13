@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Preferencias de privacidad | Ecuvel{% endblock %}
+{% block styles %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/privacy-preferences.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="privacy-preferences content-container">
+  <header>
+    <p class="privacy-preferences__eyebrow">Privacidad y datos</p>
+    <h1>Preferencias de privacidad</h1>
+    <p>Elige si ECUVEL puede registrar interacciones opcionales con el catálogo. Esta elección no afecta tu acceso, tu cuenta ni tus compras.</p>
+  </header>
+
+  <section class="privacy-preferences__card" aria-labelledby="essential-title">
+    <div>
+      <h2 id="essential-title">Funcionalidad esencial</h2>
+      <p>Siempre activa cuando es necesaria para seguridad, sesión, cuenta, carrito, checkout, pagos y operación del servicio.</p>
+    </div>
+    <strong class="privacy-preferences__state">Activa</strong>
+  </section>
+
+  <section class="privacy-preferences__card" aria-labelledby="telemetry-title">
+    <div>
+      <h2 id="telemetry-title">Telemetría conductual del catálogo</h2>
+      <p>Es opcional y ayuda a entender interacciones con productos para evaluar la presentación y el ranking. No incluye autorización de marketing.</p>
+      <p>Estado actual: <strong>{{ preference_state.decision.value if preference_state.decision else 'SIN ELECCIÓN' }}</strong>{% if preference_state.decision and not preference_state.telemetry_allowed and preference_state.decision.value == 'GRANTED' %} (requiere renovación){% endif %}</p>
+      {% if preference_state.current_notice %}
+        <p><a href="{{ url_for('docs.article', family_slug='privacidad', document_slug='cookies-y-tecnologias-similares') }}">Consulta el aviso de Cookies y tecnologías similares</a> ({{ preference_state.current_notice.version.version_identifier }}).</p>
+      {% else %}
+        <p>La telemetría opcional está desactivada. Podrá habilitarse cuando el aviso aplicable sea publicado oficialmente.</p>
+      {% endif %}
+    </div>
+
+    <div class="privacy-preferences__actions" aria-label="Cambiar telemetría opcional">
+      <form method="post" action="{{ url_for('privacy.update_preferences') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="decision" value="REJECTED">
+        <input type="hidden" name="return_to" value="{{ url_for('privacy.preferences') }}">
+        {% if preference_state.current_notice %}<input type="hidden" name="notice_version_presented" value="{{ preference_state.current_notice.version.version_identifier }}">{% endif %}
+        <button class="button privacy-preferences__choice" type="submit">Rechazar opcionales</button>
+      </form>
+      <form method="post" action="{{ url_for('privacy.update_preferences') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="decision" value="GRANTED">
+        <input type="hidden" name="return_to" value="{{ url_for('privacy.preferences') }}">
+        {% if preference_state.current_notice %}<input type="hidden" name="notice_version_presented" value="{{ preference_state.current_notice.version.version_identifier }}">{% endif %}
+        <button class="button privacy-preferences__choice" type="submit"{% if not preference_state.current_notice %} disabled aria-disabled="true"{% endif %}>Aceptar telemetría</button>
+      </form>
+    </div>
+    <p class="privacy-preferences__note">Puedes cambiar esta preferencia más adelante. Rechazar o retirar la autorización detiene eventos futuros y no elimina automáticamente registros históricos.</p>
+  </section>
+</div>
+{% endblock %}

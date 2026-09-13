@@ -12,18 +12,19 @@
       <section>
         <h2>Compra con confianza</h2>
         <ul>
-          <li><span>Ayuda</span></li>
-          <li><span>Guía para compradores</span></li>
-          <li><span>Punto de entrega</span></li>
-          <li><span>Contáctanos</span></li>
+          <li><a href="{{ url_for('docs.family', family_slug='compradores') }}">Compradores</a></li>
+          <li><a href="{{ url_for('docs.article', family_slug='ecuvel', document_slug='como-funciona') }}">Cómo funciona</a></li>
+          <li><a href="{{ url_for('docs.article', family_slug='ecuvel', document_slug='contacto') }}">Contacto</a></li>
+          <li><a href="{{ url_for('privacy.preferences') }}">Preferencias de privacidad</a></li>
         </ul>
       </section>
       <section>
         <h2>Conoce Ecuvel</h2>
         <ul>
-          <li><span>Sobre nosotros</span></li>
-          <li><span>Cómo funciona</span></li>
-          <li><span>Vender en Ecuvel</span></li>
+          <li><a href="{{ url_for('docs.home') }}">ECUVEL Docs</a></li>
+          <li><a href="{{ url_for('docs.family', family_slug='privacidad') }}">Privacidad y datos</a></li>
+          <li><a href="{{ url_for('docs.family', family_slug='vendedores') }}">Vendedores</a></li>
+          <li><a href="{{ url_for('docs.article', family_slug='legal', document_slug='operador') }}">Datos del operador</a></li>
         </ul>
       </section>
     </nav>

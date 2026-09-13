@@ -73,8 +73,34 @@
     </div>
 
     <aside class="checkout-summary" aria-labelledby="checkout-summary-title">
+      {% if legal_context %}
+        {% if legal_context.terms_missing or legal_context.privacy_missing %}
+        <fieldset class="checkout-legal">
+          <legend>Documentación vigente</legend>
+          {% if legal_context.terms_missing %}
+          <input type="hidden" name="terms_version_presented" value="{{ legal_context.terms.version.version_identifier }}">
+          <label for="checkout-terms-accepted">
+            <input id="checkout-terms-accepted" name="terms_accepted" type="checkbox" value="1" required>
+            <span>Acepto los <a href="{{ url_for('docs.article', family_slug='compradores', document_slug='terminos-y-condiciones') }}">Términos y Condiciones vigentes de ECUVEL</a>.</span>
+          </label>
+          <small>Versión {{ legal_context.terms.version.version_identifier }}</small>
+          {% endif %}
+          {% if legal_context.privacy_missing %}
+          <input type="hidden" name="privacy_version_presented" value="{{ legal_context.privacy.version.version_identifier }}">
+          <label for="checkout-privacy-acknowledged">
+            <input id="checkout-privacy-acknowledged" name="privacy_acknowledged" type="checkbox" value="1" required>
+            <span>Confirmo que he sido informado sobre la <a href="{{ url_for('docs.article', family_slug='privacidad', document_slug='politica-de-privacidad') }}">Política de Privacidad vigente</a>.</span>
+          </label>
+          <small>Versión {{ legal_context.privacy.version.version_identifier }}. Esta confirmación acredita la entrega del aviso; no es consentimiento de marketing.</small>
+          {% endif %}
+        </fieldset>
+        {% else %}
+        <p class="checkout-terms">Tus requisitos legales vigentes ya están registrados.</p>
+        {% endif %}
+      {% else %}
+      <p class="checkout-terms">La documentación legal vinculante se habilitará con su publicación oficial. Este checkout de preproducción no registra aceptación legal.</p>
+      {% endif %}
       <button class="button button--primary checkout-submit" type="submit" data-checkout-submit{% if not preview.can_submit or not pickup_is_free %} disabled{% endif %}>Generar pedido</button>
-      <p class="checkout-terms">Al continuar, usted acepta las condiciones de venta y el tratamiento de datos aplicable. Documentos legales definitivos próximamente.</p>
       <div class="checkout-summary__body">
         <div><h2 id="checkout-summary-title">Su pedido</h2><span>{{ preview.total_units }} producto{{ '' if preview.total_units == 1 else 's' }}</span></div>
         <dl>

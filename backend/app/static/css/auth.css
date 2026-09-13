@@ -75,6 +75,37 @@
   font: inherit;
 }
 
+.auth-form__legal {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.5rem 0;
+  padding: 1rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+}
+
+.auth-form__legal legend {
+  padding-inline: 0.25rem;
+  font-weight: 700;
+}
+
+.auth-form .auth-form__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.auth-form .auth-form__check input {
+  width: auto;
+  min-height: auto;
+  margin-top: 0.25rem;
+}
+
+.auth-form__legal small {
+  color: #5d6d7e;
+  line-height: 1.45;
+}
+
 .password-field {
   display: grid;
   grid-template-columns: 1fr auto;

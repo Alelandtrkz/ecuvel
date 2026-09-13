@@ -20,6 +20,25 @@
   <label for="register-password-confirmation">Vuelva a escribir la contraseña</label>
   <input id="register-password-confirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="{{ config.AUTH_PASSWORD_MIN_LENGTH }}" maxlength="128" required>
 
+  {% if terms_publication and privacy_publication %}
+  <fieldset class="auth-form__legal">
+    <legend>Documentación vigente</legend>
+    <input type="hidden" name="terms_version_presented" value="{{ terms_publication.version.version_identifier }}">
+    <label class="auth-form__check" for="register-terms">
+      <input id="register-terms" name="terms_accepted" type="checkbox" value="1" required>
+      <span>He leído y acepto los <a href="{{ url_for('docs.article', family_slug='compradores', document_slug='terminos-y-condiciones') }}">Términos y Condiciones de ECUVEL</a>.</span>
+    </label>
+    <small>Versión {{ terms_publication.version.version_identifier }}</small>
+
+    <input type="hidden" name="privacy_version_presented" value="{{ privacy_publication.version.version_identifier }}">
+    <label class="auth-form__check" for="register-privacy">
+      <input id="register-privacy" name="privacy_acknowledged" type="checkbox" value="1" required>
+      <span>Confirmo que he sido informado sobre la <a href="{{ url_for('docs.article', family_slug='privacidad', document_slug='politica-de-privacidad') }}">Política de Privacidad de ECUVEL</a>.</span>
+    </label>
+    <small>Versión {{ privacy_publication.version.version_identifier }}. Esta confirmación acredita la entrega del aviso de privacidad; no autoriza marketing ni constituye consentimiento general para tratamientos que requieran otra base.</small>
+  </fieldset>
+  {% endif %}
+
   <button class="button button--primary auth-submit" type="submit">Verificar correo electrónico</button>
 </form>
 {% if config.PHONE_OTP_ENABLED %}

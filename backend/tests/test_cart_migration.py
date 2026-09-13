@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "6499defb2c52"
 C1_HEAD = "7c1a9e4d2b6f"
-CURRENT_HEAD = "9e5f7a8b0c1d"
+CURRENT_HEAD = "a9b0c1d2e3f4"
 TABLES = {"carts", "cart_items", "cart_adoptions"}
 
 

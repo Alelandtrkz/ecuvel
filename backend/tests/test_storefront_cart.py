@@ -767,7 +767,9 @@ def test_cart_get_query_counts_are_constant_for_guest_and_authenticated(
         auth_counts.append(measure(auth_client))
 
     assert guest_counts == [8, 11, 11, 11]
-    assert auth_counts == [13, 17, 17, 17]
+    # One bounded account-preference lookup is added per authenticated request;
+    # it remains constant as cart cardinality grows.
+    assert auth_counts == [14, 18, 18, 18]
 
 
 def test_buy_now_preserves_cart_contents_selection_and_uses_quantity(

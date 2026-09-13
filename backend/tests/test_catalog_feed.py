@@ -242,7 +242,9 @@ def test_mobile_navigation_hero_and_accessibility_contract(client, session):
     assert "observedCards" in telemetry_js
 
 
-def test_batch_two_card_keeps_exact_cart_offer_and_telemetry(client, session):
+def test_batch_two_card_keeps_exact_cart_offer_without_default_telemetry(
+    client, session
+):
     _feed_fixture(session, count=25)
     first_html = client.get("/").get_data(as_text=True)
     response = _next(client, _attribute(first_html, "data-feed-cursor"))
@@ -269,5 +271,4 @@ def test_batch_two_card_keeps_exact_cart_offer_and_telemetry(client, session):
             CatalogInteractionEvent.event_type == "ADD_TO_CART"
         )
     )
-    assert event is not None
-    assert str(event.offer_id) == offer_id
+    assert event is None

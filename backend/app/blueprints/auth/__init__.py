@@ -17,7 +17,12 @@ from flask_wtf.csrf import CSRFError
 
 from app.extensions import db, limiter
 from app.models import PhoneOtpChallenge
-from app.models.enums import PhoneOtpPurpose, UserAccountTokenPurpose
+from app.models.enums import (
+    LegalAcceptanceAction,
+    LegalAcceptanceSource,
+    PhoneOtpPurpose,
+    UserAccountTokenPurpose,
+)
 from app.services.account_tokens import create_account_token
 from app.services.authentication import (
     AuthenticationError,
@@ -54,6 +59,20 @@ from app.services.cart_storage import (
 )
 from app.services.admin_users import AdminUserError, accept_staff_invitation
 from app.services.safe_redirects import safe_local_redirect
+from app.services.privacy_preferences import (
+    PRIVACY_PREFERENCE_SESSION_KEY,
+    reconcile_browser_preference_after_account_login,
+)
+from app.services.legal_product import (
+    LegalPublicationConsistencyError,
+    PRIVACY_KEY,
+    TERMS_KEY,
+    resolve_required_legal_publications,
+)
+from app.services.legal_versioning import (
+    LegalVersioningError,
+    record_user_legal_evidence,
+)
 
 
 auth = Blueprint("auth", __name__)
@@ -66,6 +85,66 @@ PHONE_REGISTRATION_CHALLENGE_SESSION_KEY = "phone_registration_challenge_id"
 CSRF_RECOVERY_MESSAGE = (
     "Tu formulario venció por seguridad. Inténtalo nuevamente."
 )
+
+
+class RegistrationLegalRequirementError(ValueError):
+    pass
+
+
+def _registration_legal_publications(database_session):
+    if not current_app.config["LEGAL_ENFORCEMENT_ENABLED"]:
+        return None
+    return resolve_required_legal_publications(database_session)
+
+
+def _render_registration_form(
+    *,
+    next_url: str,
+    form: dict[str, str],
+    status: int = 200,
+):
+    try:
+        publications = _registration_legal_publications(db.session)
+    except LegalPublicationConsistencyError:
+        current_app.logger.warning(
+            "Registration legal publication is unavailable",
+            exc_info=True,
+        )
+        return render_template("legal/unavailable.html"), 503
+    return render_template(
+        "auth/register.html",
+        next_url=next_url,
+        form=form,
+        terms_publication=(
+            publications[TERMS_KEY] if publications is not None else None
+        ),
+        privacy_publication=(
+            publications[PRIVACY_KEY] if publications is not None else None
+        ),
+    ), status
+
+
+def _validate_registration_legal_form(publications) -> None:
+    if publications is None:
+        return
+    terms = publications[TERMS_KEY].version
+    privacy = publications[PRIVACY_KEY].version
+    if request.form.get("terms_version_presented") != terms.version_identifier:
+        raise RegistrationLegalRequirementError(
+            "Los Términos vigentes cambiaron. Revísalos y vuelve a aceptarlos."
+        )
+    if request.form.get("privacy_version_presented") != privacy.version_identifier:
+        raise RegistrationLegalRequirementError(
+            "La Política de Privacidad vigente cambió. Revísala nuevamente."
+        )
+    if request.form.get("terms_accepted") != "1":
+        raise RegistrationLegalRequirementError(
+            "Debes aceptar expresamente los Términos y Condiciones vigentes."
+        )
+    if request.form.get("privacy_acknowledged") != "1":
+        raise RegistrationLegalRequirementError(
+            "Debes confirmar que recibiste la Política de Privacidad vigente."
+        )
 
 
 def _auth_recovery_url() -> str | None:
@@ -148,12 +227,29 @@ def _login_user_preserving_session(user, *, remember: bool = False) -> None:
     preserved = {
         CART_SESSION_KEY: flask_session.get(CART_SESSION_KEY),
         "checkout_order_ids": flask_session.get("checkout_order_ids"),
+        PRIVACY_PREFERENCE_SESSION_KEY: flask_session.get(
+            PRIVACY_PREFERENCE_SESSION_KEY
+        ),
     }
     flask_session.clear()
     for key, value in preserved.items():
         if value is not None:
             flask_session[key] = value
     login_user(user, remember=remember)
+    try:
+        reconcile_browser_preference_after_account_login(
+            db.session,
+            flask_session,
+            user_id=user.id,
+        )
+    except Exception:
+        flask_session.pop(PRIVACY_PREFERENCE_SESSION_KEY, None)
+        current_app.logger.warning(
+            "Account privacy preference reconciliation failed",
+            exc_info=True,
+        )
+    finally:
+        db.session.rollback()
     adopt_guest_cart_for_authenticated_user()
 
 
@@ -247,8 +343,7 @@ def _phone_otp_disabled_redirect():
 def register_form():
     if current_user.is_authenticated:
         return redirect(url_for("account.profile"))
-    return render_template(
-        "auth/register.html",
+    return _render_registration_form(
         next_url=safe_local_redirect(
             request.args.get("next"),
             fallback=url_for("storefront.home"),
@@ -273,6 +368,8 @@ def register():
         db.session.remove()
         database_session = db.session()
         with database_session.begin():
+            publications = _registration_legal_publications(database_session)
+            _validate_registration_legal_form(publications)
             result = register_customer(
                 session=database_session,
                 email=submitted_email,
@@ -288,6 +385,25 @@ def register():
                     "EMAIL_VERIFICATION_TOKEN_TTL_MINUTES"
                 ],
             )
+            if publications is not None:
+                record_user_legal_evidence(
+                    database_session,
+                    user_id=result.user.id,
+                    legal_document_version_id=publications[TERMS_KEY].version.id,
+                    action=LegalAcceptanceAction.ACCEPTED,
+                    source=LegalAcceptanceSource.REGISTER,
+                    ip_address=request.remote_addr,
+                    user_agent=request.user_agent.string,
+                )
+                record_user_legal_evidence(
+                    database_session,
+                    user_id=result.user.id,
+                    legal_document_version_id=publications[PRIVACY_KEY].version.id,
+                    action=LegalAcceptanceAction.ACKNOWLEDGED,
+                    source=LegalAcceptanceSource.REGISTER,
+                    ip_address=request.remote_addr,
+                    user_agent=request.user_agent.string,
+                )
             _claim_orders_for_user(result.user.id, database_session)
         _login_user_preserving_session(result.user)
         try:
@@ -313,13 +429,22 @@ def register():
                 url_for("auth.verification_pending", next=next_url)
             )
         return redirect(next_url)
-    except AuthenticationError as exc:
+    except RegistrationLegalRequirementError as exc:
         flash(str(exc), "error")
-        return render_template(
-            "auth/register.html",
+        return _render_registration_form(
             next_url=next_url,
             form=form,
-        ), 400
+            status=400,
+        )
+    except (LegalPublicationConsistencyError, LegalVersioningError):
+        return render_template("legal/unavailable.html"), 503
+    except AuthenticationError as exc:
+        flash(str(exc), "error")
+        return _render_registration_form(
+            next_url=next_url,
+            form=form,
+            status=400,
+        )
 
 
 @auth.get("/iniciar-sesion")
@@ -468,8 +593,10 @@ def verify_email(token: str):
         fallback=url_for("account.profile"),
     )
     try:
-        with db.session.begin():
-            user = verify_customer_email(session=db.session, token=token)
+        db.session.remove()
+        database_session = db.session()
+        with database_session.begin():
+            user = verify_customer_email(session=database_session, token=token)
         _login_user_preserving_session(user)
         flash("Correo verificado. Tu cuenta está activa.", "success")
         return redirect(next_url)

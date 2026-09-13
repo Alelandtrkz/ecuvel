@@ -16,7 +16,7 @@ pytestmark = pytest.mark.integration
 
 PREVIOUS_HEAD = "c9d0e1f2a3b4"
 H3_HEAD = "da1b2c3d4e5f"
-CURRENT_HEAD = "9e5f7a8b0c1d"
+CURRENT_HEAD = "a9b0c1d2e3f4"
 COLUMN = "preparation_time_days"
 
 

@@ -101,11 +101,48 @@ def test_phone_otp_default_is_disabled_in_pre_beta():
 def test_disabled_production_configuration_needs_no_provider_or_pepper():
     validate_phone_otp_configuration(
         enabled=False,
+        legal_enforcement=False,
         backend="console",
         production=True,
         testing=False,
         pepper="",
     )
+
+
+@pytest.mark.parametrize(
+    ("phone_enabled", "legal_enforcement"),
+    ((False, False), (False, True), (True, False)),
+)
+def test_phone_otp_and_legal_enforcement_allowed_combinations(
+    phone_enabled,
+    legal_enforcement,
+):
+    validate_phone_otp_configuration(
+        enabled=phone_enabled,
+        legal_enforcement=legal_enforcement,
+        backend="fake",
+        production=False,
+        testing=True,
+        pepper="test-pepper",
+    )
+
+
+def test_phone_otp_and_legal_enforcement_cannot_both_be_enabled():
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "PHONE_OTP_ENABLED=true no puede combinarse con "
+            "LEGAL_ENFORCEMENT_ENABLED=true"
+        ),
+    ):
+        validate_phone_otp_configuration(
+            enabled=True,
+            legal_enforcement=True,
+            backend="fake",
+            production=False,
+            testing=True,
+            pepper="test-pepper",
+        )
 
 
 @pytest.mark.parametrize("backend", ("console", "fake"))
@@ -115,6 +152,7 @@ def test_enabled_production_configuration_rejects_nonproduction_backends(
     with pytest.raises(RuntimeError, match="no está permitido en producción"):
         validate_phone_otp_configuration(
             enabled=True,
+            legal_enforcement=False,
             backend=backend,
             production=True,
             testing=False,
@@ -125,6 +163,7 @@ def test_enabled_production_configuration_rejects_nonproduction_backends(
 def test_testing_can_explicitly_enable_fake_backend():
     validate_phone_otp_configuration(
         enabled=True,
+        legal_enforcement=False,
         backend="fake",
         production=False,
         testing=True,

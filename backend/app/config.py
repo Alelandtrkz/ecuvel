@@ -69,11 +69,18 @@ def _environment_choice(name: str, default: str, choices: set[str]) -> str:
 def validate_phone_otp_configuration(
     *,
     enabled: bool,
+    legal_enforcement: bool,
     backend: str,
     production: bool,
     testing: bool,
     pepper: str,
 ) -> None:
+    if enabled and legal_enforcement:
+        raise RuntimeError(
+            "PHONE_OTP_ENABLED=true no puede combinarse con "
+            "LEGAL_ENFORCEMENT_ENABLED=true hasta integrar el flujo legal "
+            "del registro de clientes por teléfono."
+        )
     if not enabled:
         return
     if production and backend in {"console", "fake"}:
@@ -194,6 +201,9 @@ class Config:
     CATALOG_FEED_CURSOR_TTL_SECONDS = _environment_int_range(
         "CATALOG_FEED_CURSOR_TTL_SECONDS", 3600, 300, 86400
     )
+    LEGAL_ENFORCEMENT_ENABLED = _environment_bool(
+        "LEGAL_ENFORCEMENT_ENABLED", False
+    )
 
     # Secretos bancarios lazy: la aplicación puede iniciar sin ellos, pero toda
     # operación de cifrado/descifrado falla cerrada hasta configurarlos.
@@ -296,6 +306,7 @@ class Config:
     )
     validate_phone_otp_configuration(
         enabled=PHONE_OTP_ENABLED,
+        legal_enforcement=LEGAL_ENFORCEMENT_ENABLED,
         backend=PHONE_OTP_BACKEND,
         production=ECUVEL_PRODUCTION,
         testing=TESTING,

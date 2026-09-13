@@ -47,6 +47,8 @@ from app.models import (
     User,
 )
 from app.models.enums import (
+    LegalAcceptanceAction,
+    LegalAcceptanceSource,
     OfferStatus,
     PaymentMethod,
     PaymentStatus,
@@ -121,6 +123,21 @@ from app.services.catalog_telemetry import (
     load_ranking_context,
     record_context_event_best_effort,
     sign_ranking_context,
+)
+from app.services.privacy_preferences import (
+    is_optional_catalog_telemetry_allowed,
+    resolve_privacy_preference_state,
+)
+from app.services.legal_product import (
+    LegalPublicationConsistencyError,
+    PRIVACY_KEY,
+    TERMS_KEY,
+    resolve_required_legal_publications,
+)
+from app.services.legal_versioning import (
+    LegalVersioningError,
+    missing_user_legal_requirements,
+    record_user_legal_evidence,
 )
 from app.services.delivery_eta import (
     delivery_eta_compact_label,
@@ -214,6 +231,128 @@ CHECKOUT_ORDERS_SESSION_KEY = "checkout_order_ids"
 COMPLETED_CHECKOUTS_SESSION_KEY = "completed_checkouts"
 MAX_SESSION_CHECKOUT_ORDERS = 10
 PAYMENT_PROOF_UPLOADS_SESSION_KEY = "payment_proof_uploads"
+
+
+class CheckoutLegalRequirementError(ValueError):
+    pass
+
+
+def _checkout_legal_context(database_session, user_id: uuid.UUID):
+    if not current_app.config["LEGAL_ENFORCEMENT_ENABLED"]:
+        return None
+    instant = datetime.now(timezone.utc)
+    publications = resolve_required_legal_publications(
+        database_session, instant
+    )
+    missing = {
+        (version.family, version.slug)
+        for version in missing_user_legal_requirements(
+            database_session,
+            user_id,
+            instant,
+        )
+    }
+    return {
+        "terms": publications[TERMS_KEY],
+        "privacy": publications[PRIVACY_KEY],
+        "terms_missing": TERMS_KEY in missing,
+        "privacy_missing": PRIVACY_KEY in missing,
+    }
+
+
+def _validate_checkout_legal_form(legal_context) -> None:
+    if legal_context is None:
+        return
+    if legal_context["terms_missing"]:
+        terms = legal_context["terms"].version
+        if request.form.get("terms_version_presented") != terms.version_identifier:
+            raise CheckoutLegalRequirementError(
+                "Los Términos vigentes cambiaron. Revísalos antes de comprar."
+            )
+        if request.form.get("terms_accepted") != "1":
+            raise CheckoutLegalRequirementError(
+                "Debes aceptar los Términos vigentes para crear el pedido."
+            )
+    if legal_context["privacy_missing"]:
+        privacy = legal_context["privacy"].version
+        if (
+            request.form.get("privacy_version_presented")
+            != privacy.version_identifier
+        ):
+            raise CheckoutLegalRequirementError(
+                "La Política de Privacidad vigente cambió. Revísala nuevamente."
+            )
+        if request.form.get("privacy_acknowledged") != "1":
+            raise CheckoutLegalRequirementError(
+                "Debes confirmar que recibiste la Política de Privacidad vigente."
+            )
+
+
+def _record_checkout_legal_evidence(
+    database_session,
+    user_id: uuid.UUID,
+    legal_context,
+) -> None:
+    if legal_context is None:
+        return
+    if legal_context["terms_missing"]:
+        record_user_legal_evidence(
+            database_session,
+            user_id=user_id,
+            legal_document_version_id=legal_context["terms"].version.id,
+            action=LegalAcceptanceAction.ACCEPTED,
+            source=LegalAcceptanceSource.CHECKOUT,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+        )
+    if legal_context["privacy_missing"]:
+        record_user_legal_evidence(
+            database_session,
+            user_id=user_id,
+            legal_document_version_id=legal_context["privacy"].version.id,
+            action=LegalAcceptanceAction.ACKNOWLEDGED,
+            source=LegalAcceptanceSource.CHECKOUT,
+            ip_address=request.remote_addr,
+            user_agent=request.user_agent.string,
+        )
+
+
+def _privacy_user_id() -> uuid.UUID | None:
+    return current_user.id if current_user.is_authenticated else None
+
+
+def _optional_catalog_telemetry_allowed() -> bool:
+    try:
+        return is_optional_catalog_telemetry_allowed(
+            db.session,
+            flask_session,
+            user_id=_privacy_user_id(),
+        )
+    except Exception:
+        logger.warning("Privacy preference resolution failed", exc_info=True)
+        return False
+
+
+@storefront.context_processor
+def storefront_privacy_context() -> dict[str, object]:
+    try:
+        state = resolve_privacy_preference_state(
+            db.session,
+            flask_session,
+            user_id=_privacy_user_id(),
+        )
+        return {
+            "telemetry_enabled": state.telemetry_allowed,
+            "show_privacy_prompt": state.show_prompt,
+            "privacy_preference_state": state,
+        }
+    except Exception:
+        logger.warning("Privacy preference context failed", exc_info=True)
+        return {
+            "telemetry_enabled": False,
+            "show_privacy_prompt": False,
+            "privacy_preference_state": None,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -766,6 +905,8 @@ def _record_server_action_event(
     context: RankingContext | None,
 ) -> None:
     if context is None:
+        return
+    if not _optional_catalog_telemetry_allowed():
         return
     actor_id = current_user.id if current_user.is_authenticated else None
     anonymous_id = (
@@ -2088,6 +2229,11 @@ def checkout() -> str:
         )
         return redirect(url_for("storefront.cart"))
 
+    try:
+        legal_context = _checkout_legal_context(db.session, buyer.id)
+    except LegalVersioningError:
+        return render_template("legal/unavailable.html"), 503
+
     signature = _checkout_cart_signature(cart_state)
     draft = flask_session.get(CHECKOUT_DRAFT_SESSION_KEY)
     if not isinstance(draft, dict) or draft.get("signature") != signature:
@@ -2110,6 +2256,7 @@ def checkout() -> str:
             "static",
             filename="images/placeholders/product-placeholder.svg",
         ),
+        legal_context=legal_context,
     )
 
 
@@ -2179,6 +2326,15 @@ def create_checkout():
                 raise CheckoutServiceError(
                     "Inicia sesión para realizar el pedido."
                 )
+            legal_context = _checkout_legal_context(
+                database_session, buyer.id
+            )
+            _validate_checkout_legal_form(legal_context)
+            _record_checkout_legal_evidence(
+                database_session,
+                buyer.id,
+                legal_context,
+            )
             result = create_checkout_order(
                 session=database_session,
                 buyer_id=buyer.id,
@@ -2187,6 +2343,11 @@ def create_checkout():
                 idempotency_key=token,
                 reservation_expires_at=expires_at,
             )
+    except CheckoutLegalRequirementError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("storefront.checkout"))
+    except (LegalPublicationConsistencyError, LegalVersioningError):
+        return render_template("legal/unavailable.html"), 503
     except CheckoutServiceError as exc:
         flash(str(exc), "error")
         return redirect(url_for("storefront.checkout"))
@@ -3047,6 +3208,8 @@ def delete_selected_cart_items():
 @storefront.post("/catalogo/interacciones")
 @limiter.limit("120 per minute")
 def catalog_interaction():
+    if not _optional_catalog_telemetry_allowed():
+        return jsonify(ok=True, recorded=False), 202
     event_type = (_request_value("event_type") or "").strip().upper()
     token = _request_value("ranking_context") or ""
     if event_type not in CLIENT_EVENT_TYPES:

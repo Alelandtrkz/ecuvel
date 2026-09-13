@@ -32,6 +32,15 @@ def client(app):
     db.session.remove()
 
 
+@pytest.fixture(autouse=True)
+def approved_telemetry_path(monkeypatch):
+    """Keep legacy telemetry mechanics tests focused on event behavior."""
+    monkeypatch.setattr(
+        "app.storefront._optional_catalog_telemetry_allowed",
+        lambda: True,
+    )
+
+
 def _ranking_context(response) -> str:
     match = re.search(
         r'data-ranking-context="([^"]+)"',

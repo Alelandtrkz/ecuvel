@@ -937,7 +937,8 @@ def test_product_detail_gallery_query_count_is_constant_for_media_rows(
     with client.session_transaction() as browser_session:
         browser_session["_user_id"] = str(base.buyer_id)
         browser_session["_fresh"] = True
-    assert measured_get() == 15
+    # The authenticated request includes one bounded privacy-preference query.
+    assert measured_get() == 16
 
 
 def test_product_gallery_uses_accessible_alt_text(app):

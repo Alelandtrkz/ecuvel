@@ -43,6 +43,20 @@ class LegalAcceptanceSource(StrEnum):
     PRIVACY_NOTICE = "PRIVACY_NOTICE"
 
 
+class PrivacyPreferencePurpose(StrEnum):
+    CATALOG_BEHAVIORAL_TELEMETRY = "CATALOG_BEHAVIORAL_TELEMETRY"
+
+
+class PrivacyPreferenceDecision(StrEnum):
+    GRANTED = "GRANTED"
+    REJECTED = "REJECTED"
+
+
+class PrivacyPreferenceSource(StrEnum):
+    PRIVACY_BANNER = "PRIVACY_BANNER"
+    PRIVACY_SETTINGS = "PRIVACY_SETTINGS"
+
+
 class StaffIdentificationType(StrEnum):
     ECUADOR_CEDULA = "ECUADOR_CEDULA"
     PASSPORT = "PASSPORT"

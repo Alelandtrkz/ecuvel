@@ -290,6 +290,10 @@
   margin-top: var(--space-2);
 }
 
+.footer-links a {
+  color: inherit;
+}
+
 .footer-support {
   grid-column: 1 / -1;
   display: grid;
