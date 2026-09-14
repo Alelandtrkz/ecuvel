@@ -4,7 +4,9 @@ import uuid
 import re
 from datetime import datetime, timezone
 from decimal import Decimal
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from sqlalchemy import func, select
@@ -45,6 +47,43 @@ from app.models.enums import (
 
 
 pytestmark = pytest.mark.integration
+
+
+class _PartnerCatalogHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.anchors: list[dict[str, object]] = []
+        self.selected_statuses: set[str] = set()
+        self._anchor: dict[str, object] | None = None
+        self._select_id: str | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "a":
+            self._anchor = {"attributes": attributes, "text": []}
+        elif tag == "select":
+            self._select_id = attributes.get("id")
+        elif tag == "option" and self._select_id == "catalog-status-filter" and "selected" in attributes:
+            self.selected_statuses.add(attributes.get("value") or "")
+
+    def handle_data(self, data: str) -> None:
+        if self._anchor is not None:
+            text = self._anchor["text"]
+            assert isinstance(text, list)
+            text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self._anchor is not None:
+            self.anchors.append(self._anchor)
+            self._anchor = None
+        elif tag == "select":
+            self._select_id = None
+
+
+def _parse_catalog_html(body: str) -> _PartnerCatalogHTMLParser:
+    parser = _PartnerCatalogHTMLParser()
+    parser.feed(body)
+    return parser
 
 
 @pytest.fixture
@@ -176,6 +215,112 @@ def _login(client, user: User) -> None:
         data={"email": user.email, "password": "safe test password"},
     )
     assert response.status_code == 302
+
+
+def test_products_metrics_link_to_filtered_catalog(client, session: Session):
+    user, _store = _partner(session)
+    session.commit()
+    _login(client, user)
+
+    response = client.get("/partners/products")
+    parser = _parse_catalog_html(response.get_data(as_text=True))
+    metric_links = [
+        anchor
+        for anchor in parser.anchors
+        if "partner-products-metric" in str(anchor["attributes"].get("class", ""))
+    ]
+
+    assert response.status_code == 200
+    assert len(metric_links) == 3
+    expected = (
+        ("Publicaciones en borrador", "Ver borradores", "draft"),
+        ("Productos en revisión", "Ver publicaciones", "review"),
+        ("Productos activos", "Ver productos", "active"),
+    )
+    for anchor, (title, action, status) in zip(metric_links, expected, strict=True):
+        text = " ".join("".join(anchor["text"]).split())
+        location = urlparse(str(anchor["attributes"]["href"]))
+        query = parse_qs(location.query, keep_blank_values=True)
+
+        assert title in text
+        assert action in text
+        assert location.path == "/partners/my-products"
+        assert query == {"q": [""], "status": [status], "category": [""]}
+
+
+@pytest.mark.parametrize(
+    ("status", "label"),
+    (("draft", "Borrador"), ("review", "En revisión"), ("active", "Activo")),
+)
+def test_my_products_marks_status_filter_as_selected(
+    client,
+    session: Session,
+    status: str,
+    label: str,
+):
+    user, store = _partner(session)
+    parent, child = _category(session)
+    _draft(
+        session,
+        user=user,
+        store=store,
+        parent=parent,
+        child=child,
+        sku="SELECTED-STATUS",
+        title="Estado seleccionado",
+    )
+    session.commit()
+    _login(client, user)
+
+    response = client.get("/partners/my-products", query_string={"status": status})
+    body = response.get_data(as_text=True)
+    parser = _parse_catalog_html(body)
+
+    assert response.status_code == 200
+    assert parser.selected_statuses == {status}
+    assert label in body
+
+
+@pytest.mark.parametrize("status", ("draft", "review", "active"))
+def test_filtered_empty_catalog_keeps_global_empty_state(
+    client,
+    session: Session,
+    status: str,
+):
+    user, _store = _partner(session)
+    session.commit()
+    _login(client, user)
+
+    response = client.get("/partners/my-products", query_string={"status": status})
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Todavía no tienes productos" in body
+    assert "No encontramos coincidencias" not in body
+
+
+def test_status_filter_without_matches_uses_filtered_empty_state(client, session: Session):
+    user, store = _partner(session)
+    parent, child = _category(session)
+    _draft(
+        session,
+        user=user,
+        store=store,
+        parent=parent,
+        child=child,
+        sku="DRAFT-ONLY",
+        title="Solo borrador",
+    )
+    session.commit()
+    _login(client, user)
+
+    response = client.get("/partners/my-products", query_string={"status": "active"})
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "No encontramos coincidencias" in body
+    assert "Limpiar filtros" in body
+    assert "Todavía no tienes productos" not in body
 
 
 def test_my_products_empty_state_and_navigation(client, session: Session):

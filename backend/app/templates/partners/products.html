@@ -42,27 +42,27 @@
   </section>
 
   <section class="partner-products-metrics" aria-label="Resumen de productos">
-    <article>
+    <a class="partner-products-metric" href="{{ url_for('partners.my_products', q='', status='draft', category='') }}">
       <span class="partner-products-metric__icon"><i data-lucide="file-pen-line" aria-hidden="true"></i></span>
       <div>
         <strong>Publicaciones en borrador</strong>
-        <span>Disponible en próximas fases</span>
+        <span>Ver borradores</span>
       </div>
-    </article>
-    <article>
+    </a>
+    <a class="partner-products-metric" href="{{ url_for('partners.my_products', q='', status='review', category='') }}">
       <span class="partner-products-metric__icon"><i data-lucide="badge-check" aria-hidden="true"></i></span>
       <div>
         <strong>Productos en revisión</strong>
-        <span>Disponible en próximas fases</span>
+        <span>Ver publicaciones</span>
       </div>
-    </article>
-    <article>
+    </a>
+    <a class="partner-products-metric" href="{{ url_for('partners.my_products', q='', status='active', category='') }}">
       <span class="partner-products-metric__icon"><i data-lucide="package-check" aria-hidden="true"></i></span>
       <div>
         <strong>Productos activos</strong>
-        <span>Disponible en próximas fases</span>
+        <span>Ver productos</span>
       </div>
-    </article>
+    </a>
   </section>
 
   <dialog class="partner-products-guide-dialog" aria-labelledby="partner-products-guide-title" data-products-guide-dialog>
