@@ -574,6 +574,61 @@ def _babies_common() -> tuple[ProductTemplateField, ...]:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ProductTemplateCategoryBinding:
+    template_key: str
+    category_code: str
+    subcategory_code: str
+
+
+_TEMPLATE_CATEGORY_BINDINGS = (
+    ProductTemplateCategoryBinding(
+        "electronics_phones", "ELECTRONICS", "ELECTRONICS_PHONES"
+    ),
+    ProductTemplateCategoryBinding(
+        "electronics_computers", "ELECTRONICS", "ELECTRONICS_COMPUTERS"
+    ),
+    ProductTemplateCategoryBinding(
+        "electronics_headphones", "ELECTRONICS", "ELECTRONICS_HEADPHONES"
+    ),
+    ProductTemplateCategoryBinding(
+        "electronics_cameras", "ELECTRONICS", "ELECTRONICS_CAMERAS"
+    ),
+    ProductTemplateCategoryBinding("fashion_men", "FASHION", "FASHION_MEN"),
+    ProductTemplateCategoryBinding("fashion_women", "FASHION", "FASHION_WOMEN"),
+    ProductTemplateCategoryBinding("fashion_shoes", "FASHION", "FASHION_SHOES"),
+    ProductTemplateCategoryBinding(
+        "fashion_accessories", "FASHION", "FASHION_ACCESSORIES"
+    ),
+    ProductTemplateCategoryBinding(
+        "home_decoration", "HOME_KITCHEN", "HOME_DECORATION"
+    ),
+    ProductTemplateCategoryBinding(
+        "home_kitchen_tools", "HOME_KITCHEN", "HOME_KITCHEN_TOOLS"
+    ),
+    ProductTemplateCategoryBinding("home_cleaning", "HOME_KITCHEN", "HOME_CLEANING"),
+    ProductTemplateCategoryBinding(
+        "beauty_personal_care", "BEAUTY_HEALTH", "BEAUTY_PERSONAL_CARE"
+    ),
+    ProductTemplateCategoryBinding(
+        "beauty_cosmetics", "BEAUTY_HEALTH", "BEAUTY_COSMETICS"
+    ),
+    ProductTemplateCategoryBinding(
+        "beauty_skincare", "BEAUTY_HEALTH", "BEAUTY_SKINCARE"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_accessories", "AUTOMOTIVE", "AUTOMOTIVE_ACCESSORIES"
+    ),
+    ProductTemplateCategoryBinding("automotive_tools", "AUTOMOTIVE", "AUTOMOTIVE_TOOLS"),
+    ProductTemplateCategoryBinding(
+        "automotive_basic_parts", "AUTOMOTIVE", "AUTOMOTIVE_BASIC_PARTS"
+    ),
+    ProductTemplateCategoryBinding("babies_toys", "BABIES_KIDS", "BABIES_TOYS"),
+    ProductTemplateCategoryBinding("babies_clothing", "BABIES_KIDS", "BABIES_CLOTHING"),
+    ProductTemplateCategoryBinding("babies_care", "BABIES_KIDS", "BABIES_CARE"),
+)
+
+
 _TEMPLATE_FIELD_SETS = {
     "electronics_phones": _electronics_phone(),
     "electronics_computers": _electronics_computer(),
@@ -753,12 +808,30 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
 }
 
 
+_BINDINGS_BY_TEMPLATE_KEY = {
+    binding.template_key: binding for binding in _TEMPLATE_CATEGORY_BINDINGS
+}
+
+_TEMPLATE_KEYS_BY_CATEGORY_CODE = {
+    binding.subcategory_code: binding.template_key
+    for binding in _TEMPLATE_CATEGORY_BINDINGS
+}
+
+
 PRODUCT_TEMPLATES = {
     key: ProductTemplate(
         key=key,
         name=key.replace("_", " ").title(),
-        category_code=key.split("_", 1)[0].upper(),
-        subcategory_code=key.upper(),
+        category_code=(
+            _BINDINGS_BY_TEMPLATE_KEY[key].category_code
+            if key in _BINDINGS_BY_TEMPLATE_KEY
+            else ""
+        ),
+        subcategory_code=(
+            _BINDINGS_BY_TEMPLATE_KEY[key].subcategory_code
+            if key in _BINDINGS_BY_TEMPLATE_KEY
+            else ""
+        ),
         fields=fields,
         required_documents=("registro_sanitario",) if key.startswith("beauty_") else (),
         variant_axes=_TEMPLATE_VARIANT_AXES.get(key, ()),
@@ -772,6 +845,20 @@ def get_product_template(template_key: str) -> ProductTemplate:
         return PRODUCT_TEMPLATES[template_key]
     except KeyError as exc:
         raise ProductTemplateError(f"No existe plantilla para {template_key}.") from exc
+
+
+def template_key_for_category_code(category_code: str | None) -> str | None:
+    if not category_code:
+        return None
+    template_key = _TEMPLATE_KEYS_BY_CATEGORY_CODE.get(category_code)
+    return template_key if template_key in PRODUCT_TEMPLATES else None
+
+
+def get_product_template_for_category_code(
+    category_code: str | None,
+) -> ProductTemplate | None:
+    template_key = template_key_for_category_code(category_code)
+    return PRODUCT_TEMPLATES.get(template_key) if template_key else None
 
 
 def variant_axes_for_product_type(
@@ -803,7 +890,46 @@ def default_variant_axes_for_product_type(
 
 def validate_template_registry() -> None:
     errors: dict[str, str] = {}
+    seen_template_bindings: dict[str, ProductTemplateCategoryBinding] = {}
+    seen_category_codes: dict[str, str] = {}
+    for index, binding in enumerate(_TEMPLATE_CATEGORY_BINDINGS):
+        previous = seen_template_bindings.get(binding.template_key)
+        if previous is not None:
+            qualifier = "conflictiva" if previous != binding else "duplicada"
+            errors[f"binding.{index}.{binding.template_key}"] = (
+                f"Vinculación de plantilla {qualifier}."
+            )
+        else:
+            seen_template_bindings[binding.template_key] = binding
+        previous_template_key = seen_category_codes.get(binding.subcategory_code)
+        if previous_template_key is not None:
+            errors[f"binding.{index}.{binding.subcategory_code}"] = (
+                "El código de subcategoría está vinculado más de una vez."
+            )
+        else:
+            seen_category_codes[binding.subcategory_code] = binding.template_key
+        if binding.template_key not in _TEMPLATE_FIELD_SETS:
+            errors[f"binding.{index}.{binding.template_key}"] = (
+                "La vinculación apunta a una plantilla inexistente."
+            )
+
+    for key in _TEMPLATE_FIELD_SETS:
+        if key not in seen_template_bindings:
+            errors[f"binding.{key}"] = "Falta metadata explícita de categoría."
+
     for key, template in PRODUCT_TEMPLATES.items():
+        binding = seen_template_bindings.get(key)
+        if binding is None:
+            errors[f"binding.{key}"] = "Falta metadata explícita de categoría."
+        else:
+            if template.category_code != binding.category_code:
+                errors[f"binding.{key}.category_code"] = (
+                    "La categoría principal no coincide con la vinculación."
+                )
+            if template.subcategory_code != binding.subcategory_code:
+                errors[f"binding.{key}.subcategory_code"] = (
+                    "La subcategoría no coincide con la vinculación."
+                )
         seen: set[str] = set()
         for item in template.fields:
             if item.key in seen:

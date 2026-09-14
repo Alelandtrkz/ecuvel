@@ -65,6 +65,7 @@ def test_section_title_matrix_covers_the_real_template_registry():
 
 def test_template_resolution_requires_exact_category_code():
     assert resolve_product_template("ELECTRONICS_PHONES") is PRODUCT_TEMPLATES["electronics_phones"]
+    assert resolve_product_template("ELECTRONICS") is None
     assert resolve_product_template("electronics_phones") is None
     assert resolve_product_template("phones") is None
     assert resolve_product_template(None) is None

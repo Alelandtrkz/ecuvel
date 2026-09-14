@@ -5,9 +5,9 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from app.catalog.product_templates import (
-    PRODUCT_TEMPLATES,
     ProductTemplate,
     ProductTemplateField,
+    get_product_template_for_category_code,
 )
 
 
@@ -73,11 +73,6 @@ SECTION_DEFINITIONS: tuple[tuple[str, str], ...] = (
 SECTION_TITLES = dict(SECTION_DEFINITIONS)
 SECTION_ORDER = {key: index for index, (key, _title) in enumerate(SECTION_DEFINITIONS)}
 
-_TEMPLATES_BY_CATEGORY_CODE = {
-    template.subcategory_code: template
-    for template in PRODUCT_TEMPLATES.values()
-}
-
 _SHARED_ATTRIBUTE_KEYS = {
     "condition",
     "country_origin",
@@ -108,9 +103,7 @@ _WARRANTY_LABELS = (
 
 def resolve_product_template(category_code: str | None) -> ProductTemplate | None:
     """Resolve only an exact persisted Category.code; never guess from names."""
-    if not category_code:
-        return None
-    return _TEMPLATES_BY_CATEGORY_CODE.get(category_code)
+    return get_product_template_for_category_code(category_code)
 
 
 def is_publicly_empty(value: Any) -> bool:

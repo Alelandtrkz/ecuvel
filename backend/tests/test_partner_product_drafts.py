@@ -4,6 +4,7 @@ import io
 import json
 import re
 import uuid
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -13,7 +14,17 @@ from sqlalchemy import func, select
 from werkzeug.security import generate_password_hash
 
 from app.extensions import db
-from app.catalog.product_templates import PRODUCT_TEMPLATES, validate_template_registry
+import app.catalog.product_templates as product_template_registry
+from app.catalog.product_templates import (
+    PRODUCT_TEMPLATES,
+    ProductTemplateCategoryBinding,
+    ProductTemplateValidationError,
+    get_product_template,
+    get_product_template_for_category_code,
+    template_key_for_category_code,
+    validate_template_registry,
+)
+from app.commands.seed import _PRODUCT_CATEGORY_TREE
 from app.models import (
     Category,
     MarketplaceCommissionRule,
@@ -44,6 +55,30 @@ from app.services.partner_product_categories import PARTNER_PRODUCT_DRAFT_SESSIO
 
 
 pytestmark = pytest.mark.integration
+
+
+CURRENT_CATEGORY_TEMPLATE_BINDINGS = {
+    "ELECTRONICS_PHONES": ("ELECTRONICS", "electronics_phones"),
+    "ELECTRONICS_COMPUTERS": ("ELECTRONICS", "electronics_computers"),
+    "ELECTRONICS_HEADPHONES": ("ELECTRONICS", "electronics_headphones"),
+    "ELECTRONICS_CAMERAS": ("ELECTRONICS", "electronics_cameras"),
+    "FASHION_MEN": ("FASHION", "fashion_men"),
+    "FASHION_WOMEN": ("FASHION", "fashion_women"),
+    "FASHION_SHOES": ("FASHION", "fashion_shoes"),
+    "FASHION_ACCESSORIES": ("FASHION", "fashion_accessories"),
+    "HOME_DECORATION": ("HOME_KITCHEN", "home_decoration"),
+    "HOME_KITCHEN_TOOLS": ("HOME_KITCHEN", "home_kitchen_tools"),
+    "HOME_CLEANING": ("HOME_KITCHEN", "home_cleaning"),
+    "BEAUTY_PERSONAL_CARE": ("BEAUTY_HEALTH", "beauty_personal_care"),
+    "BEAUTY_COSMETICS": ("BEAUTY_HEALTH", "beauty_cosmetics"),
+    "BEAUTY_SKINCARE": ("BEAUTY_HEALTH", "beauty_skincare"),
+    "AUTOMOTIVE_ACCESSORIES": ("AUTOMOTIVE", "automotive_accessories"),
+    "AUTOMOTIVE_TOOLS": ("AUTOMOTIVE", "automotive_tools"),
+    "AUTOMOTIVE_BASIC_PARTS": ("AUTOMOTIVE", "automotive_basic_parts"),
+    "BABIES_TOYS": ("BABIES_KIDS", "babies_toys"),
+    "BABIES_CLOTHING": ("BABIES_KIDS", "babies_clothing"),
+    "BABIES_CARE": ("BABIES_KIDS", "babies_care"),
+}
 
 @pytest.fixture
 def client(app, tmp_path):
@@ -246,6 +281,74 @@ def test_template_registry_covers_seeded_subcategories():
         "babies_care",
     }
     assert expected <= set(PRODUCT_TEMPLATES)
+
+
+def test_exact_category_template_bindings_and_metadata_are_preserved():
+    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 20
+    for leaf_code, binding in CURRENT_CATEGORY_TEMPLATE_BINDINGS.items():
+        main_code, template_key = binding
+        template = PRODUCT_TEMPLATES[template_key]
+        assert template_key_for_category_code(leaf_code) == template_key
+        assert get_product_template_for_category_code(leaf_code) is template
+        assert get_product_template(template_key) is template
+        assert template.category_code == main_code
+        assert template.subcategory_code == leaf_code
+
+    for unresolved in (None, "", "ELECTRONICS", "electronics_phones", "UNKNOWN"):
+        assert template_key_for_category_code(unresolved) is None
+        assert get_product_template_for_category_code(unresolved) is None
+
+
+def test_seeded_leaf_categories_match_the_explicit_template_bindings():
+    seeded_leaves = {
+        child["code"]
+        for _parent, children in _PRODUCT_CATEGORY_TREE
+        for child in children
+    }
+    assert seeded_leaves == set(CURRENT_CATEGORY_TEMPLATE_BINDINGS)
+
+
+def test_template_registry_validation_rejects_binding_drift(monkeypatch):
+    bindings = product_template_registry._TEMPLATE_CATEGORY_BINDINGS
+    monkeypatch.setattr(
+        product_template_registry,
+        "_TEMPLATE_CATEGORY_BINDINGS",
+        bindings + (
+            ProductTemplateCategoryBinding(
+                "missing_template",
+                "ELECTRONICS",
+                "ELECTRONICS_PHONES",
+            ),
+        ),
+    )
+    with pytest.raises(ProductTemplateValidationError) as exc_info:
+        validate_template_registry()
+    assert "binding.20.ELECTRONICS_PHONES" in exc_info.value.errors
+    assert "binding.20.missing_template" in exc_info.value.errors
+
+
+def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(
+    monkeypatch,
+):
+    bindings = product_template_registry._TEMPLATE_CATEGORY_BINDINGS
+    monkeypatch.setattr(
+        product_template_registry,
+        "_TEMPLATE_CATEGORY_BINDINGS",
+        tuple(
+            binding
+            for binding in bindings
+            if binding.template_key != "home_decoration"
+        ),
+    )
+    monkeypatch.setitem(
+        PRODUCT_TEMPLATES,
+        "beauty_cosmetics",
+        replace(PRODUCT_TEMPLATES["beauty_cosmetics"], category_code="BEAUTY"),
+    )
+    with pytest.raises(ProductTemplateValidationError) as exc_info:
+        validate_template_registry()
+    assert "binding.home_decoration" in exc_info.value.errors
+    assert "binding.beauty_cosmetics.category_code" in exc_info.value.errors
 
 
 def test_template_registry_does_not_include_removed_package_content_field():

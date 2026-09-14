@@ -242,6 +242,7 @@ def test_owner_and_administrator_can_open_category_selector(client, session, rol
     assert "Cámaras y Fotografía" in html
     assert "Moda" in html
     assert "template_key" in html
+    assert "Calzado" not in html
 
 
 def test_valid_selection_is_saved_in_session_and_details_show_template_key(client, session):
@@ -295,6 +296,25 @@ def test_foreign_subcategory_is_rejected(client, session):
 
     assert response.status_code == 400
     assert "no pertenece a la categoría" in response.get_data(as_text=True)
+    with client.session_transaction() as browser_session:
+        assert PARTNER_PRODUCT_DRAFT_SESSION_KEY not in browser_session
+
+
+def test_unmapped_active_direct_child_is_rejected_without_guessing(client, session):
+    user = _user(session)
+    _enabled_store(session, user)
+    _electronics, _cameras, fashion, shoes = _category_tree(session)
+    session.commit()
+
+    _login(client, user)
+    response = client.post(
+        "/partners/products/new/category",
+        data={"category_id": str(fashion.id), "subcategory_id": str(shoes.id)},
+    )
+
+    assert response.status_code == 400
+    assert "Seleccione otra subcategoría" in response.get_data(as_text=True)
+    assert session.scalar(select(func.count()).select_from(ProductDraft)) == 0
     with client.session_transaction() as browser_session:
         assert PARTNER_PRODUCT_DRAFT_SESSION_KEY not in browser_session
 

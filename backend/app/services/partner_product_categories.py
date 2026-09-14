@@ -7,6 +7,7 @@ from typing import Mapping
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.catalog.product_templates import template_key_for_category_code
 from app.models import Category, Store, StoreContractAcceptance, StoreMember, StoreOnboarding
 from app.models.enums import (
     StoreContractAcceptanceStatus,
@@ -189,13 +190,14 @@ def validate_category_selection(
         errors["subcategory_id"] = "La subcategoría seleccionada no pertenece a la categoría."
     if errors:
         raise PartnerProductCategoryValidationError("Revisa la selección.", errors)
+    template_key = resolve_template_key(subcategory)
     return PartnerCategorySelectionResult(
         store=store,
         category_id=category.id,
         category_name=category.name,
         subcategory_id=subcategory.id,
         subcategory_name=subcategory.name,
-        template_key=resolve_template_key(subcategory),
+        template_key=template_key,
     )
 
 
@@ -224,12 +226,22 @@ def get_saved_category_selection(session: Session, user_id: uuid.UUID, draft: Ma
 
 
 def resolve_template_key(subcategory: Category) -> str:
-    return subcategory.code.lower()
+    template_key = template_key_for_category_code(subcategory.code)
+    if template_key is None:
+        raise PartnerProductCategoryValidationError(
+            "La subcategoría seleccionada no tiene una plantilla disponible.",
+            {"subcategory_id": "Seleccione otra subcategoría."},
+        )
+    return template_key
 
 
 def _category_view(category: Category) -> PartnerMainCategoryView:
     children = sorted(
-        (child for child in category.children if child.is_active),
+        (
+            child for child in category.children
+            if child.is_active
+            and template_key_for_category_code(child.code) is not None
+        ),
         key=lambda child: (child.sort_order, child.name, str(child.id)),
     )
     return PartnerMainCategoryView(
