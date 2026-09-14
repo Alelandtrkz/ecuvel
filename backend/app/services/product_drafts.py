@@ -1107,10 +1107,7 @@ def _parse_attributes(form: MultiDict, template: ProductTemplate) -> dict[str, A
         if item.type == "boolean":
             values[item.key] = name in form
         elif item.type in {"multiselect", "chips"}:
-            raw_values = form.getlist(name)
-            if len(raw_values) == 1 and "," in raw_values[0]:
-                raw_values = raw_values[0].split(",")
-            values[item.key] = _nonempty_list(raw_values)
+            values[item.key] = _nonempty_list(form.getlist(name))
         else:
             values[item.key] = _clean_text(form.get(name), 1000)
     return values
@@ -1334,7 +1331,14 @@ def _clean_text(value: Any, max_length: int) -> str | None:
 
 
 def _nonempty_list(values: list[str]) -> list[str]:
-    return [item.strip()[:160] for item in values if item and item.strip()]
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        cleaned = item.strip()[:160] if isinstance(item, str) else ""
+        if cleaned and cleaned not in seen:
+            normalized.append(cleaned)
+            seen.add(cleaned)
+    return normalized
 
 
 def _decimal_or_none(value: Any) -> Decimal | None:

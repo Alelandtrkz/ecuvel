@@ -56,6 +56,51 @@ const ecuvelPartnerVariantConditions = (() => {
 
 globalThis.EcuvelPartnerVariantConditions = ecuvelPartnerVariantConditions;
 
+const ecuvelPartnerFieldState = (() => {
+  const parseConditionValues = (serialized) => {
+    try {
+      const parsed = JSON.parse(serialized);
+      return Array.isArray(parsed) && parsed.every(
+        (value) => ["string", "number", "boolean"].includes(typeof value),
+      ) ? parsed : [];
+    } catch (_error) {
+      return [];
+    }
+  };
+
+  const normalizeChipValues = (values) => {
+    if (!Array.isArray(values)) return [];
+    const normalized = [];
+    const seen = new Set();
+    values.forEach((value) => {
+      if (typeof value !== "string") return;
+      const token = value.trim();
+      if (!token || seen.has(token)) return;
+      normalized.push(token);
+      seen.add(token);
+    });
+    return normalized;
+  };
+
+  const quickOptionState = ({ value, unit, currentUnit = "" }) => ({
+    value: typeof value === "string" ? value : "",
+    unit: typeof unit === "string" && unit ? unit : currentUnit,
+  });
+
+  const quickOptionField = (container) => (
+    container?.closest?.(".partner-draft-field") || null
+  );
+
+  return {
+    normalizeChipValues,
+    parseConditionValues,
+    quickOptionField,
+    quickOptionState,
+  };
+})();
+
+globalThis.EcuvelPartnerFieldState = ecuvelPartnerFieldState;
+
 (() => {
   const root = document.querySelector("[data-product-draft]");
   if (!root) return;
@@ -634,17 +679,93 @@ globalThis.EcuvelPartnerVariantConditions = ecuvelPartnerVariantConditions;
 
   initializePartnerSelects(root);
 
+  function initializeChipEditors(rootEl) {
+    rootEl.querySelectorAll("[data-chip-editor]").forEach((editor) => {
+      const list = editor.querySelector("[data-chip-list]");
+      const input = editor.querySelector("[data-chip-input]");
+      const addButton = editor.querySelector("[data-chip-add]");
+      const firstHidden = editor.querySelector("[data-chip-hidden]");
+      const canonicalName = editor.dataset.chipName || firstHidden?.name
+        || editor.closest("[data-attr-key]")?.querySelector("[data-chip-hidden]")?.name;
+      if (!list || !input || !addButton || !canonicalName) return;
+
+      const values = () => Array.from(list.querySelectorAll("[data-chip-hidden]"))
+        .map((hidden) => hidden.value);
+
+      function notifyChanged() {
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+
+      function render(tokens) {
+        list.replaceChildren();
+        ecuvelPartnerFieldState.normalizeChipValues(tokens).forEach((token) => {
+          const chip = document.createElement("span");
+          chip.className = "partner-token";
+          chip.dataset.chipToken = "";
+
+          const text = document.createElement("span");
+          text.textContent = token;
+          const hidden = document.createElement("input");
+          hidden.type = "hidden";
+          hidden.name = canonicalName;
+          hidden.value = token;
+          hidden.dataset.chipHidden = "";
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.dataset.chipRemove = "";
+          remove.setAttribute("aria-label", `Quitar ${token}`);
+          remove.textContent = "×";
+          chip.append(text, hidden, remove);
+          list.appendChild(chip);
+        });
+      }
+
+      function addToken(rawValue) {
+        const next = ecuvelPartnerFieldState.normalizeChipValues([...values(), rawValue]);
+        if (next.length === values().length) return false;
+        render(next);
+        input.value = "";
+        notifyChanged();
+        return true;
+      }
+
+      editor.ecuvelAddChipToken = addToken;
+      render(values());
+      addButton.addEventListener("click", () => addToken(input.value));
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        addToken(input.value);
+      });
+      list.addEventListener("click", (event) => {
+        const remove = event.target.closest("[data-chip-remove]");
+        if (!remove) return;
+        remove.closest("[data-chip-token]")?.remove();
+        notifyChanged();
+      });
+    });
+  }
+
+  initializeChipEditors(root);
+
   function initializeAttributeQuickOptions(rootEl) {
     const chipSelector = ".partner-attribute-chip, .partner-variant-suggestion";
     rootEl.querySelectorAll("[data-quick-options], [data-field-quick-options]").forEach((container) => {
-      const label = container.closest("label");
-      const input = label?.querySelector("input, textarea") || label?.querySelector("select");
-      const unitSelect = label?.querySelector("[data-unit-select]");
-      if (!input) return;
+      const field = ecuvelPartnerFieldState.quickOptionField(container);
+      const chipEditor = field?.querySelector("[data-chip-editor]");
+      const input = field?.querySelector("input[name]:not([type='hidden']), textarea[name], select[name]");
+      const unitSelect = field?.querySelector("[data-unit-select]");
+      if (!input && !chipEditor) return;
 
       function syncChips() {
+        const chipValues = chipEditor
+          ? Array.from(chipEditor.querySelectorAll("[data-chip-hidden]"), (hidden) => hidden.value)
+          : [];
         container.querySelectorAll(chipSelector).forEach((chip) => {
-          const valueMatches = chip.dataset.value === input.value;
+          const valueMatches = chipEditor
+            ? chipValues.includes(chip.dataset.value)
+            : chip.dataset.value === input.value;
           const unitMatches = !chip.dataset.unit || !unitSelect || chip.dataset.unit === unitSelect.value;
           chip.setAttribute("aria-pressed", String(valueMatches && unitMatches));
         });
@@ -652,9 +773,19 @@ globalThis.EcuvelPartnerVariantConditions = ecuvelPartnerVariantConditions;
 
       container.querySelectorAll(chipSelector).forEach((chip) => {
         chip.addEventListener("click", () => {
-          input.value = chip.dataset.value;
+          if (chipEditor) {
+            chipEditor.ecuvelAddChipToken?.(chip.dataset.value);
+            syncChips();
+            return;
+          }
+          const nextState = ecuvelPartnerFieldState.quickOptionState({
+            value: chip.dataset.value,
+            unit: chip.dataset.unit,
+            currentUnit: unitSelect?.value || "",
+          });
+          input.value = nextState.value;
           if (chip.dataset.unit && unitSelect) {
-            unitSelect.value = chip.dataset.unit;
+            unitSelect.value = nextState.unit;
             unitSelect.dispatchEvent(new Event("change", { bubbles: true }));
           }
           input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -663,8 +794,9 @@ globalThis.EcuvelPartnerVariantConditions = ecuvelPartnerVariantConditions;
         });
       });
 
-      input.addEventListener("input", syncChips);
+      (input || chipEditor).addEventListener("input", syncChips);
       if (unitSelect) unitSelect.addEventListener("change", syncChips);
+      syncChips();
     });
   }
 
@@ -682,18 +814,43 @@ globalThis.EcuvelPartnerVariantConditions = ecuvelPartnerVariantConditions;
     });
 
     triggerMap.forEach((wrappers, triggerKey) => {
-      const triggerEl = rootEl.querySelector(`[name="attributes[${triggerKey}]"]`);
-      if (!triggerEl) return;
+      const triggerEls = Array.from(rootEl.querySelectorAll(`[name="attributes[${triggerKey}]"]`));
+      if (!triggerEls.length) return;
+
+      const currentValue = () => {
+        const first = triggerEls[0];
+        if (first.type === "radio") return triggerEls.find((control) => control.checked)?.value;
+        if (first.type === "checkbox") return first.checked;
+        return first.value;
+      };
 
       const evaluate = () => {
-        const currentVal = triggerEl.value;
+        const currentVal = currentValue();
         wrappers.forEach((wrapper) => {
-          const allowed = wrapper.dataset.conditionValues.split(",");
-          wrapper.hidden = !allowed.includes(currentVal);
+          const allowed = ecuvelPartnerFieldState.parseConditionValues(
+            wrapper.dataset.conditionValues,
+          );
+          const applicable = allowed.includes(currentVal);
+          wrapper.hidden = !applicable;
+          wrapper.querySelectorAll("input, select, textarea, button").forEach((control) => {
+            if (!applicable) {
+              if (!control.disabled) {
+                control.disabled = true;
+                control.dataset.disabledByCondition = "1";
+              }
+              return;
+            }
+            if (control.dataset.disabledByCondition !== "1") return;
+            delete control.dataset.disabledByCondition;
+            const field = control.closest("[data-attr-key]");
+            const managedByVariants = field?.classList.contains("is-variant-source")
+              && control.matches("[name]");
+            if (!managedByVariants) control.disabled = false;
+          });
         });
       };
 
-      triggerEl.addEventListener("change", evaluate);
+      triggerEls.forEach((triggerEl) => triggerEl.addEventListener("change", evaluate));
       evaluate();
     });
   }
@@ -1425,7 +1582,14 @@ globalThis.EcuvelPartnerVariantConditions = ecuvelPartnerVariantConditions;
         }
         if (note) note.hidden = !active;
         const sourceControl = form.elements.namedItem(`attributes[${field.dataset.attrKey}]`);
-        if (sourceControl && !(sourceControl instanceof RadioNodeList)) sourceControl.disabled = active;
+        if (sourceControl && !(sourceControl instanceof RadioNodeList)) {
+          const conditionWrapper = field.closest("[data-condition-field]");
+          const disabledByCondition = Boolean(conditionWrapper?.hidden);
+          if (disabledByCondition && !active) {
+            sourceControl.dataset.disabledByCondition = "1";
+          }
+          sourceControl.disabled = active || disabledByCondition;
+        }
       });
     }
 

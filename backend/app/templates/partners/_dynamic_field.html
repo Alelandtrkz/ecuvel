@@ -1,5 +1,9 @@
 {% set field_name = "attributes[" ~ field.key ~ "]" %}
+{% set field_id = "attribute-" ~ field.key %}
+{% set field_label_id = field_id ~ "-label" %}
 {% set value = view.draft.attributes.get(field.key) if view.draft.attributes else none %}
+{% set scalar_value = value if value is not none else '' %}
+{% set list_value = value if value is sequence and value is not string else ([value] if value is not none and value != '' else []) %}
 {% set error = errors.get(field.key) or errors.get("attributes." ~ field.key) %}
 {% set field_placeholder = field.placeholder or (("Ej. " ~ field.example) if field.example else "") %}
 {% set field_unit = field.unit_label or field.unit %}
@@ -7,12 +11,12 @@
   {% set _trigger_val = view.draft.attributes.get(field.condition.field) if view.draft.attributes else none %}
   {% set _condition_met = _trigger_val in field.condition['values'] %}
   <div data-condition-field="{{ field.condition.field }}"
-       data-condition-values="{{ field.condition['values'] | join(',') }}"
+       data-condition-values="{{ field.condition['values'] | tojson | forceescape }}"
        {% if not _condition_met %}hidden{% endif %}>
 {% endif %}
-<label class="partner-draft-field partner-draft-field--{{ field.type }}{% if field_unit %} partner-draft-field--with-unit{% endif %}"
-       data-attr-key="{{ field.key }}" data-attr-label="{{ field.label }}"{% if field.required %} data-attr-required="1"{% endif %}>
-  <span class="partner-draft-field__heading">
+<div class="partner-draft-field partner-draft-field--{{ field.type }}{% if field_unit %} partner-draft-field--with-unit{% endif %}"
+     data-attr-key="{{ field.key }}" data-attr-label="{{ field.label }}"{% if field.required %} data-attr-required="1"{% endif %}>
+  <span class="partner-draft-field__heading" id="{{ field_label_id }}">
     {% if field.icon %}
       <i data-lucide="{{ field.icon }}" aria-hidden="true"></i>
     {% endif %}
@@ -22,87 +26,107 @@
     </span>
   </span>
 
-  {% if field.type in ["textarea", "repeater", "compatibility_table", "size_table"] %}
-    <textarea name="{{ field_name }}" rows="4" placeholder="{{ field_placeholder }}">{{ value or '' }}</textarea>
-  {% elif field.type in ["select", "radio"] %}
+  {% if field.type == "textarea" %}
+    <textarea id="{{ field_id }}" name="{{ field_name }}" rows="4" placeholder="{{ field_placeholder }}" aria-labelledby="{{ field_label_id }}">{{ scalar_value }}</textarea>
+  {% elif field.type in ["repeater", "compatibility_table", "size_table"] %}
+    <textarea id="{{ field_id }}" name="{{ field_name }}" rows="4" placeholder="{{ field_placeholder }}" aria-labelledby="{{ field_label_id }}">{{ scalar_value }}</textarea>
+  {% elif field.type == "select" %}
     {% set selected_label = value if value else "Seleccione una opción" %}
     <div class="partner-select" data-partner-select>
-      <select class="partner-select__native" name="{{ field_name }}" data-partner-select-native>
+      <select class="partner-select__native" id="{{ field_id }}" name="{{ field_name }}" data-partner-select-native aria-labelledby="{{ field_label_id }}">
         <option value="">Seleccione una opción</option>
         {% for option in field.options %}
           <option value="{{ option }}" {{ "selected" if value == option }}>{{ option }}</option>
         {% endfor %}
       </select>
-      <button class="partner-select__button"
-              type="button"
-              aria-haspopup="listbox"
-              aria-expanded="false"
-              data-partner-select-button>
-        <span data-partner-select-label>{{ selected_label }}</span>
+      <button class="partner-select__button" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="{{ field_label_id }} {{ field_id }}-selected" data-partner-select-button>
+        <span id="{{ field_id }}-selected" data-partner-select-label>{{ selected_label }}</span>
         <i data-lucide="chevron-down" aria-hidden="true"></i>
       </button>
       <div class="partner-select__menu" role="listbox" data-partner-select-menu>
-        <button class="partner-select__option"
-                type="button"
-                role="option"
-                data-value=""
-                aria-selected="{{ 'true' if not value else 'false' }}">
-          Seleccione una opción
-        </button>
+        <button class="partner-select__option" type="button" role="option" data-value="" aria-selected="{{ 'true' if not value else 'false' }}">Seleccione una opción</button>
         {% for option in field.options %}
-          <button class="partner-select__option"
-                  type="button"
-                  role="option"
-                  data-value="{{ option }}"
-                  aria-selected="{{ 'true' if value == option else 'false' }}">
-            {{ option }}
-          </button>
+          <button class="partner-select__option" type="button" role="option" data-value="{{ option }}" aria-selected="{{ 'true' if value == option else 'false' }}">{{ option }}</button>
         {% endfor %}
       </div>
     </div>
-  {% elif field.type in ["multiselect", "chips", "variant_attribute"] %}
-    <input type="text" name="{{ field_name }}" value="{{ (value|join(', ')) if value is sequence and value is not string else (value or '') }}" placeholder="{{ field_placeholder or 'Separe los valores con coma' }}">
+  {% elif field.type == "radio" %}
+    <div class="partner-choice-group" role="radiogroup" aria-labelledby="{{ field_label_id }}">
+      <label class="partner-choice-option">
+        <input type="radio" name="{{ field_name }}" value="" {% if value is none or value == '' %}checked{% endif %}>
+        <span>Sin seleccionar</span>
+      </label>
+      {% for option in field.options %}
+        <label class="partner-choice-option">
+          <input type="radio" name="{{ field_name }}" value="{{ option }}" {% if value == option %}checked{% endif %}>
+          <span>{{ option }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  {% elif field.type == "multiselect" %}
+    <div class="partner-choice-group" role="group" aria-labelledby="{{ field_label_id }}">
+      {% for option in field.options %}
+        <label class="partner-choice-option">
+          <input type="checkbox" name="{{ field_name }}" value="{{ option }}" {% if option in list_value %}checked{% endif %}>
+          <span>{{ option }}</span>
+        </label>
+      {% endfor %}
+    </div>
+  {% elif field.type == "chips" %}
+    <div class="partner-token-editor" data-chip-editor data-chip-name="{{ field_name }}" aria-labelledby="{{ field_label_id }}">
+      <div class="partner-token-editor__tokens" data-chip-list>
+        {% for token in list_value %}
+          <span class="partner-token" data-chip-token>
+            <span>{{ token }}</span>
+            <input type="hidden" name="{{ field_name }}" value="{{ token }}" data-chip-hidden>
+            <button type="button" data-chip-remove aria-label="Quitar {{ token }}">×</button>
+          </span>
+        {% endfor %}
+      </div>
+      <div class="partner-token-editor__entry">
+        <input id="{{ field_id }}" type="text" value="" placeholder="{{ field_placeholder or 'Escribe un valor' }}" data-chip-input aria-label="Nuevo valor para {{ field.label }}">
+        <button type="button" class="partner-token-editor__add" data-chip-add>Agregar</button>
+      </div>
+    </div>
   {% elif field.type == "boolean" %}
-    <span class="partner-boolean-control">
-      <input class="partner-boolean-control__input" type="checkbox" name="{{ field_name }}" value="1" {{ "checked" if value }}>
+    <label class="partner-boolean-control">
+      <input class="partner-boolean-control__input" id="{{ field_id }}" type="checkbox" name="{{ field_name }}" value="1" {% if value is sameas true %}checked{% endif %} aria-labelledby="{{ field_label_id }}">
       <span class="partner-boolean-control__box" aria-hidden="true">
-        <svg viewBox="0 0 20 20" focusable="false">
-          <path d="M5 10.4 8.2 13.5 15 6.5" />
-        </svg>
+        <svg viewBox="0 0 20 20" focusable="false"><path d="M5 10.4 8.2 13.5 15 6.5" /></svg>
       </span>
       <span class="partner-boolean-control__text">Sí, aplica</span>
-    </span>
+    </label>
   {% elif field.type == "integer" %}
     {% if field_unit %}
       <span class="partner-input-with-unit">
-        <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="1">
+        <input id="{{ field_id }}" type="number" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder }}" step="1"{% if field.min is not none %} min="{{ field.min }}"{% endif %}{% if field.max is not none %} max="{{ field.max }}"{% endif %} aria-labelledby="{{ field_label_id }}">
         <span class="partner-input-with-unit__suffix" aria-hidden="true">{{ field_unit }}</span>
       </span>
     {% else %}
-      <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="1">
+      <input id="{{ field_id }}" type="number" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder }}" step="1"{% if field.min is not none %} min="{{ field.min }}"{% endif %}{% if field.max is not none %} max="{{ field.max }}"{% endif %} aria-labelledby="{{ field_label_id }}">
     {% endif %}
-  {% elif field.type == "decimal" or field.type == "dimension" %}
+  {% elif field.type in ["decimal", "dimension"] %}
     {% if field_unit %}
       <span class="partner-input-with-unit">
-        <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="0.01">
+        <input id="{{ field_id }}" type="number" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder }}" step="any"{% if field.min is not none %} min="{{ field.min }}"{% endif %}{% if field.max is not none %} max="{{ field.max }}"{% endif %} aria-labelledby="{{ field_label_id }}">
         <span class="partner-input-with-unit__suffix" aria-hidden="true">{{ field_unit }}</span>
       </span>
     {% else %}
-      <input type="number" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}" step="0.01">
+      <input id="{{ field_id }}" type="number" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder }}" step="any"{% if field.min is not none %} min="{{ field.min }}"{% endif %}{% if field.max is not none %} max="{{ field.max }}"{% endif %} aria-labelledby="{{ field_label_id }}">
     {% endif %}
   {% elif field.type == "color" %}
-    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder or 'Azul, negro, #085DF8...' }}">
+    <input id="{{ field_id }}" type="text" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder or 'Azul, negro, #085DF8...' }}" aria-labelledby="{{ field_label_id }}">
   {% elif field.type == "date" %}
-    <input type="date" name="{{ field_name }}" value="{{ value or '' }}">
+    <input id="{{ field_id }}" type="date" name="{{ field_name }}" value="{{ scalar_value }}" aria-labelledby="{{ field_label_id }}">
+  {% elif field.type == "variant_attribute" %}
+    <input id="{{ field_id }}" type="text" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder }}" aria-labelledby="{{ field_label_id }}">
   {% elif field.type in ["file", "document"] %}
-    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder or 'Referencia del documento' }}">
+    <input id="{{ field_id }}" type="text" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder or 'Referencia del documento' }}" aria-labelledby="{{ field_label_id }}">
   {% else %}
-    <input type="text" name="{{ field_name }}" value="{{ value or '' }}" placeholder="{{ field_placeholder }}">
+    <input id="{{ field_id }}" type="text" name="{{ field_name }}" value="{{ scalar_value }}" placeholder="{{ field_placeholder }}" aria-labelledby="{{ field_label_id }}">
   {% endif %}
 
-  {% if field.help %}
-    <small class="partner-draft-field__help">{{ field.help }}</small>
-  {% endif %}
+  {% if field.help %}<small class="partner-draft-field__help">{{ field.help }}</small>{% endif %}
 
   {% if field.quick_options %}
     <div class="partner-attribute-quick-options" data-quick-options>
@@ -110,15 +134,10 @@
         {% set parts = opt.split('|') %}
         {% set chip_label = parts[0] %}
         {% set chip_value = parts[1] if parts | length > 1 else parts[0] %}
-        <button type="button"
-                class="partner-attribute-chip"
-                data-value="{{ chip_value }}"
-                aria-pressed="{{ 'true' if value is not none and (value | string) == chip_value else 'false' }}">
-          {{ chip_label }}
-        </button>
+        <button type="button" class="partner-attribute-chip" data-value="{{ chip_value }}" aria-pressed="{{ 'true' if (field.type == 'chips' and chip_value in list_value) or (field.type != 'chips' and value is not none and (value | string) == chip_value) else 'false' }}">{{ chip_label }}</button>
       {% endfor %}
     </div>
   {% endif %}
   {% if error %}<em class="partner-error">{{ error }}</em>{% endif %}
-</label>
+</div>
 {% if field.condition %}</div>{% endif %}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
@@ -1025,8 +1026,28 @@ def validate_template_registry() -> None:
                 errors[f"{key}.{item.key}"] = "Campo duplicado."
             if item.type not in SUPPORTED_FIELD_TYPES:
                 errors[f"{key}.{item.key}"] = "Tipo inválido."
-            if item.type in {"select", "multiselect", "radio"} and not item.options:
-                errors[f"{key}.{item.key}"] = "Opciones requeridas."
+            if item.type in {"select", "multiselect", "radio"}:
+                if not item.options:
+                    errors[f"{key}.{item.key}"] = "Opciones requeridas."
+                elif any(
+                    not isinstance(option, str) or not option.strip()
+                    for option in item.options
+                ):
+                    errors[f"{key}.{item.key}"] = "Las opciones deben ser textos no vacíos."
+                elif len(set(item.options)) != len(item.options):
+                    errors[f"{key}.{item.key}"] = "Las opciones no pueden repetirse."
+            if item.type in {"integer", "decimal", "dimension"}:
+                if item.min is not None and item.max is not None:
+                    try:
+                        if item.min > item.max:
+                            errors[f"{key}.{item.key}"] = "El mínimo no puede superar el máximo."
+                    except (InvalidOperation, TypeError):
+                        errors[f"{key}.{item.key}"] = "Los límites numéricos son inválidos."
+                if item.type == "integer" and any(
+                    bound is not None and not _is_integral_bound(bound)
+                    for bound in (item.min, item.max)
+                ):
+                    errors[f"{key}.{item.key}"] = "Los límites enteros deben ser integrales."
             seen.add(item.key)
         field_keys = {item.key for item in template.fields}
         fields_by_key = {item.key: item for item in template.fields}
@@ -1089,8 +1110,14 @@ def validate_attributes(
         if _is_empty(value):
             continue
         if item.type == "integer":
+            if isinstance(value, bool) or not isinstance(value, (str, int)):
+                errors[f"attributes.{item.key}"] = f"{item.label} debe ser un número entero."
+                continue
             try:
-                number = int(value)
+                text_value = str(value)
+                if not text_value or any(character in text_value for character in ".eE"):
+                    raise ValueError
+                number = int(text_value)
             except (TypeError, ValueError):
                 errors[f"attributes.{item.key}"] = f"{item.label} debe ser un número entero."
                 continue
@@ -1098,10 +1125,16 @@ def validate_attributes(
                 errors[f"attributes.{item.key}"] = f"{item.label} debe ser mayor o igual a {item.min}."
             if item.max is not None and number > item.max:
                 errors[f"attributes.{item.key}"] = f"{item.label} debe ser menor o igual a {item.max}."
-        elif item.type == "decimal":
+        elif item.type in {"decimal", "dimension"}:
+            if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+                errors[f"attributes.{item.key}"] = f"{item.label} debe ser un número decimal."
+                continue
             try:
                 number = Decimal(str(value))
             except (InvalidOperation, TypeError):
+                errors[f"attributes.{item.key}"] = f"{item.label} debe ser un número decimal."
+                continue
+            if not number.is_finite():
                 errors[f"attributes.{item.key}"] = f"{item.label} debe ser un número decimal."
                 continue
             if item.min is not None and number < item.min:
@@ -1111,11 +1144,53 @@ def validate_attributes(
         elif item.type in {"select", "radio"} and value not in item.options:
             errors[f"attributes.{item.key}"] = f"{item.label} contiene una opción inválida."
         elif item.type == "multiselect":
-            selected = value if isinstance(value, list) else [value]
-            if any(option not in item.options for option in selected):
+            if not isinstance(value, list) or any(
+                not isinstance(option, str) or option not in item.options
+                for option in value
+            ):
                 errors[f"attributes.{item.key}"] = f"{item.label} contiene opciones inválidas."
+        elif item.type == "boolean" and not isinstance(value, bool):
+            errors[f"attributes.{item.key}"] = f"{item.label} debe ser verdadero o falso."
+        elif item.type == "chips":
+            if not isinstance(value, list) or any(
+                not isinstance(token, str) or not token.strip()
+                for token in value
+            ):
+                errors[f"attributes.{item.key}"] = f"{item.label} debe ser una lista de textos."
+        elif item.type == "date":
+            if not _is_canonical_date(value):
+                errors[f"attributes.{item.key}"] = f"{item.label} debe usar el formato AAAA-MM-DD."
+        elif item.type == "variant_attribute":
+            if not isinstance(value, str):
+                errors[f"attributes.{item.key}"] = f"{item.label} debe ser un texto."
+        elif item.type in {"text", "textarea", "color"} and isinstance(
+            value, (Mapping, Collection)
+        ) and not isinstance(value, str):
+            errors[f"attributes.{item.key}"] = f"{item.label} debe ser un valor simple."
     return errors
 
 
 def _is_empty(value: Any) -> bool:
     return value is None or value == "" or value == [] or value == {}
+
+
+def _is_integral_bound(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return (
+        isinstance(value, Decimal)
+        and value.is_finite()
+        and value == value.to_integral_value()
+    )
+
+
+def _is_canonical_date(value: Any) -> bool:
+    if not isinstance(value, str) or len(value) != 10:
+        return False
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return False
+    return parsed.isoformat() == value
