@@ -279,7 +279,7 @@ def test_valid_selection_is_saved_in_session_and_details_show_template_key(clien
     html = details.get_data(as_text=True)
     assert "Electrónicos" in html
     assert "Cámaras y Fotografía" in html
-    assert "Electronics Cameras" in html
+    assert "Electronics Cameras" not in html
 
 
 def test_foreign_subcategory_is_rejected(client, session):

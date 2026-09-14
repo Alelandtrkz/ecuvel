@@ -20,7 +20,7 @@
         <span>/</span>
         <a href="{{ url_for('partners.new_product_category') }}" data-confirm-change>Categoría</a>
         <span>/</span>
-        <strong>{{ view.template.name }}</strong>
+        <strong>{{ draft.subcategory.name }}</strong>
       </p>
       <h1>Crear un nuevo producto</h1>
       <p>Completa la información técnica y comercial. El producto se enviará a revisión y no se publicará automáticamente.</p>
@@ -97,7 +97,7 @@
         </section>
 
         <section class="partner-draft-card" aria-labelledby="template-fields-title">
-          <h2 id="template-fields-title">{{ view.template.name }}</h2>
+          <h2 id="template-fields-title">{{ draft.subcategory.name }}</h2>
           <p>{{ view.template.description }}</p>
           <div class="partner-draft-grid partner-draft-grid--2">
             {% for field in view.template.fields %}
@@ -186,7 +186,7 @@
             </section>
 
             <div class="partner-variant-drawer-backdrop" data-variant-drawer-backdrop hidden></div>
-            <aside class="partner-variant-editor partner-variant-drawer" data-variant-editor aria-labelledby="variant-editor-title" hidden>
+            <aside class="partner-variant-editor partner-variant-drawer" data-variant-editor role="dialog" aria-modal="true" aria-labelledby="variant-editor-title" tabindex="-1" hidden>
               <div class="partner-variant-editor__heading">
                 <div><span>Presentación individual</span><h3 id="variant-editor-title" data-variant-editor-title>Nueva variante</h3></div>
                 <button type="button" class="partner-variant-editor__cancel" data-cancel-variant-edit aria-label="Cerrar editor"><i data-lucide="x" aria-hidden="true"></i></button>
@@ -197,6 +197,8 @@
                 <label><span>Precio (USD)</span><input data-new-variant-price inputmode="decimal" placeholder="0.00"></label>
                 <label><span>Precio anterior</span><input data-new-variant-compare-price inputmode="decimal" placeholder="Opcional"></label>
                 <label><span>Stock</span><input data-new-variant-stock inputmode="numeric" placeholder="0"></label>
+              </div>
+              <div class="partner-variant-editor__actions">
                 <button type="button" class="partner-button partner-button--primary" data-save-manual-variant>Agregar variante</button>
               </div>
             </aside>
@@ -210,7 +212,7 @@
             a calcular costos de envío más precisos para tus ventas.
           </p>
           <div class="partner-draft-grid partner-draft-grid--2">
-            {% set _weight_value = dimensions.get('product_weight_value') or dimensions.get('product_weight_kg', '') %}
+            {% set _weight_value = dimensions.get('product_weight_value') or dimensions.get('product_weight_kg') or '' %}
             {% set _weight_unit = dimensions.get('product_weight_unit') or 'kg' %}
             <label class="partner-draft-field">
               <span>Peso del producto&nbsp;<strong aria-label="obligatorio">*</strong></span>
@@ -278,14 +280,14 @@
               ] %}
                 <label class="partner-draft-field">
                   <span>{{ label }}</span>
-                  <input name="{{ key }}" value="{{ dimensions.get(key, '') }}" placeholder="0.00" inputmode="decimal">
+                  <input name="{{ key }}" value="{{ dimensions.get(key) if dimensions.get(key) is not none else '' }}" placeholder="0.00" inputmode="decimal">
                   {% if errors.get(key) %}<em class="partner-error">{{ errors.get(key) }}</em>{% endif %}
                 </label>
               {% endfor %}
             </div>
             <label class="partner-draft-field partner-draft-field--wide">
               <span>Notas de embalaje</span>
-              <textarea name="package_notes" rows="3">{{ dimensions.get("package_notes", "") }}</textarea>
+              <textarea name="package_notes" rows="3">{{ dimensions.get("package_notes") or "" }}</textarea>
             </label>
           </details>
         </section>
@@ -416,7 +418,7 @@
         <div class="partner-draft-grid" data-single-commercial-fields {% if family_enabled %}hidden{% endif %}>
           <label class="partner-draft-field">
             <span>Precio de venta (USD)</span>
-            <input form="partner-product-draft-form" name="price" value="{{ price.get('price', '') }}" placeholder="$ 0.00">
+            <input form="partner-product-draft-form" name="price" value="{{ price.get('price') if price.get('price') is not none else '' }}" placeholder="$ 0.00">
             {% if errors.price %}<em class="partner-error">{{ errors.price }}</em>{% endif %}
           </label>
           <div class="partner-commission-summary" data-single-commission-summary aria-live="polite">
@@ -433,11 +435,11 @@
           </div>
           <label class="partner-draft-field">
             <span>Precio anterior</span>
-            <input form="partner-product-draft-form" name="compare_at_price" value="{{ price.get('compare_at_price', '') }}" placeholder="$ 0.00">
+            <input form="partner-product-draft-form" name="compare_at_price" value="{{ price.get('compare_at_price') if price.get('compare_at_price') is not none else '' }}" placeholder="$ 0.00">
           </label>
           <label class="partner-draft-field">
             <span>Stock</span>
-            <input form="partner-product-draft-form" name="stock_quantity" value="{{ inventory.get('stock_quantity', '') }}" placeholder="0">
+            <input form="partner-product-draft-form" name="stock_quantity" value="{{ inventory.get('stock_quantity') if inventory.get('stock_quantity') is not none else '' }}" placeholder="0">
             {% if errors.stock_quantity %}<em class="partner-error">{{ errors.stock_quantity }}</em>{% endif %}
           </label>
           <label class="partner-draft-field">
@@ -480,7 +482,10 @@
       <em class="partner-autosave-status" data-autosave-status aria-live="polite"></em>
     </span>
     <div>
-      <a class="partner-button partner-button--secondary" href="{{ url_for('partners.products') }}">Cancelar</a>
+      <form method="post" action="{{ url_for('partners.delete_product_draft_route', draft_id=draft.id) }}" data-discard-product-draft>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="partner-button partner-button--secondary" type="submit">Cancelar</button>
+      </form>
       <button class="partner-button partner-button--secondary" form="partner-product-draft-form" type="submit">Guardar borrador</button>
       <a class="partner-button partner-button--secondary" href="{{ url_for('partners.product_draft_preview', draft_id=draft.id) }}">Vista previa</a>
       <button class="partner-button partner-button--primary" form="partner-product-draft-form" type="submit" formaction="{{ url_for('partners.submit_product_draft_route', draft_id=draft.id) }}" data-submit-review>
@@ -488,6 +493,18 @@
       </button>
     </div>
   </footer>
+
+  <dialog class="partner-confirm-dialog" aria-modal="true" aria-labelledby="partner-confirm-title" aria-describedby="partner-confirm-message" data-product-draft-confirmation>
+    <div class="partner-confirm-dialog__card">
+      <span class="partner-confirm-dialog__icon" aria-hidden="true"><i data-lucide="triangle-alert"></i></span>
+      <h2 id="partner-confirm-title" data-product-confirm-title>¿Confirmar este cambio?</h2>
+      <p id="partner-confirm-message" data-product-confirm-message></p>
+      <div class="partner-confirm-dialog__actions">
+        <button class="partner-button partner-button--secondary" type="button" data-product-confirm-cancel>Cancelar</button>
+        <button class="partner-button partner-confirm-dialog__confirm" type="button" data-product-confirm-accept>Confirmar</button>
+      </div>
+    </div>
+  </dialog>
 </main>
 {% endblock %}
 

@@ -6,8 +6,19 @@ from types import SimpleNamespace
 import pytest
 from werkzeug.datastructures import MultiDict
 
-from app.catalog.product_templates import PRODUCT_TEMPLATES, variant_axes_for_product_type
+from app.catalog.product_templates import (
+    PRODUCT_TEMPLATES,
+    ProductTemplate,
+    axis_def,
+    condition_applies,
+    default_variant_axes_for_attributes,
+    field_def,
+    validate_attributes,
+    variant_axes_for_attributes,
+    variant_axes_for_product_type,
+)
 from app.services.product_variant_builder import (
+    available_variant_axes,
     build_variant_state,
     publication_payload_from_draft,
     variant_rows_complete,
@@ -32,6 +43,130 @@ TEMPLATE = PRODUCT_TEMPLATES["electronics_phones"]
 )
 def test_phone_variant_axis_matrix(product_type, expected):
     assert {axis.key for axis in variant_axes_for_product_type(TEMPLATE, product_type)} == expected
+    assert {
+        axis.key
+        for axis in variant_axes_for_attributes(
+            TEMPLATE, {"tipo_producto": product_type}
+        )
+    } == expected
+
+
+@pytest.mark.parametrize(
+    ("equipment_type", "expected"),
+    (
+        ("Laptop", {"color", "ram", "almacenamiento"}),
+        ("Desktop", {"color", "ram", "almacenamiento"}),
+        ("Tablet", {"color", "ram", "almacenamiento"}),
+        ("Monitor", {"color", "tamano"}),
+        ("", {"color"}),
+        ("Desconocido", {"color"}),
+    ),
+)
+def test_computer_variant_axis_matrix_uses_tipo_equipo(equipment_type, expected):
+    template = PRODUCT_TEMPLATES["electronics_computers"]
+
+    assert {
+        axis.key
+        for axis in variant_axes_for_attributes(
+            template, {"tipo_equipo": equipment_type}
+        )
+    } == expected
+
+
+def test_condition_engine_and_defaults_are_not_tied_to_known_trigger_names():
+    template = ProductTemplate(
+        key="synthetic",
+        name="Synthetic",
+        category_code="SYNTHETIC",
+        subcategory_code="SYNTHETIC_LEAF",
+        fields=(
+            field_def(
+                "clase_producto",
+                "Clase",
+                type="select",
+                options=("A", "B"),
+            ),
+            field_def(
+                "capacidad",
+                "Capacidad",
+                required=True,
+                condition={"field": "clase_producto", "values": ["A"]},
+            ),
+            field_def("color_principal", "Color"),
+        ),
+        variant_axes=(
+            axis_def(
+                "capacidad",
+                "Capacidad",
+                condition={"field": "clase_producto", "values": ["A"]},
+                default_for=("A",),
+            ),
+            axis_def(
+                "color",
+                "Color",
+                source_field="color_principal",
+                default_for=("Legacy",),
+            ),
+        ),
+    )
+
+    assert condition_applies(None, {}) is True
+    assert condition_applies(
+        {"field": "clase_producto", "values": ["A"]},
+        {"clase_producto": "A"},
+    ) is True
+    assert condition_applies(
+        {"field": "clase_producto", "values": ["A"]},
+        {"clase_producto": "B"},
+    ) is False
+    assert condition_applies(
+        {"field": "clase_producto", "values": ["A"]}, {}
+    ) is False
+    assert [
+        axis.key
+        for axis in variant_axes_for_attributes(template, {"clase_producto": "A"})
+    ] == ["capacidad", "color"]
+    assert [
+        axis.key
+        for axis in variant_axes_for_attributes(template, {"clase_producto": "B"})
+    ] == ["color"]
+    assert [
+        axis.key
+        for axis in default_variant_axes_for_attributes(
+            template, {"clase_producto": "A", "tipo_producto": "Other"}
+        )
+    ] == ["capacidad"]
+    assert [
+        axis.key
+        for axis in default_variant_axes_for_attributes(
+            template, {"clase_producto": "B", "tipo_producto": "Legacy"}
+        )
+    ] == ["color"]
+    assert "attributes.capacidad" in validate_attributes(
+        template, {"clase_producto": "A"}, final=True
+    )
+    assert validate_attributes(
+        template, {"clase_producto": "B"}, final=True
+    ) == {}
+
+
+def test_available_axes_keep_potential_axes_and_generic_condition_metadata():
+    payload = available_variant_axes(
+        PRODUCT_TEMPLATES["electronics_computers"],
+        {"tipo_equipo": "Laptop"},
+    )
+    axes = {axis["key"]: axis for axis in payload}
+
+    assert set(axes) == {"color", "ram", "almacenamiento", "tamano"}
+    assert axes["color"]["condition"] is None
+    assert axes["ram"]["condition"] == {
+        "field": "tipo_equipo",
+        "values": ["Laptop", "Desktop", "Tablet"],
+    }
+    assert axes["tamano"]["condition"] == {
+        "field": "tipo_equipo",
+        "values": ["Monitor"],
+    }
 
 
 def test_listing_axis_policy_distinguishes_phone_and_shoe_detail_axes():
@@ -121,6 +256,25 @@ def test_rejects_axis_from_another_phone_product_type():
         product_type="Cable",
         rows=(_row("variant-1", {"ram_gb": "8"}),),
     )
+    assert variants == []
+    assert "no permitido" in errors["variants"]
+
+
+def test_crafted_computer_post_cannot_force_axis_with_false_condition():
+    config, variants, errors = build_variant_state(
+        form=_form(
+            _configuration("ram"),
+            rows=(_row("variant-1", {"ram": "16"}),),
+        ),
+        template=PRODUCT_TEMPLATES["electronics_computers"],
+        attributes={"tipo_equipo": "Monitor"},
+        product_code="CRI-00000001-000001",
+        existing_configuration=None,
+        existing_variants=None,
+        final=False,
+    )
+
+    assert config == {}
     assert variants == []
     assert "no permitido" in errors["variants"]
 
@@ -337,6 +491,49 @@ def test_disabling_family_archives_existing_rows_without_renumbering():
     assert config["enabled"] is False
     assert config["archived_family"] is True
     assert variants == existing
+
+
+def test_variant_mode_off_does_not_require_axes_for_an_empty_family():
+    existing_configuration = {
+        "version": 4,
+        "enabled": True,
+        "mode": "family",
+        "axes": [],
+        "default_variant_id": None,
+    }
+    form = MultiDict(
+        (
+            (
+                "variant_configuration",
+                json.dumps(
+                    {
+                        "version": 4,
+                        "enabled": False,
+                        "mode": "single",
+                        "axes": [],
+                    }
+                ),
+            ),
+            ("price", "100"),
+            ("stock_quantity", "4"),
+        )
+    )
+
+    config, variants, errors = build_variant_state(
+        form=form,
+        template=TEMPLATE,
+        attributes={"tipo_producto": "Smartphone"},
+        product_code="CRI-00000001-000001",
+        existing_configuration=existing_configuration,
+        existing_variants=[],
+        final=False,
+    )
+
+    assert errors == {}
+    assert variants == []
+    assert config["enabled"] is False
+    assert config["mode"] == "single"
+    assert config["axes"] == []
 
 
 def test_publication_contract_never_emits_archived_variants_as_offers():

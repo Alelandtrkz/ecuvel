@@ -188,6 +188,38 @@ def test_phone_presentation_uses_metadata_conditions_units_and_structured_sectio
     ]
 
 
+def test_computer_public_specifications_honor_generic_condition_true_and_false():
+    laptop_items = _items(
+        build_product_specification_presentation(
+            _row(
+                category_code="ELECTRONICS_COMPUTERS",
+                attributes={
+                    "tipo_equipo": "Laptop",
+                    "ram_gb": "16",
+                    "frecuencia_hz": "144",
+                },
+            )
+        )
+    )
+    monitor_items = _items(
+        build_product_specification_presentation(
+            _row(
+                category_code="ELECTRONICS_COMPUTERS",
+                attributes={
+                    "tipo_equipo": "Monitor",
+                    "ram_gb": "16",
+                    "frecuencia_hz": "144",
+                },
+            )
+        )
+    )
+
+    assert laptop_items["ram_gb"].value == "16 GB"
+    assert "frecuencia_hz" not in laptop_items
+    assert monitor_items["frecuencia_hz"].value == "144 Hz"
+    assert "ram_gb" not in monitor_items
+
+
 @pytest.mark.parametrize(
     ("category_code", "attributes", "expected_key", "expected_label", "expected_value"),
     [

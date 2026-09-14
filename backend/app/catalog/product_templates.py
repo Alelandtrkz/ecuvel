@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
@@ -861,31 +862,119 @@ def get_product_template_for_category_code(
     return PRODUCT_TEMPLATES.get(template_key) if template_key else None
 
 
+def condition_applies(
+    condition: Mapping[str, Any] | None,
+    values: Mapping[str, Any],
+) -> bool:
+    """Evaluate the registry's simple single-field membership condition."""
+    if condition is None:
+        return True
+    if not isinstance(condition, Mapping):
+        return False
+    field_key = condition.get("field")
+    allowed_values = condition.get("values")
+    if (
+        not isinstance(field_key, str)
+        or not field_key.strip()
+        or not isinstance(allowed_values, Collection)
+        or isinstance(allowed_values, (str, bytes, bytearray, Mapping))
+    ):
+        return False
+    try:
+        return field_key in values and values[field_key] in allowed_values
+    except TypeError:
+        return False
+
+
+def variant_axes_for_attributes(
+    template: ProductTemplate,
+    attributes: Mapping[str, Any],
+) -> tuple[VariantAxis, ...]:
+    """Return axes whose registry conditions apply to the current attributes."""
+    return tuple(
+        axis
+        for axis in template.variant_axes
+        if condition_applies(axis.condition, attributes)
+    )
+
+
+def _axis_is_default_for_attributes(
+    axis: VariantAxis,
+    attributes: Mapping[str, Any],
+) -> bool:
+    if not axis.default_for:
+        return False
+    condition_field = (
+        axis.condition.get("field")
+        if isinstance(axis.condition, Mapping)
+        else None
+    )
+    trigger_field = condition_field or "tipo_producto"
+    return attributes.get(trigger_field) in axis.default_for
+
+
+def default_variant_axes_for_attributes(
+    template: ProductTemplate,
+    attributes: Mapping[str, Any],
+) -> tuple[VariantAxis, ...]:
+    """Return eligible axes selected by the registry's default metadata."""
+    return tuple(
+        axis
+        for axis in variant_axes_for_attributes(template, attributes)
+        if _axis_is_default_for_attributes(axis, attributes)
+    )
+
+
 def variant_axes_for_product_type(
     template: ProductTemplate,
     product_type: str | None,
 ) -> tuple[VariantAxis, ...]:
-    """Return only axes explicitly allowed for the selected product type."""
-    return tuple(
-        axis
-        for axis in template.variant_axes
-        if not axis.condition
-        or (
-            axis.condition.get("field") == "tipo_producto"
-            and product_type in axis.condition.get("values", ())
-        )
-    )
+    """Compatibility wrapper for templates triggered by ``tipo_producto``."""
+    return variant_axes_for_attributes(template, {"tipo_producto": product_type})
 
 
 def default_variant_axes_for_product_type(
     template: ProductTemplate,
     product_type: str | None,
 ) -> tuple[VariantAxis, ...]:
-    return tuple(
-        axis
-        for axis in variant_axes_for_product_type(template, product_type)
-        if product_type in axis.default_for
+    """Compatibility wrapper for templates triggered by ``tipo_producto``."""
+    return default_variant_axes_for_attributes(
+        template,
+        {"tipo_producto": product_type},
     )
+
+
+def _condition_validation_errors(
+    condition: object,
+    *,
+    field_keys: set[str],
+    fields_by_key: dict[str, ProductTemplateField],
+) -> tuple[dict[str, str], Sequence[Any] | None]:
+    errors: dict[str, str] = {}
+    if not isinstance(condition, Mapping):
+        return {"condition": "La condición debe ser un mapeo."}, None
+
+    condition_field = condition.get("field")
+    if not isinstance(condition_field, str) or not condition_field.strip():
+        errors["condition.field"] = "La condición requiere un campo no vacío."
+        condition_field = None
+    elif condition_field not in field_keys:
+        errors["condition.field"] = "La condición referencia un campo inexistente."
+
+    condition_values = condition.get("values")
+    if (
+        not isinstance(condition_values, Sequence)
+        or isinstance(condition_values, (str, bytes, bytearray))
+        or not condition_values
+    ):
+        errors["condition.values"] = "La condición requiere una colección de valores no vacía."
+        return errors, None
+
+    trigger = fields_by_key.get(condition_field) if condition_field else None
+    if trigger and trigger.type in {"select", "radio"}:
+        if any(value not in trigger.options for value in condition_values):
+            errors["condition.values"] = "La condición contiene un valor imposible para el campo disparador."
+    return errors, condition_values
 
 
 def validate_template_registry() -> None:
@@ -940,6 +1029,17 @@ def validate_template_registry() -> None:
                 errors[f"{key}.{item.key}"] = "Opciones requeridas."
             seen.add(item.key)
         field_keys = {item.key for item in template.fields}
+        fields_by_key = {item.key: item for item in template.fields}
+        for item in template.fields:
+            if item.condition is None:
+                continue
+            condition_errors, _condition_values = _condition_validation_errors(
+                item.condition,
+                field_keys=field_keys,
+                fields_by_key=fields_by_key,
+            )
+            for suffix, message in condition_errors.items():
+                errors[f"{key}.{item.key}.{suffix}"] = message
         axis_keys: set[str] = set()
         for axis in template.variant_axes:
             if axis.key in axis_keys:
@@ -948,6 +1048,21 @@ def validate_template_registry() -> None:
                 errors[f"{key}.variant.{axis.key}"] = "El eje no corresponde a un campo de la plantilla."
             if axis.value_type not in {"text", "integer", "decimal", "select"}:
                 errors[f"{key}.variant.{axis.key}"] = "Tipo de valor de variante inválido."
+            if axis.condition is not None:
+                condition_errors, condition_values = _condition_validation_errors(
+                    axis.condition,
+                    field_keys=field_keys,
+                    fields_by_key=fields_by_key,
+                )
+                for suffix, message in condition_errors.items():
+                    errors[f"{key}.variant.{axis.key}.{suffix}"] = message
+                if condition_values is not None and any(
+                    default_value not in condition_values
+                    for default_value in axis.default_for
+                ):
+                    errors[f"{key}.variant.{axis.key}.default_for"] = (
+                        "Los valores predeterminados no son compatibles con la condición."
+                    )
             axis_keys.add(axis.key)
     if errors:
         raise ProductTemplateValidationError(errors)
@@ -965,10 +1080,8 @@ def validate_attributes(
     for item in template.fields:
         if item.key in excluded_keys:
             continue
-        if item.condition:
-            trigger_val = values.get(item.condition["field"])
-            if trigger_val not in item.condition["values"]:
-                continue
+        if not condition_applies(item.condition, values):
+            continue
         value = values.get(item.key)
         if final and item.required and _is_empty(value):
             errors[f"attributes.{item.key}"] = f"{item.label} es obligatorio."

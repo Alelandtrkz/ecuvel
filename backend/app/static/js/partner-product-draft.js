@@ -1,3 +1,61 @@
+const ecuvelPartnerVariantConditions = (() => {
+  const conditionApplies = (condition, valueForField) => {
+    if (!condition) return true;
+    if (typeof condition.field !== "string" || !Array.isArray(condition.values)) return false;
+    const currentValue = valueForField(condition.field);
+    return currentValue !== undefined && condition.values.includes(currentValue);
+  };
+
+  const eligibleAxes = (catalog, valueForField) => catalog.filter(
+    (axis) => conditionApplies(axis.condition, valueForField),
+  );
+
+  const dependentFieldKeys = (fields, triggerField) => fields
+    .filter((field) => field.condition?.field === triggerField)
+    .map((field) => field.key);
+
+  const resolvedTriggerValue = (previousValue, currentValue, accepted) => (
+    accepted ? currentValue : previousValue
+  );
+
+  const isDefaultAxis = (axis, valueForField) => {
+    if (!axis.default_for?.length) return false;
+    const triggerField = axis.condition?.field || "tipo_producto";
+    return axis.default_for.includes(valueForField(triggerField));
+  };
+
+  const conditionChangePlan = ({
+    previousValue,
+    currentValue,
+    wasVariantModeActive,
+    invalidAxisCount,
+    hasVariantData,
+    dependentValueCount = 0,
+  }) => {
+    const changed = currentValue !== previousValue;
+    return {
+      changed,
+      shouldConfirm: changed && (
+        dependentValueCount > 0
+        || invalidAxisCount > 0
+        || (wasVariantModeActive && hasVariantData)
+      ),
+      shouldDeactivate: changed && wasVariantModeActive,
+    };
+  };
+
+  return {
+    conditionApplies,
+    dependentFieldKeys,
+    eligibleAxes,
+    isDefaultAxis,
+    conditionChangePlan,
+    resolvedTriggerValue,
+  };
+})();
+
+globalThis.EcuvelPartnerVariantConditions = ecuvelPartnerVariantConditions;
+
 (() => {
   const root = document.querySelector("[data-product-draft]");
   if (!root) return;
@@ -6,6 +64,7 @@
   let dirty = false;
   let changeVersion = 0;
   let submitting = false;
+  let confirmationPending = false;
   let refreshChecklist = null;
   let autosaveNow = null;
   const commissionPolicy = (() => {
@@ -71,6 +130,62 @@
     if (window.lucide?.createIcons) window.lucide.createIcons();
   };
 
+  const confirmationDialog = document.querySelector("[data-product-draft-confirmation]");
+  const confirmationTitle = confirmationDialog?.querySelector("[data-product-confirm-title]");
+  const confirmationMessage = confirmationDialog?.querySelector("[data-product-confirm-message]");
+  const confirmationCancel = confirmationDialog?.querySelector("[data-product-confirm-cancel]");
+  const confirmationAccept = confirmationDialog?.querySelector("[data-product-confirm-accept]");
+  let confirmationResolve = null;
+  let confirmationReturnFocus = null;
+
+  function closeProductDraftConfirmation(accepted) {
+    if (!confirmationDialog?.open) return;
+    confirmationDialog.close(accepted ? "confirm" : "cancel");
+  }
+
+  confirmationCancel?.addEventListener("click", () => closeProductDraftConfirmation(false));
+  confirmationAccept?.addEventListener("click", () => closeProductDraftConfirmation(true));
+  confirmationDialog?.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeProductDraftConfirmation(false);
+  });
+  confirmationDialog?.addEventListener("click", (event) => {
+    if (event.target === confirmationDialog) closeProductDraftConfirmation(false);
+  });
+  confirmationDialog?.addEventListener("close", () => {
+    const accepted = confirmationDialog.returnValue === "confirm";
+    const resolve = confirmationResolve;
+    const returnFocus = confirmationReturnFocus;
+    confirmationResolve = null;
+    confirmationReturnFocus = null;
+    confirmationPending = false;
+    resolve?.(accepted);
+    if (!accepted) returnFocus?.focus({ preventScroll: true });
+  });
+
+  function requestProductDraftConfirmation({
+    title,
+    message,
+    cancelLabel,
+    confirmLabel,
+    origin,
+  }) {
+    if (!confirmationDialog || typeof confirmationDialog.showModal !== "function" || confirmationResolve) {
+      return Promise.resolve(false);
+    }
+    if (confirmationTitle) confirmationTitle.textContent = title;
+    if (confirmationMessage) confirmationMessage.textContent = message;
+    if (confirmationCancel) confirmationCancel.textContent = cancelLabel;
+    if (confirmationAccept) confirmationAccept.textContent = confirmLabel;
+    confirmationReturnFocus = origin || document.activeElement;
+    confirmationPending = true;
+    confirmationDialog.returnValue = "";
+    confirmationDialog.showModal();
+    refreshIcons();
+    window.setTimeout(() => confirmationCancel?.focus({ preventScroll: true }), 0);
+    return new Promise((resolve) => { confirmationResolve = resolve; });
+  }
+
   document.querySelectorAll("[data-confirm-change]").forEach((link) => {
     link.addEventListener("click", (event) => {
       if (dirty && !window.confirm("Hay cambios sin guardar. ¿Quieres cambiar la categoría de todos modos?")) {
@@ -112,6 +227,34 @@
       }
     });
   }
+
+  const discardDraftForm = document.querySelector("[data-discard-product-draft]");
+  const confirmedDiscardForms = new WeakSet();
+  discardDraftForm?.addEventListener("submit", async (event) => {
+    if (confirmedDiscardForms.has(discardDraftForm)) {
+      submitting = true;
+      dirty = false;
+      return;
+    }
+    event.preventDefault();
+    const submitter = event.submitter || discardDraftForm.querySelector("button[type='submit']");
+    const confirmed = await requestProductDraftConfirmation({
+      title: "¿Descartar este borrador?",
+      message: "Se eliminará este borrador y los cambios realizados.",
+      cancelLabel: "Seguir editando",
+      confirmLabel: "Descartar borrador",
+      origin: submitter,
+    });
+    if (!confirmed) return;
+    submitting = true;
+    dirty = false;
+    confirmedDiscardForms.add(discardDraftForm);
+    try {
+      discardDraftForm.requestSubmit(submitter);
+    } finally {
+      confirmedDiscardForms.delete(discardDraftForm);
+    }
+  });
 
   function galleryMessage(gallery, message, kind = "info") {
     const target = gallery.querySelector("[data-gallery-message]");
@@ -1118,11 +1261,25 @@
     const existing = parseJson("[data-existing-variants]", []);
     let savedConfig = {};
     try { savedConfig = JSON.parse(configInput?.value || "{}"); } catch (_error) { savedConfig = {}; }
-    const productTypeInput = form.querySelector('[name="attributes[tipo_producto]"]');
-    let previousProductType = productTypeInput?.value || "";
-    const productType = () => productTypeInput?.value || "";
-    const allowedFields = () => catalog.filter(
-      (field) => !field.allowed_product_types?.length || field.allowed_product_types.includes(productType()),
+    const attributeValue = (key) => form.elements.namedItem(`attributes[${key}]`)?.value;
+    const allowedFields = () => ecuvelPartnerVariantConditions.eligibleAxes(
+      catalog,
+      attributeValue,
+    );
+    const dependentAttributeWrappers = [...form.querySelectorAll("[data-condition-field]")];
+    const attributeConditionMetadata = dependentAttributeWrappers.map((wrapper) => {
+      const field = wrapper.querySelector("[data-attr-key]");
+      return {
+        key: field?.dataset.attrKey || "",
+        condition: { field: wrapper.dataset.conditionField || "" },
+      };
+    }).filter((field) => field.key && field.condition.field);
+    const conditionTriggers = [...new Set([
+      ...catalog.map((field) => field.condition?.field),
+      ...attributeConditionMetadata.map((field) => field.condition.field),
+    ].filter((key) => typeof key === "string" && key))];
+    const previousTriggerValues = new Map(
+      conditionTriggers.map((key) => [key, attributeValue(key) || ""]),
     );
     const definition = (key) => catalog.find((field) => field.key === key);
     const technicalValue = (source) => String(form.elements.namedItem(`attributes[${source}]`)?.value || "").trim();
@@ -1144,7 +1301,9 @@
 
     function ensureDefaultFields() {
       if (state.fields.length || !toggle?.checked) return;
-      allowedFields().filter((field) => field.default_for?.includes(productType()))
+      allowedFields().filter(
+        (field) => ecuvelPartnerVariantConditions.isDefaultAxis(field, attributeValue),
+      )
         .slice(0, Math.min(2, maxAxes)).forEach((field) => state.fields.push(field.key));
     }
     ensureDefaultFields();
@@ -1371,43 +1530,76 @@
       cancelEditing(); renderAll(); notifyChange();
     }
 
+    function buildOptionControl(field, {
+      titleText,
+      value = "",
+      swatch = "#111827",
+      inputDataKey,
+      inputDataValue,
+      swatchDataKey,
+      swatchDataValue,
+      className = "partner-manual-option",
+    }) {
+      const control = document.createElement("label");
+      control.className = className;
+      const title = document.createElement("span");
+      title.className = "partner-manual-option__label";
+      title.textContent = titleText;
+      const inputRow = document.createElement("span");
+      inputRow.className = "partner-manual-option__input";
+      if (field.is_visual) {
+        const color = document.createElement("input");
+        color.type = "color";
+        color.value = swatch || "#111827";
+        color.dataset[swatchDataKey] = swatchDataValue;
+        color.setAttribute("aria-label", `Muestra de ${field.label}`);
+        inputRow.appendChild(color);
+      }
+      const input = document.createElement("input");
+      input.type = ["integer", "decimal"].includes(field.value_type) ? "number" : "text";
+      input.step = field.value_type === "integer" ? "1" : field.value_type === "decimal" ? "0.01" : "";
+      input.dataset[inputDataKey] = inputDataValue;
+      input.value = value;
+      input.placeholder = `Selecciona o escribe ${field.label.toLowerCase()}`;
+      inputRow.appendChild(input);
+      const suggestions = document.createElement("span");
+      suggestions.className = "partner-manual-option__suggestions";
+      const choices = [...new Set([
+        ...(field.suggestions || []),
+        ...distinctValues(field.key).map((item) => item.label),
+      ])];
+      choices.forEach((choice) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "partner-attribute-chip";
+        button.textContent = `${choice}${field.unit ? ` ${field.unit}` : ""}`;
+        button.setAttribute("aria-pressed", String(String(choice) === String(value)));
+        button.addEventListener("click", () => {
+          input.value = choice;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          suggestions.querySelectorAll("button").forEach((item) => {
+            item.setAttribute("aria-pressed", String(item === button));
+          });
+        });
+        suggestions.appendChild(button);
+      });
+      control.append(title, inputRow, suggestions);
+      return control;
+    }
+
     function renderEditor(seedRow = null) {
       editorOptions?.replaceChildren();
       state.fields.forEach((key) => {
-        const field = definition(key) || { label: key, suggestions: [] };
-        const control = document.createElement("label");
-        control.className = "partner-manual-option";
-        const title = document.createElement("span");
-        title.className = "partner-manual-option__label";
-        title.textContent = `${field.label}${field.unit ? ` (${field.unit})` : ""}`;
-        const inputRow = document.createElement("span");
-        inputRow.className = "partner-manual-option__input";
-        let color = null;
-        if (field.is_visual) {
-          color = document.createElement("input"); color.type = "color"; color.dataset.manualOptionSwatch = key;
-          color.value = seedRow?.options[key]?.swatch || "#111827"; color.setAttribute("aria-label", `Muestra de ${field.label}`);
-          inputRow.appendChild(color);
-        }
-        const input = document.createElement("input");
-        input.type = ["integer", "decimal"].includes(field.value_type) ? "number" : "text";
-        input.step = field.value_type === "integer" ? "1" : field.value_type === "decimal" ? "0.01" : "";
-        input.dataset.manualOptionInput = key;
-        input.value = seedRow?.options[key]?.label || "";
-        input.placeholder = `Selecciona o escribe ${field.label.toLowerCase()}`;
-        inputRow.appendChild(input);
-        const suggestions = document.createElement("span");
-        suggestions.className = "partner-manual-option__suggestions";
-        const choices = [...new Set([...(field.suggestions || []), ...distinctValues(key).map((item) => item.label)])];
-        choices.forEach((choice) => {
-          const button = document.createElement("button"); button.type = "button";
-          button.className = "partner-attribute-chip"; button.textContent = `${choice}${field.unit ? ` ${field.unit}` : ""}`;
-          button.addEventListener("click", () => {
-            input.value = choice;
-            suggestions.querySelectorAll("button").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
-          });
-          suggestions.appendChild(button);
-        });
-        control.append(title, inputRow, suggestions); editorOptions?.appendChild(control);
+        const field = definition(key) || { key, label: key, suggestions: [] };
+        editorOptions?.appendChild(buildOptionControl(field, {
+          titleText: `${field.label}${field.unit ? ` (${field.unit})` : ""}`,
+          value: seedRow?.options[key]?.label || "",
+          swatch: seedRow?.options[key]?.swatch || "#111827",
+          inputDataKey: "manualOptionInput",
+          inputDataValue: key,
+          swatchDataKey: "manualOptionSwatch",
+          swatchDataValue: key,
+        }));
       });
       if (editorPrice) editorPrice.value = seedRow?.price || "";
       if (editorComparePrice) editorComparePrice.value = seedRow?.compareAtPrice || "";
@@ -1429,25 +1621,46 @@
       return complete ? result : null;
     }
 
-    function openDrawer(seedRow = null, title = "Nueva variante") {
+    let drawerReturnFocus = null;
+
+    function resetDrawerState() {
+      state.pendingField = null;
+      state.editingId = null;
+      editorOptions?.replaceChildren();
+      batchEditor?.replaceChildren();
+      if (editorOptions) editorOptions.hidden = false;
+      if (batchEditor) batchEditor.hidden = true;
+      const commercial = editor?.querySelector(".partner-variant-editor__commercial");
+      if (commercial) commercial.hidden = false;
+      if (editorTitle) editorTitle.textContent = "Nueva variante";
+      if (saveVariantButton) saveVariantButton.textContent = "Agregar variante";
+    }
+
+    function showDrawer(focusTarget) {
       if (editor) editor.hidden = false;
       if (drawerBackdrop) drawerBackdrop.hidden = false;
       document.body.classList.add("partner-variant-drawer-open");
+      window.setTimeout(() => focusTarget?.focus({ preventScroll: true }), 0);
+    }
+
+    function openDrawer(seedRow = null, title = "Nueva variante", editingId = null) {
+      drawerReturnFocus = document.activeElement;
+      resetDrawerState();
+      showMessage("");
+      state.editingId = editingId;
       if (editorTitle) editorTitle.textContent = title;
-      if (batchEditor) batchEditor.hidden = true;
-      if (editorOptions) editorOptions.hidden = false;
-      const commercial = editor?.querySelector(".partner-variant-editor__commercial");
-      commercial?.removeAttribute("hidden");
-      commercial?.querySelectorAll("label").forEach((label) => { label.hidden = false; });
       renderEditor(seedRow);
-      window.setTimeout(() => editorOptions?.querySelector("input")?.focus(), 0);
+      showDrawer(editorOptions?.querySelector("input") || editor);
     }
 
     function closeDrawer() {
+      const returnFocus = drawerReturnFocus;
       if (editor) editor.hidden = true;
       if (drawerBackdrop) drawerBackdrop.hidden = true;
       document.body.classList.remove("partner-variant-drawer-open");
-      state.pendingField = null;
+      drawerReturnFocus = null;
+      resetDrawerState();
+      returnFocus?.focus?.({ preventScroll: true });
     }
 
     function captureSourceSnapshot() {
@@ -1472,25 +1685,30 @@
     function openBatchField(key) {
       const field = definition(key);
       if (!field || !batchEditor) return;
+      drawerReturnFocus = document.activeElement;
+      resetDrawerState();
+      showMessage("");
       state.pendingField = key;
-      batchEditor.replaceChildren();
       const intro = document.createElement("p");
       intro.textContent = `Asigna ${field.label} a cada variante antes de agregar el campo.`;
       batchEditor.appendChild(intro);
       state.variants.forEach((row) => {
-        const label = document.createElement("label");
-        const name = document.createElement("span"); name.textContent = rowName(row);
-        const input = document.createElement("input"); input.dataset.batchVariantId = row.variantId; input.placeholder = field.label;
-        label.append(name, input); batchEditor.appendChild(label);
+        batchEditor.appendChild(buildOptionControl(field, {
+          titleText: `Elige ${field.label} para la variante ${rowName(row)}`,
+          inputDataKey: "batchVariantId",
+          inputDataValue: row.variantId,
+          swatchDataKey: "batchVariantSwatch",
+          swatchDataValue: row.variantId,
+          className: "partner-manual-option partner-variant-batch__assignment",
+        }));
       });
       if (editorOptions) editorOptions.hidden = true;
       batchEditor.hidden = false;
-      editor?.querySelectorAll(".partner-variant-editor__commercial label").forEach((label) => { label.hidden = true; });
-      if (saveVariantButton) saveVariantButton.textContent = "Confirmar campo";
-      openDrawer(null, `Agregar ${field.label}`);
-      if (editorOptions) editorOptions.hidden = true;
-      batchEditor.hidden = false;
-      editor?.querySelectorAll(".partner-variant-editor__commercial label").forEach((label) => { label.hidden = true; });
+      const commercial = editor?.querySelector(".partner-variant-editor__commercial");
+      if (commercial) commercial.hidden = true;
+      if (editorTitle) editorTitle.textContent = `Agregar ${field.label}`;
+      if (saveVariantButton) saveVariantButton.textContent = "Agregar campo";
+      showDrawer(batchEditor.querySelector("input") || editor);
     }
 
     function saveBatchField() {
@@ -1501,12 +1719,26 @@
         showMessage("Completa el nuevo campo en todas las variantes.", "error");
         return true;
       }
+      const proposedValues = new Map(inputs.map((input) => [
+        input.dataset.batchVariantId,
+        String(input.value).trim(),
+      ]));
+      const nextFields = [...state.fields, key];
+      const proposedKeys = state.variants.map((row) => rowKey({
+        ...row.options,
+        [key]: { label: proposedValues.get(row.variantId) || "" },
+      }, nextFields));
+      if (new Set(proposedKeys).size !== proposedKeys.length) {
+        showMessage("Las asignaciones producirían variantes duplicadas. Elige valores diferentes.", "error");
+        return true;
+      }
       state.fields.push(key);
       inputs.forEach((input) => {
         const row = state.variants.find((item) => item.variantId === input.dataset.batchVariantId);
-        if (row) row.options[key] = { label: String(input.value).trim(), swatch: null };
+        const swatch = input.closest(".partner-variant-batch__assignment")
+          ?.querySelector("[data-batch-variant-swatch]")?.value || null;
+        if (row) row.options[key] = { label: String(input.value).trim(), swatch };
       });
-      state.pendingField = null;
       closeDrawer(); renderAll(); notifyChange();
       return true;
     }
@@ -1589,24 +1821,14 @@
 
     function editVariant(id) {
       const row = state.variants.find((variant) => variant.variantId === id); if (!row) return;
-      state.editingId = id;
-      if (editorTitle) editorTitle.textContent = "Editar variante";
+      openDrawer(row, "Editar variante", id);
       if (saveVariantButton) saveVariantButton.textContent = "Guardar cambios";
-      if (cancelEditButton) cancelEditButton.hidden = false;
-      openDrawer(row, "Editar variante");
     }
     function duplicateVariant(id) {
       const row = state.variants.find((variant) => variant.variantId === id); if (!row) return;
-      state.editingId = null;
-      if (editorTitle) editorTitle.textContent = "Duplicar como nueva variante";
-      if (saveVariantButton) saveVariantButton.textContent = "Agregar variante";
-      if (cancelEditButton) cancelEditButton.hidden = false;
       openDrawer(row, "Duplicar como nueva variante"); showMessage("Cambia al menos un valor antes de agregarla.", "info");
     }
     function cancelEditing() {
-      state.editingId = null;
-      if (editorTitle) editorTitle.textContent = "Nueva variante";
-      if (saveVariantButton) saveVariantButton.textContent = "Agregar variante";
       closeDrawer();
     }
 
@@ -1757,6 +1979,31 @@
       renderFieldBar(); renderRows(); cancelEditing(); syncConfiguration(); moveGalleryForMode();
     }
 
+    function deactivateVariantMode({ alreadyConfirmed = false, skipSourceFields = new Set() } = {}) {
+      const principal = state.variants.find((row) => row.variantId === state.defaultId);
+      if (principal && !alreadyConfirmed && !window.confirm("Las variantes se archivarán durante este borrador y la principal se convertirá en producto simple. ¿Continuar?")) {
+        if (toggle) toggle.checked = true;
+        return false;
+      }
+      if (principal) {
+        state.fields.forEach((key) => {
+          const source = definition(key)?.source_field || key;
+          const input = form.elements.namedItem(`attributes[${source}]`);
+          if (input && !(input instanceof RadioNodeList)) {
+            input.disabled = false;
+            if (!skipSourceFields.has(source)) input.value = principal.options[key]?.label || "";
+          }
+        });
+        const priceInput = form.elements.namedItem("price"); if (priceInput) priceInput.value = principal.price || "";
+        const compareInput = form.elements.namedItem("compare_at_price"); if (compareInput) compareInput.value = principal.compareAtPrice || "";
+        const stockInput = form.elements.namedItem("stock_quantity"); if (stockInput) stockInput.value = principal.stock || "";
+      }
+      if (panel) panel.hidden = true;
+      if (activation) activation.hidden = true;
+      renderAll(); notifyChange();
+      return true;
+    }
+
     toggle?.addEventListener("change", () => {
       if (toggle.checked) {
         captureSourceSnapshot();
@@ -1772,23 +2019,7 @@
           renderTechnicalBadges(); renderCommercialSummary(); moveGalleryForMode();
         }
       } else {
-        const principal = state.variants.find((row) => row.variantId === state.defaultId);
-        if (principal && !window.confirm("Las variantes se archivarÃ¡n durante este borrador y la principal se convertirÃ¡ en producto simple. Â¿Continuar?")) {
-          toggle.checked = true; return;
-        }
-        if (principal) {
-          state.fields.forEach((key) => {
-            const source = definition(key)?.source_field || key;
-            const input = form.elements.namedItem(`attributes[${source}]`);
-            if (input && !(input instanceof RadioNodeList)) { input.disabled = false; input.value = principal.options[key]?.label || ""; }
-          });
-          const priceInput = form.elements.namedItem("price"); if (priceInput) priceInput.value = principal.price || "";
-          const compareInput = form.elements.namedItem("compare_at_price"); if (compareInput) compareInput.value = principal.compareAtPrice || "";
-          const stockInput = form.elements.namedItem("stock_quantity"); if (stockInput) stockInput.value = principal.stock || "";
-        }
-        if (panel) panel.hidden = true;
-        if (activation) activation.hidden = true;
-        renderAll(); notifyChange();
+        deactivateVariantMode();
       }
     });
     pickerButton?.addEventListener("click", (event) => {
@@ -1837,6 +2068,11 @@
     saveVariantButton?.addEventListener("click", saveManualVariant);
     cancelEditButton?.addEventListener("click", cancelEditing);
     drawerBackdrop?.addEventListener("click", cancelEditing);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || editor?.hidden || confirmationDialog?.open) return;
+      event.preventDefault();
+      cancelEditing();
+    });
     startEmptyButton?.addEventListener("click", () => {
       state.activationPending = false;
       if (activation) activation.hidden = true;
@@ -1871,14 +2107,121 @@
       state.variants.push(converted); state.defaultId = converted.variantId;
       renderAll(); notifyChange();
     });
-    productTypeInput?.addEventListener("change", () => {
+    function syncEnhancedSelect(triggerControl) {
+      const select = triggerControl?.closest?.("[data-partner-select]");
+      if (!select) return;
+      const label = select.querySelector("[data-partner-select-label]");
+      const selected = triggerControl.selectedOptions?.[0];
+      if (label) label.textContent = selected?.textContent?.trim() || "Seleccione una opción";
+      select.querySelectorAll(".partner-select__option[data-value]").forEach((option) => {
+        option.setAttribute("aria-selected", String(option.dataset.value === triggerControl.value));
+      });
+    }
+
+    function triggerControls(triggerKey) {
+      const namedControl = form.elements.namedItem(`attributes[${triggerKey}]`);
+      if (!namedControl) return [];
+      return namedControl instanceof RadioNodeList ? [...namedControl] : [namedControl];
+    }
+
+    function dependentAttributeFields(triggerKey) {
+      const keys = new Set(ecuvelPartnerVariantConditions.dependentFieldKeys(
+        attributeConditionMetadata,
+        triggerKey,
+      ));
+      return dependentAttributeWrappers.map((wrapper) => {
+        const field = wrapper.querySelector("[data-attr-key]");
+        return { wrapper, field, key: field?.dataset.attrKey || "" };
+      }).filter((entry) => keys.has(entry.key));
+    }
+
+    function fieldHasValue(entry) {
+      return [...entry.wrapper.querySelectorAll("input[name], select[name], textarea[name]")]
+        .some((control) => (
+          ["checkbox", "radio"].includes(control.type)
+            ? control.checked
+            : Boolean(String(control.value || "").trim())
+        ));
+    }
+
+    function clearDependentAttribute(entry) {
+      entry.wrapper.querySelectorAll("input[name], select[name], textarea[name]").forEach((control) => {
+        if (["checkbox", "radio"].includes(control.type)) control.checked = false;
+        else control.value = "";
+        if (control instanceof HTMLSelectElement) syncEnhancedSelect(control);
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+        control.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      entry.wrapper.querySelectorAll("[data-quick-options] button").forEach((button) => {
+        button.setAttribute("aria-pressed", "false");
+      });
+    }
+
+    function restoreTriggerValue(triggerKey, previousValue, currentValue, changedControl) {
+      const restoredValue = ecuvelPartnerVariantConditions.resolvedTriggerValue(
+        previousValue,
+        currentValue,
+        false,
+      );
+      const controls = triggerControls(triggerKey);
+      restoringTrigger = true;
+      if (controls.length > 1) {
+        controls.forEach((control) => { control.checked = control.value === restoredValue; });
+      } else if (controls[0]) {
+        controls[0].value = restoredValue;
+        syncEnhancedSelect(controls[0]);
+      }
+      const restoredControl = controls.find((control) => control.checked) || controls[0] || changedControl;
+      restoredControl?.dispatchEvent(new Event("change", { bubbles: true }));
+      restoringTrigger = false;
+    }
+
+    let restoringTrigger = false;
+    async function handleConditionTriggerChange(triggerKey, changedControl) {
+      if (restoringTrigger) return;
+      const previousValue = previousTriggerValues.get(triggerKey) || "";
+      const currentValue = attributeValue(triggerKey) || "";
+      if (currentValue === previousValue) return;
+      const dependentFields = dependentAttributeFields(triggerKey);
+      const populatedDependentFields = dependentFields.filter(fieldHasValue);
+      const wasVariantModeActive = Boolean(toggle?.checked);
       const valid = new Set(allowedFields().map((field) => field.key));
       const invalid = state.fields.filter((key) => !valid.has(key));
-      const invalidLabels = invalid.map((key) => definition(key)?.label || key).join(", ");
-      if (invalid.length && !window.confirm(`El nuevo tipo no admite: ${invalidLabels}. Esos campos se eliminarán y las variantes duplicadas se reducirán conservando la principal o la más antigua. ¿Continuar?`)) {
-        productTypeInput.value = previousProductType; return;
+      const hasVariantMedia = [...rootEl.querySelectorAll("[data-draft-gallery][data-variant-value-key]")]
+        .some((gallery) => Number(gallery.dataset.count || 0) > 0);
+      const hasVariantData = state.variants.length > 0 || hasVariantMedia;
+      const changePlan = ecuvelPartnerVariantConditions.conditionChangePlan({
+        previousValue,
+        currentValue,
+        wasVariantModeActive,
+        invalidAxisCount: invalid.length,
+        hasVariantData,
+        dependentValueCount: populatedDependentFields.length,
+      });
+      if (changePlan.shouldConfirm) {
+        const triggerField = form.querySelector(`[data-attr-key="${CSS.escape(triggerKey)}"]`);
+        const triggerLabel = triggerField?.dataset.attrLabel || "tipo de producto";
+        const origin = changedControl?.closest?.("[data-partner-select]")
+          ?.querySelector("[data-partner-select-button]") || changedControl;
+        const confirmed = await requestProductDraftConfirmation({
+          title: `¿Cambiar a ${currentValue || "otro tipo"}?`,
+          message: `Al cambiar ${triggerLabel.toLowerCase()} se restablecerán las características y variantes asociadas con ${previousValue || "el tipo actual"}.`,
+          cancelLabel: `Seguir con ${previousValue || "el tipo actual"}`,
+          confirmLabel: `Cambiar a ${currentValue || "otro tipo"}`,
+          origin,
+        });
+        if (!confirmed) {
+          restoreTriggerValue(triggerKey, previousValue, currentValue, changedControl);
+          return;
+        }
       }
-      previousProductType = productType();
+      previousTriggerValues.set(triggerKey, currentValue);
+      restoringTrigger = true;
+      dependentFields.forEach((entry) => {
+        clearDependentAttribute(entry);
+        if (previousTriggerValues.has(entry.key)) previousTriggerValues.set(entry.key, "");
+      });
+      restoringTrigger = false;
       invalid.forEach((key) => state.variants.forEach((row) => delete row.options[key]));
       state.fields = state.fields.filter((key) => valid.has(key));
       const uniqueRows = new Map();
@@ -1891,7 +2234,20 @@
       if (!state.variants.some((row) => row.variantId === state.defaultId)) {
         state.defaultId = state.variants.find((row) => row.enabled)?.variantId || "";
       }
-      ensureDefaultFields(); renderAll(); notifyChange();
+      if (changePlan.shouldDeactivate && toggle) {
+        toggle.checked = false;
+        deactivateVariantMode({
+          alreadyConfirmed: true,
+          skipSourceFields: new Set(dependentFields.map((entry) => entry.key)),
+        });
+      } else {
+        ensureDefaultFields(); renderAll(); notifyChange();
+      }
+    }
+    conditionTriggers.forEach((triggerKey) => {
+      triggerControls(triggerKey).forEach((control) => {
+        control.addEventListener("change", () => handleConditionTriggerChange(triggerKey, control));
+      });
     });
     form.addEventListener("formdata", syncConfiguration);
     document.addEventListener("ecuvel:gallery-updated", renderRows);
@@ -2056,6 +2412,7 @@
 
     async function autosave(_force = false) {
       if (submitting) return false;
+      if (confirmationPending) return false;
       if (saving) return false;
       if (!dirty) return true;
       saving = true;

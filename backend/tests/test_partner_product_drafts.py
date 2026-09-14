@@ -7,6 +7,7 @@ import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -52,6 +53,7 @@ from app.models.enums import (
     UserStatus,
 )
 from app.services.partner_product_categories import PARTNER_PRODUCT_DRAFT_SESSION_KEY
+from app.services.product_drafts import PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY
 
 
 pytestmark = pytest.mark.integration
@@ -227,8 +229,47 @@ def _phone_category_tree(session):
     return electronics, phones
 
 
+def _computer_category_tree(session):
+    existing = session.scalar(
+        select(Category).where(Category.code == "ELECTRONICS_COMPUTERS")
+    )
+    if existing is not None:
+        return existing.parent, existing
+    electronics = Category(
+        code="ELECTRONICS",
+        name="Electrónicos",
+        slug=f"electronicos-{uuid.uuid4().hex[:6]}",
+        is_active=True,
+        sort_order=1,
+    )
+    computers = Category(
+        code="ELECTRONICS_COMPUTERS",
+        name="Computadoras y Tabletas",
+        slug=f"computadoras-{uuid.uuid4().hex[:6]}",
+        parent=electronics,
+        is_active=True,
+        sort_order=1,
+    )
+    session.add_all([electronics, computers])
+    session.flush()
+    return electronics, computers
+
+
 def _create_phone_draft(client, session, user: User) -> ProductDraft:
     category, subcategory = _phone_category_tree(session)
+    session.commit()
+    _login(client, user)
+    response = client.post(
+        "/partners/products/drafts",
+        data={"category_id": str(category.id), "subcategory_id": str(subcategory.id)},
+        follow_redirects=False,
+    )
+    draft_id = uuid.UUID(response.headers["Location"].rstrip("/").rsplit("/", 1)[-1])
+    return session.get(ProductDraft, draft_id)
+
+
+def _create_computer_draft(client, session, user: User) -> ProductDraft:
+    category, subcategory = _computer_category_tree(session)
     session.commit()
     _login(client, user)
     response = client.post(
@@ -351,6 +392,98 @@ def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(
     assert "binding.beauty_cosmetics.category_code" in exc_info.value.errors
 
 
+@pytest.mark.parametrize(
+    ("condition", "error_suffix"),
+    (
+        ([], ".condition"),
+        ({"values": ["Smartphone"]}, ".condition.field"),
+        ({"field": "", "values": ["Smartphone"]}, ".condition.field"),
+        (
+            {"field": "campo_inexistente", "values": ["Smartphone"]},
+            ".condition.field",
+        ),
+        ({"field": "tipo_producto", "values": []}, ".condition.values"),
+        (
+            {"field": "tipo_producto", "values": "Smartphone"},
+            ".condition.values",
+        ),
+        (
+            {"field": "tipo_producto", "values": ["Valor imposible"]},
+            ".condition.values",
+        ),
+    ),
+)
+def test_template_registry_rejects_malformed_field_conditions(
+    monkeypatch,
+    condition,
+    error_suffix,
+):
+    template = PRODUCT_TEMPLATES["electronics_phones"]
+    fields = tuple(
+        replace(field, condition=condition) if field.key == "ram_gb" else field
+        for field in template.fields
+    )
+    monkeypatch.setitem(
+        PRODUCT_TEMPLATES,
+        template.key,
+        replace(template, fields=fields),
+    )
+
+    with pytest.raises(ProductTemplateValidationError) as exc_info:
+        validate_template_registry()
+
+    assert any(key.endswith(error_suffix) for key in exc_info.value.errors)
+
+
+def test_template_registry_rejects_malformed_axis_condition(monkeypatch):
+    template = PRODUCT_TEMPLATES["electronics_computers"]
+    axes = tuple(
+        replace(
+            axis,
+            condition={"field": "campo_inexistente", "values": ["Laptop"]},
+        )
+        if axis.key == "ram"
+        else axis
+        for axis in template.variant_axes
+    )
+    monkeypatch.setitem(
+        PRODUCT_TEMPLATES,
+        template.key,
+        replace(template, variant_axes=axes),
+    )
+
+    with pytest.raises(ProductTemplateValidationError) as exc_info:
+        validate_template_registry()
+
+    assert (
+        "electronics_computers.variant.ram.condition.field"
+        in exc_info.value.errors
+    )
+
+
+def test_template_registry_rejects_axis_default_outside_condition(monkeypatch):
+    template = PRODUCT_TEMPLATES["electronics_phones"]
+    axes = tuple(
+        replace(axis, default_for=("Cable",))
+        if axis.key == "ram_gb"
+        else axis
+        for axis in template.variant_axes
+    )
+    monkeypatch.setitem(
+        PRODUCT_TEMPLATES,
+        template.key,
+        replace(template, variant_axes=axes),
+    )
+
+    with pytest.raises(ProductTemplateValidationError) as exc_info:
+        validate_template_registry()
+
+    assert (
+        "electronics_phones.variant.ram_gb.default_for"
+        in exc_info.value.errors
+    )
+
+
 def test_template_registry_does_not_include_removed_package_content_field():
     validate_template_registry()
     for template in PRODUCT_TEMPLATES.values():
@@ -446,6 +579,241 @@ def test_product_draft_form_removes_highlights_and_package_content_section(clien
     assert "mAh" in html
     assert "Resolución de foto o sensor en megapíxeles." in html
     assert "Capacidad de batería en miliamperios-hora." in html
+
+
+def test_product_draft_editor_uses_localized_title_and_renders_null_values_empty(
+    client,
+    session,
+):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_computer_draft(client, session, user)
+    draft.pricing_data = {"price": None, "compare_at_price": None}
+    draft.inventory_data = {
+        "stock_quantity": None,
+        "preparation_time_days": None,
+    }
+    draft.dimensions_data = {
+        "product_weight_value": None,
+        "product_weight_kg": None,
+        "product_length_cm": None,
+        "package_notes": None,
+    }
+    session.commit()
+
+    response = client.get(f"/partners/products/drafts/{draft.id}")
+    html = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Computadoras y Tabletas" in html
+    assert "Electronics Computers" not in html
+    assert "precios válidos" in html
+    assert "vÃ¡lidos" not in html
+    assert re.search(r'name="price" value=""', html)
+    assert re.search(r'name="compare_at_price" value=""', html)
+    assert re.search(r'name="stock_quantity" value=""', html)
+    assert re.search(r'name="product_weight_value" value=""', html)
+    assert re.search(r'name="product_length_cm" value=""', html)
+    assert '<textarea name="package_notes" rows="3"></textarea>' in html
+    assert "None" not in html
+    assert f'/products/drafts/{draft.id}/delete' in html
+    assert "data-discard-product-draft" in html
+    assert re.search(
+        rf'<form method="post" action="[^"]*/products/drafts/{draft.id}/delete" '
+        r'data-discard-product-draft>\s*'
+        r'<input type="hidden" name="csrf_token" value="[^"]*">',
+        html,
+    )
+    assert 'data-product-draft-confirmation' in html
+    assert 'aria-modal="true"' in html
+    assert 'data-product-confirm-cancel' in html
+    assert 'data-product-confirm-accept' in html
+
+
+def test_computer_type_change_clears_dependent_values_and_preserves_common_values(
+    client,
+    session,
+):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_computer_draft(client, session, user)
+    draft.attributes = {
+        "tipo_equipo": "Laptop",
+        "color_principal": "Negro",
+        "material": "Aluminio",
+        "procesador": "Core i7",
+        "ram_gb": "12",
+        "almacenamiento_gb": "256",
+        "tipo_almacenamiento": "SSD",
+        "sistema_operativo": "Windows",
+        "pantalla_pulgadas": "16",
+    }
+    session.commit()
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "attributes[tipo_equipo]": "Desktop",
+            "attributes[color_principal]": "Negro",
+            "attributes[material]": "Aluminio",
+            "attributes[procesador]": "",
+            "attributes[ram_gb]": "",
+            "attributes[almacenamiento_gb]": "",
+            "attributes[tipo_almacenamiento]": "",
+            "attributes[sistema_operativo]": "",
+            # A crafted stale value for an inapplicable field must also be dropped.
+            "attributes[pantalla_pulgadas]": "16",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    session.expire_all()
+    persisted = session.get(ProductDraft, draft.id)
+    assert persisted.attributes["tipo_equipo"] == "Desktop"
+    assert persisted.attributes["color_principal"] == "Negro"
+    assert persisted.attributes["material"] == "Aluminio"
+    for key in (
+        "procesador",
+        "ram_gb",
+        "almacenamiento_gb",
+        "tipo_almacenamiento",
+        "sistema_operativo",
+    ):
+        assert persisted.attributes.get(key) is None
+    assert "pantalla_pulgadas" not in persisted.attributes
+
+    html = client.get(f"/partners/products/drafts/{draft.id}").get_data(as_text=True)
+    assert re.search(r'name="attributes\[ram_gb\]" value=""', html)
+    assert re.search(r'name="attributes\[almacenamiento_gb\]" value=""', html)
+    assert re.search(r'name="attributes\[pantalla_pulgadas\]" value=""', html)
+
+
+def test_laptop_to_monitor_drops_stale_laptop_values_and_keeps_monitor_fields_empty(
+    client,
+    session,
+):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_computer_draft(client, session, user)
+    draft.attributes = {
+        "tipo_equipo": "Laptop",
+        "color_principal": "Plata",
+        "material": "Aluminio",
+        "ram_gb": "12",
+        "almacenamiento_gb": "256",
+        "sistema_operativo": "Windows",
+        "pantalla_pulgadas": "16",
+    }
+    session.commit()
+
+    response = client.post(
+        f"/partners/products/drafts/{draft.id}/save",
+        data={
+            "attributes[tipo_equipo]": "Monitor",
+            "attributes[color_principal]": "Plata",
+            "attributes[material]": "Aluminio",
+            "attributes[ram_gb]": "12",
+            "attributes[almacenamiento_gb]": "256",
+            "attributes[sistema_operativo]": "Windows",
+            "attributes[pantalla_pulgadas]": "",
+            "attributes[resolucion_pantalla]": "",
+            "attributes[frecuencia_hz]": "",
+            "attributes[tipo_panel]": "",
+            "attributes[tipo_conexion_monitor]": "",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    session.expire_all()
+    persisted = session.get(ProductDraft, draft.id)
+    assert persisted.attributes["tipo_equipo"] == "Monitor"
+    assert persisted.attributes["color_principal"] == "Plata"
+    assert persisted.attributes["material"] == "Aluminio"
+    for key in ("ram_gb", "almacenamiento_gb", "sistema_operativo"):
+        assert key not in persisted.attributes
+    for key in (
+        "pantalla_pulgadas",
+        "resolucion_pantalla",
+        "frecuencia_hz",
+        "tipo_panel",
+        "tipo_conexion_monitor",
+    ):
+        assert persisted.attributes.get(key) in (None, [])
+
+
+def test_same_selection_reuses_draft_until_explicit_cancel_discards_it(
+    client,
+    app,
+    session,
+):
+    user = _user(session)
+    _enabled_store(session, user)
+    draft = _create_draft_via_selector(client, session, user)
+    old_id = draft.id
+    category_id = draft.category_id
+    subcategory_id = draft.subcategory_id
+    draft.title = "Información que debe descartarse"
+    storage_key = f"drafts/{uuid.uuid4().hex}.png"
+    stored = Path(app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"]) / storage_key
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(b"draft image")
+    session.add(
+        ProductDraftFile(
+            draft_id=old_id,
+            kind=ProductDraftFileKind.IMAGE,
+            status=ProductDraftFileStatus.ACTIVE,
+            storage_key=storage_key,
+            original_filename="draft.png",
+            media_type="image/png",
+            size_bytes=len(b"draft image"),
+            sha256="c" * 64,
+            position=0,
+            is_cover=True,
+        )
+    )
+    session.commit()
+
+    reuse = client.post(
+        "/partners/products/drafts",
+        data={
+            "category_id": str(category_id),
+            "subcategory_id": str(subcategory_id),
+        },
+        follow_redirects=False,
+    )
+    assert reuse.status_code == 302
+    assert reuse.headers["Location"].endswith(str(old_id))
+
+    cancelled = client.post(
+        f"/partners/products/drafts/{old_id}/delete",
+        follow_redirects=False,
+    )
+    assert cancelled.status_code == 302
+    assert "/partners/my-products" in cancelled.headers["Location"]
+    session.expire_all()
+    assert session.get(ProductDraft, old_id) is None
+    assert not stored.exists()
+    with client.session_transaction() as browser_session:
+        assert PARTNER_CURRENT_PRODUCT_DRAFT_SESSION_KEY not in browser_session
+
+    replacement = client.post(
+        "/partners/products/drafts",
+        data={
+            "category_id": str(category_id),
+            "subcategory_id": str(subcategory_id),
+        },
+        follow_redirects=False,
+    )
+    assert replacement.status_code == 302
+    replacement_id = uuid.UUID(replacement.headers["Location"].rstrip("/").rsplit("/", 1)[-1])
+    assert replacement_id != old_id
+    session.expire_all()
+    replacement_draft = session.get(ProductDraft, replacement_id)
+    assert replacement_draft is not None
+    assert replacement_draft.title is None
+    assert replacement_draft.attributes == {}
 
 
 def test_preparation_time_input_preserves_h3_number_contract(client, session):
@@ -1288,6 +1656,10 @@ def test_foreign_user_cannot_open_draft_or_file(client, session):
     assert preview.status_code == 404
     submit = client.post(f"/partners/products/drafts/{draft.id}/submit-saved")
     assert submit.status_code == 404
+    cancel = client.post(f"/partners/products/drafts/{draft.id}/delete")
+    assert cancel.status_code == 404
+    session.expire_all()
+    assert session.get(ProductDraft, draft.id) is not None
 
 
 def test_product_code_is_generated_once_and_increments_per_store(client, session):

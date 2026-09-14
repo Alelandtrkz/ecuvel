@@ -13,7 +13,8 @@ from app.catalog.product_templates import (
     ProductTemplate,
     ProductTemplateField,
     VariantAxis,
-    variant_axes_for_product_type,
+    default_variant_axes_for_attributes,
+    variant_axes_for_attributes,
 )
 from app.services.marketplace_policy import MINIMUM_PRICE_MESSAGE, MINIMUM_SELLER_PRICE
 
@@ -78,6 +79,8 @@ def _axis_public_data(axis: VariantAxis, *, is_default: bool) -> dict[str, Any]:
         "is_listing_axis": axis.is_listing_axis,
         "is_default": is_default,
         "default_for": list(axis.default_for),
+        "condition": dict(axis.condition) if axis.condition is not None else None,
+        # Temporary compatibility for the inactive pre-V4 builder.
         "allowed_product_types": list((axis.condition or {}).get("values", ())),
     }
 
@@ -86,9 +89,13 @@ def available_variant_axes(
     template: ProductTemplate,
     attributes: Mapping[str, Any] | None,
 ) -> tuple[dict[str, Any], ...]:
-    product_type = str((attributes or {}).get("tipo_producto") or "")
+    current_attributes = attributes or {}
+    default_keys = {
+        axis.key
+        for axis in default_variant_axes_for_attributes(template, current_attributes)
+    }
     return tuple(
-        _axis_public_data(axis, is_default=product_type in axis.default_for)
+        _axis_public_data(axis, is_default=axis.key in default_keys)
         for axis in template.variant_axes
     )
 
@@ -258,9 +265,7 @@ def build_variant_state(
 
     allowed = {
         axis.key: axis
-        for axis in variant_axes_for_product_type(
-            template, str(attributes.get("tipo_producto") or "")
-        )
+        for axis in variant_axes_for_attributes(template, attributes)
     }
     raw_axes = raw_configuration.get("axes")
     if not isinstance(raw_axes, list) or not raw_axes:

@@ -15,6 +15,7 @@ from werkzeug.datastructures import FileStorage, MultiDict
 from app.catalog.product_templates import (
     ProductTemplate,
     ProductTemplateError,
+    condition_applies,
     get_product_template,
     validate_attributes,
 )
@@ -887,7 +888,7 @@ def calculate_checklist(
         ChecklistItem("description", "Descripción", bool(draft.description and len(draft.description.strip()) >= 20), "Describe el producto con detalle."),
         ChecklistItem("attributes", "Características", attrs_complete, "Completa los campos obligatorios de la plantilla."),
         ChecklistItem("variants", "Variantes", _variants_complete(draft), "Configura variantes o usa la oferta única."),
-        ChecklistItem("price", "Precio", _variants_complete(draft) if family_enabled else price is not None and price > 0, "Define precios vÃ¡lidos."),
+        ChecklistItem("price", "Precio", _variants_complete(draft) if family_enabled else price is not None and price > 0, "Define precios válidos."),
         ChecklistItem("stock", "Stock", _variants_complete(draft) if family_enabled else stock is not None and stock >= 0, "Define stock inicial."),
         ChecklistItem("preparation_time", "Preparación", preparation_time is not None, "Selecciona 1 o 2 días."),
         ChecklistItem("dimensions", "Dimensiones", bool(draft.dimensions_data.get("product_weight_kg")), "Agrega peso y dimensiones básicas."),
@@ -924,7 +925,12 @@ def _apply_form_to_draft(draft: ProductDraft, template: ProductTemplate, form: M
         "responsible": _clean_text(form.get("warranty_responsible"), 80),
         "conditions": _clean_text(form.get("warranty_conditions"), 500),
     }
-    draft.attributes = _parse_attributes(form, template)
+    parsed_attributes = _parse_attributes(form, template)
+    draft.attributes = {
+        item.key: parsed_attributes.get(item.key)
+        for item in template.fields
+        if condition_applies(item.condition, parsed_attributes)
+    }
     draft.pricing_data = {
         "price": _clean_text(form.get("price"), 40),
         "compare_at_price": _clean_text(form.get("compare_at_price"), 40),

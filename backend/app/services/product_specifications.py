@@ -7,6 +7,7 @@ from typing import Any, Mapping
 from app.catalog.product_templates import (
     ProductTemplate,
     ProductTemplateField,
+    condition_applies,
     get_product_template_for_category_code,
 )
 
@@ -209,7 +210,7 @@ def build_product_specification_presentation(row: Any) -> ProductSpecificationPr
         for field in sorted(template.fields, key=lambda item: (item.order, item.key)):
             if field.section not in SECTION_TITLES or field.key in _SHARED_ATTRIBUTE_KEYS:
                 continue
-            if not _condition_applies(field, attributes):
+            if not condition_applies(field.condition, attributes):
                 continue
             item = _field_item(field, attributes.get(field.key))
             if item:
@@ -284,14 +285,6 @@ def product_specification_presentation_payload(
         ],
         "public_seller_highlights": list(presentation.seller_highlights),
     }
-
-
-def _condition_applies(field: ProductTemplateField, values: Mapping[str, Any]) -> bool:
-    if not field.condition:
-        return True
-    trigger_key = field.condition.get("field")
-    allowed_values = field.condition.get("values", ())
-    return values.get(trigger_key) in allowed_values
 
 
 def _scalar_item(key: str, label: str, value: Any) -> ProductSpecificationItemViewModel | None:
