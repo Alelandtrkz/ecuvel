@@ -121,7 +121,7 @@ def test_fashion_registry_seed_and_commission_integrity():
 
 
 def test_legacy_fashion_registry_and_rates_remain_compatible():
-    assert LEGACY_NEW_LISTING_CATEGORY_CODES == frozenset(LEGACY_FASHION)
+    assert set(LEGACY_FASHION) <= LEGACY_NEW_LISTING_CATEGORY_CODES
     for code, template_key in LEGACY_FASHION.items():
         assert template_key_for_category_code(code) == template_key
         assert get_product_template_for_category_code(code) is PRODUCT_TEMPLATES[

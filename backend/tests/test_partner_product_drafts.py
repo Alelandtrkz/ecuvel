@@ -76,6 +76,12 @@ CURRENT_CATEGORY_TEMPLATE_BINDINGS = {
     "HOME_DECORATION": ("HOME_KITCHEN", "home_decoration"),
     "HOME_KITCHEN_TOOLS": ("HOME_KITCHEN", "home_kitchen_tools"),
     "HOME_CLEANING": ("HOME_KITCHEN", "home_cleaning"),
+    "HOME_DECOR_LIGHTING": ("HOME_KITCHEN", "home_decor_lighting"),
+    "HOME_KITCHEN_DINING": ("HOME_KITCHEN", "home_kitchen_dining"),
+    "HOME_CLEANING_SUPPLIES": ("HOME_KITCHEN", "home_cleaning_supplies"),
+    "HOME_STORAGE_ORGANIZATION": ("HOME_KITCHEN", "home_storage_organization"),
+    "HOME_TEXTILES": ("HOME_KITCHEN", "home_textiles"),
+    "HOME_FURNITURE": ("HOME_KITCHEN", "home_furniture"),
     "BEAUTY_PERSONAL_CARE": ("BEAUTY_HEALTH", "beauty_personal_care"),
     "BEAUTY_COSMETICS": ("BEAUTY_HEALTH", "beauty_cosmetics"),
     "BEAUTY_SKINCARE": ("BEAUTY_HEALTH", "beauty_skincare"),
@@ -321,6 +327,12 @@ def test_template_registry_covers_seeded_subcategories():
         "home_decoration",
         "home_kitchen_tools",
         "home_cleaning",
+        "home_decor_lighting",
+        "home_kitchen_dining",
+        "home_cleaning_supplies",
+        "home_storage_organization",
+        "home_textiles",
+        "home_furniture",
         "beauty_personal_care",
         "beauty_cosmetics",
         "beauty_skincare",
@@ -335,7 +347,7 @@ def test_template_registry_covers_seeded_subcategories():
 
 
 def test_exact_category_template_bindings_and_metadata_are_preserved():
-    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 25
+    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 31
     for leaf_code, binding in CURRENT_CATEGORY_TEMPLATE_BINDINGS.items():
         main_code, template_key = binding
         template = PRODUCT_TEMPLATES[template_key]
@@ -374,8 +386,8 @@ def test_template_registry_validation_rejects_binding_drift(monkeypatch):
     )
     with pytest.raises(ProductTemplateValidationError) as exc_info:
         validate_template_registry()
-    assert "binding.25.ELECTRONICS_PHONES" in exc_info.value.errors
-    assert "binding.25.missing_template" in exc_info.value.errors
+    assert "binding.31.ELECTRONICS_PHONES" in exc_info.value.errors
+    assert "binding.31.missing_template" in exc_info.value.errors
 
 
 def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(

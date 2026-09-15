@@ -412,6 +412,12 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "FASHION_BAGS_ACCESSORIES",
         "FASHION_JEWELRY_WATCHES",
         "HOME_KITCHEN",
+        "HOME_DECOR_LIGHTING",
+        "HOME_KITCHEN_DINING",
+        "HOME_CLEANING_SUPPLIES",
+        "HOME_STORAGE_ORGANIZATION",
+        "HOME_TEXTILES",
+        "HOME_FURNITURE",
         "BEAUTY_HEALTH",
         "AUTOMOTIVE",
         "BABIES_KIDS",
@@ -454,6 +460,27 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "FASHION_BAGS_ACCESSORIES",
         "FASHION_JEWELRY_WATCHES",
     )
+    home_view = next(
+        category
+        for category in list_main_categories(session)
+        if category.code == "HOME_KITCHEN"
+    )
+    assert tuple(item.name for item in home_view.subcategories) == (
+        "Decoración e iluminación",
+        "Cocina y comedor",
+        "Limpieza del hogar",
+        "Organización y almacenamiento",
+        "Textiles del hogar",
+        "Muebles",
+    )
+    assert tuple(item.code for item in home_view.subcategories) == (
+        "HOME_DECOR_LIGHTING",
+        "HOME_KITCHEN_DINING",
+        "HOME_CLEANING_SUPPLIES",
+        "HOME_STORAGE_ORGANIZATION",
+        "HOME_TEXTILES",
+        "HOME_FURNITURE",
+    )
 
     fashion = session.scalar(select(Category).where(Category.code == "FASHION"))
     legacy_men = session.scalar(
@@ -485,6 +512,39 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
     historical_page = client.get(f"/partners/products/drafts/{historical.id}")
     assert historical_page.status_code == 200
     assert "Hombre" in historical_page.get_data(as_text=True)
+
+    home = session.scalar(select(Category).where(Category.code == "HOME_KITCHEN"))
+    legacy_decoration = session.scalar(
+        select(Category).where(Category.code == "HOME_DECORATION")
+    )
+    crafted_home = client.post(
+        "/partners/products/drafts",
+        data={
+            "category_id": str(home.id),
+            "subcategory_id": str(legacy_decoration.id),
+        },
+    )
+    assert crafted_home.status_code == 400
+    assert "no está disponible para publicaciones nuevas" in crafted_home.get_data(
+        as_text=True
+    )
+    assert session.scalar(select(func.count()).select_from(ProductDraft)) == 1
+
+    historical_home = ProductDraft(
+        store_id=store.id,
+        created_by_user_id=user.id,
+        category_id=home.id,
+        subcategory_id=legacy_decoration.id,
+        template_key="home_decoration",
+        attributes={"tipo": "Espejo", "habitacion": "Sala"},
+    )
+    session.add(historical_home)
+    session.commit()
+    historical_home_page = client.get(
+        f"/partners/products/drafts/{historical_home.id}"
+    )
+    assert historical_home_page.status_code == 200
+    assert "Espejo" in historical_home_page.get_data(as_text=True)
 
     category_count = session.scalar(select(func.count()).select_from(Category))
     third = runner.invoke(args=["seed-product-categories"])

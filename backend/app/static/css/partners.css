@@ -1496,6 +1496,7 @@
 
 .partner-draft-field {
   display: grid;
+  align-self: start;
   gap: 8px;
   min-width: 0;
   color: #111;

@@ -291,6 +291,12 @@ def test_quick_options_remain_scoped_to_canonical_templates():
         "fashion_footwear",
         "fashion_bags_accessories",
         "fashion_jewelry_watches",
+        "home_decor_lighting",
+        "home_kitchen_dining",
+        "home_cleaning_supplies",
+        "home_storage_organization",
+        "home_textiles",
+        "home_furniture",
     }
     for key, template in PRODUCT_TEMPLATES.items():
         if key in keys_with_quick_options:

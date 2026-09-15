@@ -46,6 +46,12 @@ INITIAL_CATEGORY_RATES = {
     "AUTOMOTIVE_BASIC_PARTS": Decimal("8.00"),
     "AUTOMOTIVE_TOOLS": Decimal("8.00"),
     "HOME_CLEANING": Decimal("10.00"),
+    "HOME_DECOR_LIGHTING": Decimal("12.00"),
+    "HOME_KITCHEN_DINING": Decimal("10.00"),
+    "HOME_CLEANING_SUPPLIES": Decimal("10.00"),
+    "HOME_STORAGE_ORGANIZATION": Decimal("10.00"),
+    "HOME_TEXTILES": Decimal("12.00"),
+    "HOME_FURNITURE": Decimal("10.00"),
 }
 
 

@@ -319,6 +319,12 @@ _PRODUCT_CATEGORY_TREE = (
             {"code": "HOME_DECORATION", "name": "Decoración", "slug": "decoracion", "sort_order": 1},
             {"code": "HOME_KITCHEN_TOOLS", "name": "Cocina", "slug": "cocina", "sort_order": 2},
             {"code": "HOME_CLEANING", "name": "Limpieza", "slug": "limpieza", "sort_order": 3},
+            {"code": "HOME_DECOR_LIGHTING", "name": "Decoración e iluminación", "slug": "decoracion-e-iluminacion", "sort_order": 1},
+            {"code": "HOME_KITCHEN_DINING", "name": "Cocina y comedor", "slug": "cocina-y-comedor", "sort_order": 2},
+            {"code": "HOME_CLEANING_SUPPLIES", "name": "Limpieza del hogar", "slug": "limpieza-del-hogar", "sort_order": 3},
+            {"code": "HOME_STORAGE_ORGANIZATION", "name": "Organización y almacenamiento", "slug": "organizacion-y-almacenamiento", "sort_order": 4},
+            {"code": "HOME_TEXTILES", "name": "Textiles del hogar", "slug": "textiles-del-hogar", "sort_order": 5},
+            {"code": "HOME_FURNITURE", "name": "Muebles", "slug": "muebles", "sort_order": 6},
         ),
     ),
     (

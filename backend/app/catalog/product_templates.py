@@ -106,6 +106,11 @@ _UNIT_LABELS = {
     "horas": "horas",
     "in": "pulgadas",
     "meses": "meses",
+    "L": "L",
+    "ml": "ml",
+    "kg": "kg",
+    "g/m²": "g/m²",
+    "°C": "°C",
 }
 
 _FIELD_EXAMPLES = {
@@ -305,6 +310,57 @@ _FIELD_ICONS = {
     "piedra_principal": "gem",
     "ley_metal": "gem",
     "compatibilidad_so": "smartphone",
+    "habitacion_uso": "house",
+    "uso_ubicacion": "house",
+    "orientacion": "image",
+    "tipo_montaje": "wrench",
+    "mecanismo_reloj": "clock",
+    "tipo_cera": "flame",
+    "tipo_planta": "flower-2",
+    "tipo_casquillo": "lightbulb",
+    "bombilla_incluida": "lightbulb",
+    "regulable": "sliders-horizontal",
+    "cantidad_luces": "lightbulb",
+    "cantidad_piezas": "list-checks",
+    "compatibilidad_coccion": "cooking-pot",
+    "tipo_cuchillo": "utensils",
+    "material_hoja": "layers",
+    "material_mango": "layers",
+    "tipo_filo": "utensils",
+    "tipo_utensilio": "utensils",
+    "tipo_cubierto": "utensils",
+    "aislamiento_termico": "thermometer",
+    "presentacion": "package",
+    "contenido_neto": "flask-conical",
+    "superficie_recomendada": "brush-cleaning",
+    "superficie_uso": "spray-can",
+    "reutilizable": "refresh-cw",
+    "lavable": "washing-machine",
+    "cantidad_paquete": "package",
+    "apilable": "boxes",
+    "plegable": "archive",
+    "numero_compartimentos": "boxes",
+    "numero_niveles": "list-ordered",
+    "tapa_incluida": "package-check",
+    "ruedas": "circle-dot",
+    "instalacion": "wrench",
+    "tamano_cama": "bed",
+    "tamano_textil": "ruler",
+    "material_relleno": "layers",
+    "firmeza": "layers",
+    "tipo_toalla": "bath",
+    "blackout": "moon",
+    "translucidez": "sun",
+    "requiere_ensamblaje": "wrench",
+    "numero_plazas": "armchair",
+    "material_tapizado": "armchair",
+    "altura_ajustable": "sliders-horizontal",
+    "numero_puertas": "door-open",
+    "numero_cajones": "archive",
+    "numero_estantes": "library",
+    "tamano_colchon": "bed",
+    "tamano_colchon_compatible": "bed",
+    "tipo_colchon": "bed",
 }
 
 _UNIT_ICONS = {
@@ -323,6 +379,11 @@ _UNIT_ICONS = {
     "Hz": "activity",
     "horas": "clock",
     "in": "monitor",
+    "L": "cup-soda",
+    "ml": "cup-soda",
+    "kg": "scale",
+    "g/m²": "scale",
+    "°C": "thermometer",
 }
 
 
@@ -1313,6 +1374,260 @@ def _fashion_jewelry_watches() -> tuple[ProductTemplateField, ...]:
     )
 
 
+_HOME_DECOR_TYPES = (
+    "Cuadro / Lámina", "Decoración de pared", "Espejo", "Reloj decorativo",
+    "Florero / Jarrón", "Figura / Adorno", "Portavelas / Candelabro", "Vela",
+    "Planta artificial", "Lámpara decorativa", "Guirnalda / Luz decorativa", "Otro",
+)
+_HOME_KITCHEN_TYPES = (
+    "Olla / Cacerola", "Sartén", "Wok", "Molde / Bandeja para horno", "Cuchillo",
+    "Tabla de cortar", "Utensilio de cocina", "Colador / Escurridor", "Rallador / Pelador",
+    "Recipiente para alimentos", "Botella / Termo", "Taza / Vaso", "Plato / Bowl",
+    "Cubiertos", "Vajilla / Set de comedor", "Secaplatos / Organizador de cocina", "Otro",
+)
+
+
+def _home_decor_lighting() -> tuple[ProductTemplateField, ...]:
+    wall = ("Cuadro / Lámina", "Decoración de pared")
+    powered = ("Reloj decorativo", "Lámpara decorativa", "Guirnalda / Luz decorativa")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_HOME_DECOR_TYPES, icon="house"),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=2),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=3,
+                  options=("Madera", "Metal", "Vidrio", "Cerámica", "Porcelana", "Plástico / Resina", "Textil", "Papel / Cartón", "Piedra", "Cera", "Mixto", "Otro")),
+        field_def("estilo", "Estilo", type="select", section="presentacion", order=4,
+                  options=("Moderno", "Minimalista", "Clásico", "Industrial", "Rústico", "Boho", "Infantil", "Otro")),
+        field_def("habitacion_uso", "Habitación / uso", type="multiselect", section="uso", order=5,
+                  options=("Sala", "Dormitorio", "Comedor", "Cocina", "Baño", "Oficina", "Pasillo", "Exterior", "Otro")),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=6, min=Decimal("0")),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=7, min=Decimal("0")),
+        field_def("profundidad_cm", "Profundidad", type="decimal", unit="cm", section="medidas", order=8, min=Decimal("0")),
+        field_def("forma", "Forma", type="select", section="presentacion", order=9, options=("Redonda", "Cuadrada", "Rectangular", "Ovalada", "Irregular", "Otra")),
+        field_def("uso_ubicacion", "Uso", type="select", section="uso", order=10, options=("Interior", "Exterior", "Interior y exterior")),
+        field_def("orientacion", "Orientación", type="select", section="presentacion", order=11, options=("Vertical", "Horizontal", "Cuadrada", "Otra"), condition=_for_product_types(*wall)),
+        field_def("tipo_montaje", "Tipo de montaje", type="select", section="uso", order=12, options=("Pared", "Sobremesa", "Adhesivo", "Colgante", "Otro"), condition=_for_product_types(*wall, "Espejo")),
+        field_def("enmarcado", "Enmarcado", type="boolean", section="presentacion", order=13, condition=_for_product_types("Cuadro / Lámina")),
+        field_def("con_marco", "Con marco", type="boolean", section="presentacion", order=14, condition=_for_product_types("Espejo")),
+        field_def("mecanismo_reloj", "Mecanismo del reloj", type="select", section="tecnica", order=15, options=("Cuarzo", "Mecánico", "Digital", "Otro"), condition=_for_product_types("Reloj decorativo")),
+        field_def("alimentacion", "Alimentación", type="select", section="alimentacion", order=16, options=("Pilas", "USB", "Corriente eléctrica", "Batería / Pilas", "Solar", "Otra"), condition=_for_product_types(*powered)),
+        field_def("tipo_cera", "Tipo de cera", type="select", section="materiales", order=17, options=("Parafina", "Soya", "Cera de abeja", "Coco", "Mezcla", "Otra"), condition=_for_product_types("Vela")),
+        field_def("aroma", "Aroma", section="producto", order=18, condition=_for_product_types("Vela")),
+        field_def("duracion_horas", "Duración estimada", type="decimal", unit="horas", section="tecnica", order=19, min=Decimal("0"), condition=_for_product_types("Vela")),
+        field_def("tipo_planta", "Tipo de planta", section="producto", order=20, condition=_for_product_types("Planta artificial")),
+        field_def("voltaje_v", "Voltaje", type="decimal", unit="V", section="alimentacion", order=21, min=Decimal("0"), condition=_for_product_types("Lámpara decorativa")),
+        field_def("potencia_w", "Potencia", type="decimal", unit="W", section="alimentacion", order=22, min=Decimal("0"), condition=_for_product_types("Lámpara decorativa")),
+        field_def("tipo_casquillo", "Tipo de casquillo", type="select", section="alimentacion", order=23, options=("E27", "E14", "GU10", "G9", "LED integrado", "Otro", "No aplica"), condition=_for_product_types("Lámpara decorativa")),
+        field_def("bombilla_incluida", "Bombilla incluida", type="boolean", section="alimentacion", order=24, condition=_for_product_types("Lámpara decorativa")),
+        field_def("regulable", "Regulable", type="boolean", section="alimentacion", order=25, condition=_for_product_types("Lámpara decorativa")),
+        field_def("longitud_m", "Longitud", type="decimal", unit="m", section="medidas", order=26, min=Decimal("0"), condition=_for_product_types("Guirnalda / Luz decorativa")),
+        field_def("cantidad_luces", "Cantidad de luces", type="integer", section="tecnica", order=27, min=1, condition=_for_product_types("Guirnalda / Luz decorativa")),
+        field_def("uso_exterior", "Uso exterior", type="boolean", section="uso", order=28, condition=_for_product_types("Guirnalda / Luz decorativa")),
+    )
+
+
+def _home_kitchen_dining() -> tuple[ProductTemplateField, ...]:
+    cookware = ("Olla / Cacerola", "Sartén", "Wok")
+    ml_types = ("Recipiente para alimentos", "Botella / Termo", "Taza / Vaso")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_HOME_KITCHEN_TYPES, icon="cooking-pot"),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=2),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=3, options=("Acero inoxidable", "Aluminio", "Hierro fundido", "Vidrio", "Cerámica", "Porcelana", "Silicona", "Plástico", "Madera", "Bambú", "Acero al carbono", "Otro")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=4, min=1),
+        field_def("apto_lavavajillas", "Apto para lavavajillas", type="boolean", section="cuidados", order=5),
+        field_def("diametro_cm", "Diámetro", type="decimal", unit="cm", section="medidas", order=6, min=Decimal("0"), condition=_for_product_types(*cookware, "Colador / Escurridor", "Plato / Bowl")),
+        field_def("diametro_base_cm", "Diámetro de la base", type="decimal", unit="cm", section="medidas", order=7, min=Decimal("0"), condition=_for_product_types(*cookware)),
+        field_def("tapa_incluida", "Tapa incluida", type="boolean", section="producto", order=8, condition=_for_product_types(*cookware)),
+        field_def("revestimiento_antiadherente", "Revestimiento antiadherente", type="boolean", section="producto", order=9, condition=_for_product_types(*cookware)),
+        field_def("mango_desmontable", "Mango desmontable", type="boolean", section="producto", order=10, condition=_for_product_types(*cookware)),
+        field_def("compatibilidad_coccion", "Compatibilidad de cocción", type="multiselect", section="uso", order=11, options=("Gas", "Inducción", "Eléctrica", "Vitrocerámica"), condition=_for_product_types(*cookware)),
+        field_def("capacidad_l", "Capacidad", type="decimal", unit="L", section="medidas", order=12, min=Decimal("0"), quick_options=("1", "1.5", "2", "3", "4", "5", "6"), condition=_for_product_types("Olla / Cacerola", "Wok")),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=13, min=Decimal("0"), condition=_for_product_types("Molde / Bandeja para horno", "Secaplatos / Organizador de cocina")),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=14, min=Decimal("0"), condition=_for_product_types("Molde / Bandeja para horno", "Tabla de cortar", "Secaplatos / Organizador de cocina")),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=15, min=Decimal("0"), condition=_for_product_types("Molde / Bandeja para horno", "Tabla de cortar")),
+        field_def("profundidad_cm", "Profundidad", type="decimal", unit="cm", section="medidas", order=16, min=Decimal("0"), condition=_for_product_types("Plato / Bowl", "Secaplatos / Organizador de cocina")),
+        field_def("grosor_cm", "Grosor", type="decimal", unit="cm", section="medidas", order=17, min=Decimal("0"), condition=_for_product_types("Tabla de cortar")),
+        field_def("apto_horno", "Apto para horno", type="boolean", section="uso", order=18, condition=_for_product_types("Molde / Bandeja para horno")),
+        field_def("temperatura_max_c", "Temperatura máxima", type="integer", unit="°C", section="uso", order=19, min=0, condition=_for_product_types("Molde / Bandeja para horno")),
+        field_def("tipo_cuchillo", "Tipo de cuchillo", type="select", section="producto", order=20, options=("Chef", "Pan", "Santoku", "Deshuesador", "Fileteador", "Utilitario", "Pelador", "Otro"), condition=_for_product_types("Cuchillo")),
+        field_def("material_hoja", "Material de la hoja", type="select", section="materiales", order=21, options=("Acero inoxidable", "Acero al carbono", "Cerámica", "Otro"), condition=_for_product_types("Cuchillo")),
+        field_def("longitud_hoja_cm", "Longitud de la hoja", type="decimal", unit="cm", section="medidas", order=22, min=Decimal("0"), condition=_for_product_types("Cuchillo")),
+        field_def("material_mango", "Material del mango", type="select", section="materiales", order=23, options=("Madera", "Plástico", "Acero inoxidable", "Caucho", "Compuesto", "Otro"), condition=_for_product_types("Cuchillo")),
+        field_def("tipo_filo", "Tipo de filo", type="select", section="producto", order=24, options=("Liso", "Dentado", "Mixto", "Otro"), condition=_for_product_types("Cuchillo")),
+        field_def("antideslizante", "Antideslizante", type="boolean", section="producto", order=25, condition=_for_product_types("Tabla de cortar")),
+        field_def("tipo_utensilio", "Tipo de utensilio", type="select", section="producto", order=26, options=("Espátula", "Cucharón", "Batidor", "Pinzas", "Cuchara", "Prensa", "Brocha", "Otro"), condition=_for_product_types("Utensilio de cocina")),
+        field_def("longitud_cm", "Longitud", type="decimal", unit="cm", section="medidas", order=27, min=Decimal("0"), condition=_for_product_types("Utensilio de cocina")),
+        field_def("resistente_calor", "Resistente al calor", type="boolean", section="uso", order=28, condition=_for_product_types("Utensilio de cocina")),
+        field_def("plegable", "Plegable", type="boolean", section="producto", order=29, condition=_for_product_types("Colador / Escurridor")),
+        field_def("tipo_rallador_pelador", "Tipo de rallador / pelador", type="select", section="producto", order=30, options=("Rallador", "Pelador", "Mandolina", "Cortador", "Otro"), condition=_for_product_types("Rallador / Pelador")),
+        field_def("numero_superficies", "Número de superficies", type="integer", section="producto", order=31, min=1, condition=_for_product_types("Rallador / Pelador")),
+        field_def("capacidad_ml", "Capacidad", type="decimal", unit="ml", section="medidas", order=32, min=Decimal("0"), quick_options=("200", "250", "300", "350", "400", "500", "600", "750", "1000", "1500", "2000"), condition=_for_product_types(*ml_types)),
+        field_def("hermetico", "Hermético", type="boolean", section="producto", order=33, condition=_for_product_types("Recipiente para alimentos")),
+        field_def("apto_congelador", "Apto para congelador", type="boolean", section="uso", order=34, condition=_for_product_types("Recipiente para alimentos")),
+        field_def("apto_microondas", "Apto para microondas", type="boolean", section="uso", order=35, condition=_for_product_types("Recipiente para alimentos", "Taza / Vaso")),
+        field_def("aislamiento_termico", "Aislamiento térmico", type="boolean", section="producto", order=36, condition=_for_product_types("Botella / Termo")),
+        field_def("horas_frio", "Horas de frío", type="decimal", unit="horas", section="tecnica", order=37, min=Decimal("0"), condition=_for_product_types("Botella / Termo")),
+        field_def("horas_caliente", "Horas de calor", type="decimal", unit="horas", section="tecnica", order=38, min=Decimal("0"), condition=_for_product_types("Botella / Termo")),
+        field_def("antiderrames", "Antiderrames", type="boolean", section="producto", order=39, condition=_for_product_types("Botella / Termo")),
+        field_def("pajilla_incluida", "Pajilla incluida", type="boolean", section="producto", order=40, condition=_for_product_types("Botella / Termo")),
+        field_def("tipo_cubierto", "Tipo de cubierto", type="multiselect", section="producto", order=41, options=("Cuchara", "Tenedor", "Cuchillo", "Cucharilla", "Otro"), condition=_for_product_types("Cubiertos")),
+        field_def("numero_personas", "Número de personas", type="integer", section="producto", order=42, min=1, condition=_for_product_types("Vajilla / Set de comedor")),
+        field_def("numero_niveles", "Número de niveles", type="integer", section="producto", order=43, min=1, condition=_for_product_types("Secaplatos / Organizador de cocina")),
+        field_def("escurridor", "Escurridor", type="boolean", section="producto", order=44, condition=_for_product_types("Secaplatos / Organizador de cocina")),
+    )
+
+
+_HOME_CLEANING_CHEMICAL_TYPES = ("Limpiador líquido", "Detergente", "Desinfectante", "Limpiador en polvo")
+_HOME_CLEANING_TOOL_TYPES = (
+    "Mopa / Trapeador", "Escoba", "Cepillo de limpieza", "Recogedor", "Balde",
+    "Paño / Microfibra", "Esponja / Estropajo", "Plumero", "Limpiavidrios manual",
+    "Guantes de limpieza", "Bolsas de basura",
+)
+_HOME_CLEANING_TYPES = (*_HOME_CLEANING_TOOL_TYPES, *_HOME_CLEANING_CHEMICAL_TYPES, "Otro")
+_HOME_STORAGE_TYPES = (
+    "Caja / Contenedor", "Canasta", "Organizador de cajón", "Organizador de armario",
+    "Organizador de joyería", "Zapatero", "Perchero", "Estante", "Perchas", "Ganchos",
+    "Cesto para ropa", "Bolsa al vacío", "Organizador colgante", "Otro",
+)
+
+
+def _home_cleaning_supplies() -> tuple[ProductTemplateField, ...]:
+    handled = ("Mopa / Trapeador", "Escoba", "Cepillo de limpieza", "Plumero", "Limpiavidrios manual")
+    headed = ("Mopa / Trapeador", "Escoba", "Cepillo de limpieza", "Limpiavidrios manual")
+    surfaces = ("Piso", "Vidrio", "Cocina", "Baño", "Madera", "Cerámica", "Acero inoxidable", "Textiles", "Uso general", "Otro")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_HOME_CLEANING_TYPES, icon="spray-can"),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=2, condition=_for_product_types(*_HOME_CLEANING_TOOL_TYPES)),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=3, options=("Plástico", "Acero", "Aluminio", "Microfibra", "Algodón", "Caucho", "Celulosa / Esponja", "Mixto", "Otro"), condition=_for_product_types(*_HOME_CLEANING_TOOL_TYPES)),
+        field_def("superficie_recomendada", "Superficie recomendada", type="multiselect", section="uso", order=4, options=surfaces, condition=_for_product_types(*_HOME_CLEANING_TOOL_TYPES)),
+        field_def("reutilizable", "Reutilizable", type="boolean", section="producto", order=5, condition=_for_product_types(*_HOME_CLEANING_TOOL_TYPES)),
+        field_def("lavable", "Lavable", type="boolean", section="cuidados", order=6, condition=_for_product_types(*_HOME_CLEANING_TOOL_TYPES)),
+        field_def("cantidad_paquete", "Cantidad por paquete", type="integer", section="producto", order=7, min=1, condition=_for_product_types(*_HOME_CLEANING_TOOL_TYPES)),
+        field_def("longitud_mango_cm", "Longitud del mango", type="decimal", unit="cm", section="medidas", order=8, min=Decimal("0"), condition=_for_product_types(*handled)),
+        field_def("ancho_cabezal_cm", "Ancho del cabezal", type="decimal", unit="cm", section="medidas", order=9, min=Decimal("0"), condition=_for_product_types(*headed)),
+        field_def("capacidad_l", "Capacidad", type="decimal", unit="L", section="medidas", order=10, min=Decimal("0"), quick_options=("5", "10", "12", "15", "20"), condition=_for_product_types("Balde", "Bolsas de basura")),
+        field_def("presentacion", "Presentación", type="select", section="producto", order=11, options=("Líquido", "Gel", "Polvo", "Spray", "Tabletas", "Otra"), condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+        field_def("contenido_neto", "Contenido neto", type="decimal", section="producto", order=12, min=Decimal("0"), condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+        field_def("unidad", "Unidad", type="select", section="producto", order=13, options=("ml", "L", "g", "kg", "unidades"), condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+        field_def("fragancia", "Fragancia", section="producto", order=14, condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+        field_def("concentrado", "Concentrado", type="boolean", section="producto", order=15, condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+        field_def("superficie_uso", "Superficie de uso", type="multiselect", section="uso", order=16, options=surfaces, condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+        field_def("instrucciones_dilucion", "Instrucciones de dilución", type="textarea", section="uso", order=17, condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+        field_def("advertencias", "Advertencias", type="textarea", section="uso", order=18, condition=_for_product_types(*_HOME_CLEANING_CHEMICAL_TYPES)),
+    )
+
+
+def _home_storage_organization() -> tuple[ProductTemplateField, ...]:
+    capacity = ("Caja / Contenedor", "Canasta", "Cesto para ropa")
+    load = ("Estante", "Zapatero", "Perchero", "Organizador de armario")
+    compartments = ("Organizador de cajón", "Organizador de armario", "Organizador de joyería", "Organizador colgante")
+    installation = ("Perchero", "Estante", "Ganchos", "Organizador colgante", "Organizador de armario")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_HOME_STORAGE_TYPES, icon="boxes"),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=2),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=3, options=("Plástico", "Tela", "Madera", "Metal", "Bambú", "Ratán", "Cartón", "Vidrio", "Mixto", "Otro")),
+        field_def("habitacion_uso", "Habitación / uso", type="multiselect", section="uso", order=4, options=("Dormitorio", "Armario", "Baño", "Cocina", "Sala", "Oficina", "Lavandería", "Garaje", "Otro")),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=5, min=Decimal("0")),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=6, min=Decimal("0")),
+        field_def("profundidad_cm", "Profundidad", type="decimal", unit="cm", section="medidas", order=7, min=Decimal("0")),
+        field_def("apilable", "Apilable", type="boolean", section="producto", order=8),
+        field_def("plegable", "Plegable", type="boolean", section="producto", order=9),
+        field_def("capacidad_l", "Capacidad", type="decimal", unit="L", section="medidas", order=10, min=Decimal("0"), condition=_for_product_types(*capacity)),
+        field_def("capacidad_carga_kg", "Capacidad de carga", type="decimal", unit="kg", section="medidas", order=11, min=Decimal("0"), condition=_for_product_types(*load)),
+        field_def("numero_compartimentos", "Número de compartimentos", type="integer", section="producto", order=12, min=1, condition=_for_product_types(*compartments)),
+        field_def("numero_niveles", "Número de niveles", type="integer", section="producto", order=13, min=1, condition=_for_product_types("Zapatero", "Estante", "Organizador de armario")),
+        field_def("tapa_incluida", "Tapa incluida", type="boolean", section="producto", order=14, condition=_for_product_types("Caja / Contenedor", "Canasta")),
+        field_def("ruedas", "Ruedas", type="boolean", section="producto", order=15, condition=_for_product_types("Caja / Contenedor", "Estante", "Perchero", "Cesto para ropa")),
+        field_def("instalacion", "Instalación", type="select", section="uso", order=16, options=("Piso", "Pared", "Colgante", "Puerta", "Interior de cajón", "Otro"), condition=_for_product_types(*installation)),
+    )
+
+
+_HOME_TEXTILE_TYPES = (
+    "Juego de sábanas", "Sábana", "Funda de almohada", "Almohada", "Edredón / Comforter",
+    "Cobija / Manta", "Protector de colchón", "Toalla", "Alfombra", "Tapete de baño",
+    "Cortina", "Cojín decorativo", "Mantel", "Servilleta de tela", "Otro",
+)
+_HOME_BEDDING_TYPES = (
+    "Juego de sábanas", "Sábana", "Funda de almohada", "Edredón / Comforter",
+    "Cobija / Manta", "Protector de colchón",
+)
+_HOME_TEXTILE_SIZE_TYPES = (
+    "Almohada", "Toalla", "Alfombra", "Tapete de baño", "Cortina",
+    "Cojín decorativo", "Mantel", "Servilleta de tela",
+)
+_HOME_FURNITURE_TYPES = (
+    "Silla", "Mesa", "Escritorio", "Sofá", "Sillón", "Cama / Base de cama", "Colchón",
+    "Mesa de noche", "Cómoda", "Armario", "Gabinete", "Estantería / Librero",
+    "Mueble para TV", "Banco", "Taburete", "Juego de comedor", "Otro",
+)
+
+
+def _home_textiles() -> tuple[ProductTemplateField, ...]:
+    fill = ("Almohada", "Cojín decorativo")
+    shaped = ("Alfombra", "Tapete de baño", "Mantel", "Servilleta de tela")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_HOME_TEXTILE_TYPES, icon="layers"),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=2),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=3, options=("Algodón", "Poliéster", "Microfibra", "Lino", "Lana", "Viscosa / Rayón", "Bambú", "Mezcla", "Otro")),
+        field_def("composicion", "Composición", type="chips", section="materiales", order=4, help="Ej. Algodón 100% o Algodón 60%, Poliéster 40%", quick_options=("Algodón", "Poliéster", "Microfibra", "Lino", "Lana", "Viscosa", "Bambú")),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=5, min=Decimal("0")),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=6, min=Decimal("0")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=7, min=1),
+        field_def("cuidados", "Cuidados", type="multiselect", section="cuidados", order=8, options=("Lavar a mano", "Lavado a máquina", "Lavar con agua fría", "Lavar con colores similares", "No usar blanqueador", "No usar secadora", "Secar a la sombra", "Secar en plano", "Planchar a baja temperatura", "No planchar", "Limpieza en seco", "No limpiar en seco")),
+        field_def("tamano_cama", "Tamaño", type="select", section="tallas", order=9, options=("Individual / 1 plaza", "1½ plazas", "2 plazas", "Queen", "King", "Otro"), condition=_for_product_types(*_HOME_BEDDING_TYPES)),
+        field_def("numero_hilos", "Número de hilos", type="integer", section="materiales", order=10, min=0, condition=_for_product_types("Juego de sábanas", "Sábana", "Funda de almohada")),
+        field_def("tamano_textil", "Tamaño", type="variant_attribute", section="tallas", order=11, quick_options=("Pequeño", "Mediano", "Grande"), condition=_for_product_types(*_HOME_TEXTILE_SIZE_TYPES)),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=12, min=Decimal("0"), condition=_for_product_types("Almohada")),
+        field_def("material_relleno", "Material de relleno", type="select", section="materiales", order=13, options=("Fibra", "Espuma", "Espuma viscoelástica", "Plumas / Plumón", "Látex", "Algodón", "Otro"), condition=_for_product_types(*fill)),
+        field_def("firmeza", "Firmeza", type="select", section="producto", order=14, options=("Suave", "Media", "Firme"), condition=_for_product_types("Almohada")),
+        field_def("gramaje_g_m2", "Gramaje", type="decimal", unit="g/m²", section="materiales", order=15, min=Decimal("0"), condition=_for_product_types("Toalla")),
+        field_def("tipo_toalla", "Tipo de toalla", type="select", section="producto", order=16, options=("Manos", "Rostro", "Baño", "Playa", "Deportiva", "Otra"), condition=_for_product_types("Toalla")),
+        field_def("tipo_instalacion_cortina", "Tipo de instalación de cortina", type="select", section="uso", order=17, options=("Ojales", "Presillas", "Riel", "Barra", "Cinta fruncidora", "Otro"), condition=_for_product_types("Cortina")),
+        field_def("blackout", "Blackout", type="boolean", section="producto", order=18, condition=_for_product_types("Cortina")),
+        field_def("translucidez", "Translucidez", type="select", section="producto", order=19, options=("Transparente", "Semitransparente", "Opaca", "Blackout"), condition=_for_product_types("Cortina")),
+        field_def("cantidad_paneles", "Cantidad de paneles", type="integer", section="producto", order=20, min=1, condition=_for_product_types("Cortina")),
+        field_def("forma", "Forma", type="select", section="presentacion", order=21, options=("Rectangular", "Redonda", "Ovalada", "Cuadrada", "Irregular", "Otra"), condition=_for_product_types(*shaped)),
+        field_def("altura_pelo_mm", "Altura del pelo", type="decimal", unit="mm", section="medidas", order=22, min=Decimal("0"), condition=_for_product_types("Alfombra", "Tapete de baño")),
+        field_def("base_antideslizante", "Base antideslizante", type="boolean", section="producto", order=23, condition=_for_product_types("Alfombra", "Tapete de baño")),
+        field_def("uso_ubicacion", "Uso", type="select", section="uso", order=24, options=("Interior", "Exterior", "Interior y exterior"), condition=_for_product_types("Alfombra", "Tapete de baño")),
+        field_def("tipo_cierre", "Tipo de cierre", type="select", section="producto", order=25, options=("Cremallera", "Botones", "Sobre", "Sin cierre", "Otro"), condition=_for_product_types("Cojín decorativo")),
+    )
+
+
+def _home_furniture() -> tuple[ProductTemplateField, ...]:
+    seating = ("Silla", "Sofá", "Sillón", "Banco", "Taburete")
+    tables = ("Mesa", "Escritorio", "Juego de comedor")
+    storage = ("Cómoda", "Armario", "Gabinete", "Estantería / Librero", "Mueble para TV", "Mesa de noche")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_HOME_FURNITURE_TYPES, icon="armchair"),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=2),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=3, options=("Madera maciza", "MDF / MDP", "Metal", "Vidrio", "Plástico", "Ratán", "Bambú", "Tela", "Cuero", "Cuero sintético", "Mixto", "Otro")),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=4, min=Decimal("0")),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=5, min=Decimal("0")),
+        field_def("profundidad_cm", "Profundidad", type="decimal", unit="cm", section="medidas", order=6, min=Decimal("0")),
+        field_def("requiere_ensamblaje", "Requiere ensamblaje", type="boolean", section="producto", order=7),
+        field_def("uso_ubicacion", "Uso", type="select", section="uso", order=8, options=("Interior", "Exterior", "Interior y exterior")),
+        field_def("numero_plazas", "Número de plazas", type="integer", section="producto", order=9, min=1, condition=_for_product_types(*seating)),
+        field_def("material_tapizado", "Material tapizado", type="select", section="materiales", order=10, options=("Tela", "Cuero", "Cuero sintético", "Terciopelo", "Microfibra", "Sin tapizado", "Otro"), condition=_for_product_types(*seating)),
+        field_def("material_relleno", "Material de relleno", type="select", section="materiales", order=11, options=("Espuma", "Fibra", "Plumas", "Mixto", "Sin relleno", "Otro"), condition=_for_product_types(*seating)),
+        field_def("capacidad_max_kg", "Capacidad máxima", type="decimal", unit="kg", section="medidas", order=12, min=Decimal("0"), condition=_for_product_types(*seating, *storage)),
+        field_def("forma", "Forma", type="select", section="presentacion", order=13, options=("Rectangular", "Cuadrada", "Redonda", "Ovalada", "Otra"), condition=_for_product_types(*tables)),
+        field_def("numero_personas", "Número de personas", type="integer", section="producto", order=14, min=1, condition=_for_product_types("Mesa", "Juego de comedor")),
+        field_def("altura_ajustable", "Altura ajustable", type="boolean", section="producto", order=15, condition=_for_product_types("Escritorio")),
+        field_def("plegable", "Plegable", type="boolean", section="producto", order=16, condition=_for_product_types("Mesa", "Escritorio")),
+        field_def("numero_puertas", "Número de puertas", type="integer", section="producto", order=17, min=0, condition=_for_product_types(*storage)),
+        field_def("numero_cajones", "Número de cajones", type="integer", section="producto", order=18, min=0, condition=_for_product_types(*storage)),
+        field_def("numero_estantes", "Número de estantes", type="integer", section="producto", order=19, min=0, condition=_for_product_types(*storage)),
+        field_def("tamano_colchon_compatible", "Tamaño de colchón compatible", type="select", section="tallas", order=20, options=("Individual / 1 plaza", "1½ plazas", "2 plazas", "Queen", "King", "Otro"), condition=_for_product_types("Cama / Base de cama")),
+        field_def("material_estructura", "Material de la estructura", type="select", section="materiales", order=21, options=("Madera", "Metal", "Tapizado", "Mixto", "Otro"), condition=_for_product_types("Cama / Base de cama")),
+        field_def("cabecero_incluido", "Cabecero incluido", type="boolean", section="producto", order=22, condition=_for_product_types("Cama / Base de cama")),
+        field_def("tamano_colchon", "Tamaño", type="select", section="tallas", order=23, options=("Individual / 1 plaza", "1½ plazas", "2 plazas", "Queen", "King", "Otro"), condition=_for_product_types("Colchón")),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=24, min=Decimal("0"), condition=_for_product_types("Colchón")),
+        field_def("firmeza", "Firmeza", type="select", section="producto", order=25, options=("Suave", "Media", "Firme"), condition=_for_product_types("Colchón")),
+        field_def("tipo_colchon", "Tipo de colchón", type="select", section="producto", order=26, options=("Espuma", "Resortes", "Híbrido", "Látex", "Otro"), condition=_for_product_types("Colchón")),
+        field_def("peso_max_soportado_kg", "Peso máximo soportado", type="decimal", unit="kg", section="medidas", order=27, min=Decimal("0"), condition=_for_product_types("Colchón")),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProductTemplateCategoryBinding:
     template_key: str
@@ -1361,6 +1676,12 @@ _TEMPLATE_CATEGORY_BINDINGS = (
         "home_kitchen_tools", "HOME_KITCHEN", "HOME_KITCHEN_TOOLS"
     ),
     ProductTemplateCategoryBinding("home_cleaning", "HOME_KITCHEN", "HOME_CLEANING"),
+    ProductTemplateCategoryBinding("home_decor_lighting", "HOME_KITCHEN", "HOME_DECOR_LIGHTING"),
+    ProductTemplateCategoryBinding("home_kitchen_dining", "HOME_KITCHEN", "HOME_KITCHEN_DINING"),
+    ProductTemplateCategoryBinding("home_cleaning_supplies", "HOME_KITCHEN", "HOME_CLEANING_SUPPLIES"),
+    ProductTemplateCategoryBinding("home_storage_organization", "HOME_KITCHEN", "HOME_STORAGE_ORGANIZATION"),
+    ProductTemplateCategoryBinding("home_textiles", "HOME_KITCHEN", "HOME_TEXTILES"),
+    ProductTemplateCategoryBinding("home_furniture", "HOME_KITCHEN", "HOME_FURNITURE"),
     ProductTemplateCategoryBinding(
         "beauty_personal_care", "BEAUTY_HEALTH", "BEAUTY_PERSONAL_CARE"
     ),
@@ -1406,6 +1727,12 @@ _TEMPLATE_FIELD_SETS = {
     "home_decoration": _home_common(),
     "home_kitchen_tools": _home_common(),
     "home_cleaning": _home_common(),
+    "home_decor_lighting": _home_decor_lighting(),
+    "home_kitchen_dining": _home_kitchen_dining(),
+    "home_cleaning_supplies": _home_cleaning_supplies(),
+    "home_storage_organization": _home_storage_organization(),
+    "home_textiles": _home_textiles(),
+    "home_furniture": _home_furniture(),
     "beauty_personal_care": _beauty_common(),
     "beauty_cosmetics": _beauty_common(),
     "beauty_skincare": _beauty_common(),
@@ -1593,6 +1920,35 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
             "talla", "Talla", source_field="talla", is_listing_axis=True,
             condition={"field": "tipo_producto", "values": ["Anillo"]},
         ),
+    ),
+    "home_decor_lighting": (
+        axis_def("color", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+    ),
+    "home_kitchen_dining": (
+        axis_def("color", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+        axis_def("capacidad_l", "Capacidad", source_field="capacidad_l", unit="L", value_type="decimal",
+                 condition={"field": "tipo_producto", "values": ["Olla / Cacerola", "Wok"]}),
+        axis_def("capacidad_ml", "Capacidad", source_field="capacidad_ml", unit="ml", value_type="decimal",
+                 condition={"field": "tipo_producto", "values": ["Recipiente para alimentos", "Botella / Termo", "Taza / Vaso"]}),
+    ),
+    "home_cleaning_supplies": (
+        axis_def("color", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True,
+                 condition={"field": "tipo_producto", "values": list(_HOME_CLEANING_TOOL_TYPES)}),
+    ),
+    "home_storage_organization": (
+        axis_def("color", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+    ),
+    "home_textiles": (
+        axis_def("color", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+        axis_def("tamano_cama", "Tamaño", source_field="tamano_cama", value_type="select", is_listing_axis=True,
+                 condition={"field": "tipo_producto", "values": list(_HOME_BEDDING_TYPES)}),
+        axis_def("tamano_textil", "Tamaño", source_field="tamano_textil", is_listing_axis=True,
+                 condition={"field": "tipo_producto", "values": list(_HOME_TEXTILE_SIZE_TYPES)}),
+    ),
+    "home_furniture": (
+        axis_def("color", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+        axis_def("tamano_colchon", "Tamaño", source_field="tamano_colchon", value_type="select", is_listing_axis=True,
+                 condition={"field": "tipo_producto", "values": ["Colchón"]}),
     ),
     "babies_clothing": (
         axis_def(

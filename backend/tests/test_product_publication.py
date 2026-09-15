@@ -138,10 +138,10 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert seeded.exit_code == 0, seeded.output
     first = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert first.exit_code == 0, first.output
-    assert "Reglas creadas: 25; actualizadas: 0." in first.output
+    assert "Reglas creadas: 31; actualizadas: 0." in first.output
     second = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert second.exit_code == 0, second.output
-    assert "Reglas creadas: 0; actualizadas: 25." in second.output
+    assert "Reglas creadas: 0; actualizadas: 31." in second.output
 
     session.expire_all()
     rules = session.scalars(
@@ -159,6 +159,12 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert by_code["BABIES_CARE"] == Decimal("10.00")
     assert by_code["BABIES_CLOTHING"] == Decimal("12.00")
     assert by_code["HOME_CLEANING"] == Decimal("10.00")
+    assert by_code["HOME_DECOR_LIGHTING"] == Decimal("12.00")
+    assert by_code["HOME_KITCHEN_DINING"] == Decimal("10.00")
+    assert by_code["HOME_CLEANING_SUPPLIES"] == Decimal("10.00")
+    assert by_code["HOME_STORAGE_ORGANIZATION"] == Decimal("10.00")
+    assert by_code["HOME_TEXTILES"] == Decimal("12.00")
+    assert by_code["HOME_FURNITURE"] == Decimal("10.00")
     assert {
         by_code[code]
         for code in (
@@ -186,7 +192,7 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
         )
         for category in publishable
     }
-    assert len(publishable) == 25
+    assert len(publishable) == 31
     assert set(resolutions) == {category.code for category in publishable}
     assert all(result.mode == SellerCommissionType.PERCENTAGE for result in resolutions.values())
 
