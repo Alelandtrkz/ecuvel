@@ -25,6 +25,7 @@ INITIAL_CATEGORY_RATES = {
     "ELECTRONICS_COMPUTERS": Decimal("6.00"),
     "ELECTRONICS_HEADPHONES": Decimal("9.00"),
     "ELECTRONICS_CAMERAS": Decimal("8.00"),
+    "ELECTRONICS_SECURITY": Decimal("8.00"),
     "BEAUTY_COSMETICS": Decimal("8.00"),
     "BEAUTY_SKINCARE": Decimal("10.00"),
     "BEAUTY_PERSONAL_CARE": Decimal("10.00"),

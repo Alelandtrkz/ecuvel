@@ -44,6 +44,7 @@ from app.services.public_identifiers import assign_product_code_to_draft
 from app.services.marketplace_policy import (
     CommissionRuleMissingError,
     InvalidSellerPriceError,
+    MINIMUM_COMMISSION_AMOUNT,
     MINIMUM_PRICE_MESSAGE,
     ResolvedSellerCommission,
     resolve_marketplace_commission,
@@ -206,8 +207,7 @@ def build_product_draft_view(draft: ProductDraft) -> ProductDraftView:
         _sort_files(item for item in active_files if item.kind == ProductDraftFileKind.DOCUMENT)
     )
     policy: dict[str, Any] = {
-        "threshold": "3.00",
-        "fixed_amount": "0.25",
+        "minimum_commission": str(MINIMUM_COMMISSION_AMOUNT),
         "minimum_price": "0.25",
         "minimum_price_message": MINIMUM_PRICE_MESSAGE,
         "rate_percent": None,
@@ -218,7 +218,7 @@ def build_product_draft_view(draft: ProductDraft) -> ProductDraftView:
     if session is not None:
         try:
             resolved_policy = resolve_marketplace_commission(
-                session, category_id=draft.subcategory_id, price="3.00"
+                session, category_id=draft.subcategory_id, price="100.00"
             )
             policy.update({
                 "rate_percent": str(resolved_policy.rate_percent),

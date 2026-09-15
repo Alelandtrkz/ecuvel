@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select
 from werkzeug.security import generate_password_hash
 
+from app.catalog.product_templates import template_key_for_category_code
 from app.extensions import db
 from app.models import (
     Category,
@@ -382,7 +383,11 @@ def test_cancel_keeps_product_tables_empty(client, session):
     assert session.scalar(select(func.count()).select_from(SellerOffer)) == 0
 
 
-def test_seed_product_categories_is_idempotent(app, session):
+def test_seed_product_categories_is_idempotent_and_exposes_security_leaf(
+    app,
+    session,
+    client,
+):
     runner = app.test_cli_runner()
 
     first = runner.invoke(args=["seed-product-categories"])
@@ -394,7 +399,10 @@ def test_seed_product_categories_is_idempotent(app, session):
     managed_codes = {
         "ELECTRONICS",
         "ELECTRONICS_PHONES",
+        "ELECTRONICS_COMPUTERS",
+        "ELECTRONICS_HEADPHONES",
         "ELECTRONICS_CAMERAS",
+        "ELECTRONICS_SECURITY",
         "FASHION",
         "HOME_KITCHEN",
         "BEAUTY_HEALTH",
@@ -405,8 +413,22 @@ def test_seed_product_categories_is_idempotent(app, session):
     assert {row.code for row in rows} == managed_codes
     electronics = session.scalar(select(Category).where(Category.code == "ELECTRONICS"))
     cameras = session.scalar(select(Category).where(Category.code == "ELECTRONICS_CAMERAS"))
+    security = session.scalar(select(Category).where(Category.code == "ELECTRONICS_SECURITY"))
     assert electronics.parent_id is None
     assert cameras.parent_id == electronics.id
+    assert security.parent_id == electronics.id
+    assert security.name == "Seguridad y videovigilancia"
+    assert security.slug == "seguridad-y-videovigilancia"
+    assert security.sort_order == 5
+    assert template_key_for_category_code(security.code) == "electronics_security"
+
+    user = _user(session)
+    _enabled_store(session, user)
+    session.commit()
+    _login(client, user)
+    selector = client.get("/partners/products/new/category")
+    assert selector.status_code == 200
+    assert "Seguridad y videovigilancia" in selector.get_data(as_text=True)
 
     category_count = session.scalar(select(func.count()).select_from(Category))
     third = runner.invoke(args=["seed-product-categories"])

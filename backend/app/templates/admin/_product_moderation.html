@@ -34,7 +34,7 @@
     <tbody>{% for row in commission_rows %}<tr>
       <td><strong>{{ row.name }}</strong><small>{{ row.sku }}</small></td>
       <td>{{ row.price|money }}</td>
-      <td><strong>{{ row.commission_amount|money }}</strong><small>{% if row.mode == 'FIXED' %}Tarifa fija {{ row.fixed_amount|money }} por unidad{% else %}{{ row.rate_percent }}% del precio{% endif %}</small></td>
+      <td><strong>{{ row.commission_amount|money }}</strong><small>{% if row.mode == 'FIXED' %}Tarifa mínima ECUVEL {{ row.fixed_amount|money }} por unidad{% if row.rate_percent %}; tasa de categoría {{ row.rate_percent }}%{% endif %}{% else %}{{ row.rate_percent }}% del precio{% endif %}</small></td>
       <td><strong>{{ row.seller_net_amount|money }}</strong></td>
       <td><span>{{ row.category_labels|join(' / ') }}</span><small>{% if row.captured_at %}Fijada: {{ row.captured_at }}{% else %}Estimación actual{% endif %}</small></td>
     </tr>{% endfor %}</tbody>

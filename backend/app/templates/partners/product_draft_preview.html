@@ -162,7 +162,7 @@
                   <span><strong>{{ row.name }}</strong><small>{{ row.sku }}</small></span>
                   <span>{{ row.price|money('USD') }}</span>
                   <span>
-                    {% if row.mode == 'FIXED' %}{{ row.fixed_amount|money('USD') }} fijo
+                    {% if row.mode == 'FIXED' %}Tarifa mínima ECUVEL · {{ row.fixed_amount|money('USD') }}{% if row.rate_percent %}<small>{{ row.rate_percent }}% de categoría; mínimo por unidad</small>{% endif %}
                     {% else %}{{ row.rate_percent }}% · {{ row.commission_amount|money('USD') }}{% endif %}
                   </span>
                   <span><strong>{{ row.seller_net_amount|money('USD') }}</strong></span>

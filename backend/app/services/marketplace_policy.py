@@ -21,15 +21,14 @@ from app.models.enums import LocationType, SellerCommissionType
 from app.services.inventory import SELLABLE_LOCATION_TYPES
 
 
-LOW_PRICE_THRESHOLD = Decimal("3.00")
-LOW_PRICE_FIXED_FEE = Decimal("0.25")
-MINIMUM_SELLER_PRICE = LOW_PRICE_FIXED_FEE
+MINIMUM_COMMISSION_AMOUNT = Decimal("0.25")
+MINIMUM_SELLER_PRICE = MINIMUM_COMMISSION_AMOUNT
 COMMISSION_CURRENCY = "USD"
 MONEY_QUANTUM = Decimal("0.01")
 COMMISSION_SNAPSHOT_VERSION = 1
 MINIMUM_PRICE_MESSAGE = (
-    "El precio debe ser mayor a USD 0.25 porque los productos menores a "
-    "USD 3.00 tienen una tarifa fija de servicio de USD 0.25."
+    "El precio debe ser mayor a USD 0.25 para soportar la comisión mínima "
+    "ECUVEL de USD 0.25."
 )
 
 
@@ -70,8 +69,10 @@ class ResolvedSellerCommission:
 
     @property
     def rate(self) -> Decimal:
-        """Backward-compatible percentage accessor."""
-        return self.rate_percent or Decimal("0.00")
+        """Return the persisted offer rate for the resolved commission mode."""
+        if self.mode == SellerCommissionType.PERCENTAGE:
+            return self.rate_percent or Decimal("0.00")
+        return Decimal("0.00")
 
     @property
     def scope(self) -> str:
@@ -167,23 +168,6 @@ def resolve_marketplace_commission(
     category_path = tuple(category.code for category in reversed(lineage))
     category_labels = tuple(category.name for category in reversed(lineage))
 
-    if normalized_price < LOW_PRICE_THRESHOLD:
-        commission_amount = LOW_PRICE_FIXED_FEE
-        return ResolvedSellerCommission(
-            mode=SellerCommissionType.FIXED,
-            currency=COMMISSION_CURRENCY,
-            price=normalized_price,
-            category_id=category_id,
-            category_path=category_path,
-            category_labels=category_labels,
-            rate_percent=None,
-            fixed_amount=LOW_PRICE_FIXED_FEE,
-            commission_amount=commission_amount,
-            seller_net_amount=_money(normalized_price - commission_amount),
-            rule_id=None,
-            source="LOW_PRICE_FIXED",
-        )
-
     rules = session.scalars(
         select(MarketplaceCommissionRule).where(
             MarketplaceCommissionRule.is_active.is_(True),
@@ -207,20 +191,28 @@ def resolve_marketplace_commission(
     rate = Decimal(selected_rule.commission_rate).quantize(
         Decimal("0.01"), rounding=ROUND_HALF_UP
     )
-    commission_amount = _money(normalized_price * rate / Decimal("100"))
+    percentage_commission = _money(normalized_price * rate / Decimal("100"))
+    minimum_applies = percentage_commission < MINIMUM_COMMISSION_AMOUNT
+    commission_amount = (
+        MINIMUM_COMMISSION_AMOUNT if minimum_applies else percentage_commission
+    )
     return ResolvedSellerCommission(
-        mode=SellerCommissionType.PERCENTAGE,
+        mode=(
+            SellerCommissionType.FIXED
+            if minimum_applies
+            else SellerCommissionType.PERCENTAGE
+        ),
         currency=COMMISSION_CURRENCY,
         price=normalized_price,
         category_id=category_id,
         category_path=category_path,
         category_labels=category_labels,
         rate_percent=rate,
-        fixed_amount=None,
+        fixed_amount=MINIMUM_COMMISSION_AMOUNT if minimum_applies else None,
         commission_amount=commission_amount,
         seller_net_amount=_money(normalized_price - commission_amount),
         rule_id=selected_rule.id,
-        source=source,
+        source=f"{source}_MINIMUM" if minimum_applies else source,
     )
 
 
@@ -271,17 +263,34 @@ def commission_from_snapshot(
         raise CommissionSnapshotError("Los importes del snapshot de comisión no son válidos.")
     if snapshot.get("currency") != COMMISSION_CURRENCY:
         raise CommissionSnapshotError("La moneda del snapshot de comisión no es válida.")
+    percentage_commission = (
+        _money(price * rate / Decimal("100"))
+        if rate is not None and Decimal("0") <= rate <= Decimal("100")
+        else None
+    )
     if mode == SellerCommissionType.FIXED:
-        valid = rate is None and fixed == LOW_PRICE_FIXED_FEE and price < LOW_PRICE_THRESHOLD
+        current_floor = (
+            percentage_commission is not None
+            and percentage_commission < MINIMUM_COMMISSION_AMOUNT
+            and rule_id is not None
+            and snapshot.get("source") in {"CATEGORY_MINIMUM", "GLOBAL_MINIMUM"}
+            and fixed == MINIMUM_COMMISSION_AMOUNT
+        )
+        legacy_fixed = (
+            rate is None
+            and rule_id is None
+            and snapshot.get("source") == "LOW_PRICE_FIXED"
+            and fixed == MINIMUM_COMMISSION_AMOUNT
+        )
+        valid = current_floor or legacy_fixed
         calculated = fixed
     else:
         valid = (
-            price >= LOW_PRICE_THRESHOLD
-            and fixed is None
-            and rate is not None
-            and Decimal("0") <= rate <= Decimal("100")
+            fixed is None
+            and percentage_commission is not None
+            and percentage_commission >= MINIMUM_COMMISSION_AMOUNT
         )
-        calculated = _money(price * rate / Decimal("100")) if rate is not None else None
+        calculated = percentage_commission
     if (
         not valid
         or calculated != commission_amount

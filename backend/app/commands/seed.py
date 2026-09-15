@@ -297,6 +297,7 @@ _PRODUCT_CATEGORY_TREE = (
             {"code": "ELECTRONICS_COMPUTERS", "name": "Computadoras y Tabletas", "slug": "computadoras-y-tabletas", "sort_order": 2},
             {"code": "ELECTRONICS_HEADPHONES", "name": "Auriculares", "slug": "auriculares", "sort_order": 3},
             {"code": "ELECTRONICS_CAMERAS", "name": "Cámaras y Fotografía", "slug": "camaras-y-fotografia", "sort_order": 4},
+            {"code": "ELECTRONICS_SECURITY", "name": "Seguridad y videovigilancia", "slug": "seguridad-y-videovigilancia", "sort_order": 5},
         ),
     ),
     (

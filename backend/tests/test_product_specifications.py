@@ -215,9 +215,38 @@ def test_computer_public_specifications_honor_generic_condition_true_and_false()
     )
 
     assert laptop_items["ram_gb"].value == "16 GB"
-    assert "frecuencia_hz" not in laptop_items
+    assert laptop_items["frecuencia_hz"].value == "144 Hz"
     assert monitor_items["frecuencia_hz"].value == "144 Hz"
     assert "ram_gb" not in monitor_items
+
+
+def test_security_public_specifications_use_exact_template_and_conditions():
+    assert resolve_product_template("ELECTRONICS_SECURITY") is PRODUCT_TEMPLATES[
+        "electronics_security"
+    ]
+    items = _items(
+        build_product_specification_presentation(
+            _row(
+                category_code="ELECTRONICS_SECURITY",
+                attributes={
+                    "tipo_seguridad": "Cámara de seguridad",
+                    "formato_camara": "Domo",
+                    "resolucion_mp": "4",
+                    "lente_mm": "2.8",
+                    "vision_nocturna": True,
+                    "conectividad": ["Ethernet", "Wi-Fi"],
+                    "bahias_hdd": "2",  # stale recorder-only value
+                },
+            )
+        )
+    )
+
+    assert items["formato_camara"].value == "Domo"
+    assert items["resolucion_mp"].value == "4 MP"
+    assert items["lente_mm"].value == "2,8 mm"
+    assert items["vision_nocturna"].value == "Sí"
+    assert items["conectividad"].list_items == ("Ethernet", "Wi-Fi")
+    assert "bahias_hdd" not in items
 
 
 @pytest.mark.parametrize(

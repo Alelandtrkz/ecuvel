@@ -9,23 +9,24 @@
 
 <section id="precio-minimo">
   <h2>Precio mínimo</h2>
-  <p>El precio Seller debe ser <strong>superior a USD 0,25</strong>. Un valor igual o inferior no es válido porque impediría un neto positivo bajo la tarifa fija de productos de bajo precio.</p>
+  <p>El precio Seller debe ser <strong>superior a USD 0,25</strong>. Un valor igual o inferior no es válido porque no puede soportar la comisión mínima ECUVEL y conservar un neto Seller positivo.</p>
 </section>
 
 <section id="tarifa-fija">
-  <h2>Tarifa fija</h2>
-  <p>Cuando el precio es <strong>menor a USD 3,00</strong>, el resolver aplica una tarifa fija de servicio de <strong>USD 0,25</strong>. Por ejemplo, un precio de USD 2,99 genera una comisión de USD 0,25 antes de cualquier otro ajuste financiero aplicable.</p>
+  <h2>Comisión mínima</h2>
+  <p>La tasa porcentual de la categoría es siempre la regla principal. ECUVEL calcula ese porcentaje sobre el precio de cada unidad y aplica como comisión efectiva el mayor importe entre el resultado porcentual y el mínimo de <strong>USD 0,25 por unidad</strong>.</p>
+  <p>Cuando el porcentaje calculado es inferior a USD 0,25, se aplica la tarifa mínima ECUVEL sin modificar ni sustituir la tasa de la categoría.</p>
 </section>
 
 <section id="comision-porcentual">
   <h2>Comisión porcentual</h2>
-  <p>Desde <strong>USD 3,00</strong>, se aplica un porcentaje. El resolver busca primero una regla activa para la categoría concreta o su linaje y, si no existe, utiliza la regla global activa. Si falta toda regla aplicable, la presentación no puede continuar como si tuviera comisión cero.</p>
+  <p>Cuando el importe porcentual es igual o superior a <strong>USD 0,25</strong>, ese importe es la comisión efectiva. El resolver busca primero una regla activa para la categoría concreta o su linaje y, si no existe, utiliza la regla global activa. Si falta toda regla aplicable, la presentación no puede continuar como si tuviera comisión cero.</p>
   <p>Los porcentajes son administrables y no se reproducen como una tabla estática en este documento. El resolver actual ignora el identificador de Tienda y no aplica tarifas negociadas individualmente por Store.</p>
 </section>
 
 <section id="snapshot">
   <h2>Snapshot de comisión</h2>
-  <p>Al enviar una publicación a revisión se captura un snapshot por presentación. Conserva versión y fecha de captura, categoría y su ruta, precio, moneda, modo fijo o porcentual, porcentaje o tarifa fija, comisión calculada, neto Seller, identificador de regla y origen —tarifa baja, categoría o regla global—.</p>
+  <p>Al enviar una publicación a revisión se captura un snapshot por presentación. Conserva versión y fecha de captura, categoría y su ruta, precio, moneda, tasa de categoría, mínimo aplicado cuando corresponda, comisión calculada, neto Seller, identificador de regla y origen —categoría, regla global o mínimo ECUVEL—.</p>
   <p>Al publicar, el sistema valida y lleva los datos aprobados a la oferta. En checkout, cada artículo vuelve a conservar la comisión económica aplicable. Los cambios posteriores de reglas no deben reescribir retroactivamente los snapshots ya fijados para una operación.</p>
 </section>
 

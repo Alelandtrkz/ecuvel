@@ -101,6 +101,46 @@ const ecuvelPartnerFieldState = (() => {
 
 globalThis.EcuvelPartnerFieldState = ecuvelPartnerFieldState;
 
+const ecuvelPartnerCommissionPolicy = (() => {
+  const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+  const estimate = (policy, rawPrice) => {
+    const parsedPrice = Number(rawPrice);
+    const price = roundMoney(parsedPrice);
+    const minimumPrice = Number(policy.minimum_price || 0.25);
+    const configuredMinimum = Number(policy.minimum_commission || 0.25);
+    const minimumCommission = Number.isFinite(configuredMinimum) && configuredMinimum > 0
+      ? configuredMinimum
+      : 0.25;
+    if (!Number.isFinite(parsedPrice) || !Number.isFinite(price) || price <= minimumPrice) return null;
+    const rate = Number(policy.rate_percent);
+    if (!policy.available || !Number.isFinite(rate)) return { mode: "MISSING" };
+    const percentageAmount = roundMoney(price * rate / 100);
+    if (percentageAmount < minimumCommission) {
+      return {
+        mode: "MINIMUM",
+        label: `$${minimumCommission.toFixed(2)} mínimo`,
+        amount: minimumCommission,
+        net: roundMoney(price - minimumCommission),
+        percentageAmount,
+        rate,
+      };
+    }
+    return {
+      mode: "PERCENTAGE",
+      label: `${rate.toFixed(2).replace(/\.00$/, "")}% / $${percentageAmount.toFixed(2)}`,
+      amount: percentageAmount,
+      net: roundMoney(price - percentageAmount),
+      percentageAmount,
+      rate,
+    };
+  };
+
+  return { estimate, roundMoney };
+})();
+
+globalThis.EcuvelPartnerCommissionPolicy = ecuvelPartnerCommissionPolicy;
+
 (() => {
   const root = document.querySelector("[data-product-draft]");
   if (!root) return;
@@ -120,23 +160,10 @@ globalThis.EcuvelPartnerFieldState = ecuvelPartnerFieldState;
     }
   })();
 
-  const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-
-  const commissionEstimate = (rawPrice) => {
-    const parsedPrice = Number(rawPrice);
-    const price = roundMoney(parsedPrice);
-    const minimum = Number(commissionPolicy.minimum_price || 0.25);
-    const threshold = Number(commissionPolicy.threshold || 3);
-    const fixed = Number(commissionPolicy.fixed_amount || 0.25);
-    if (!Number.isFinite(parsedPrice) || !Number.isFinite(price) || price <= minimum) return null;
-    if (price < threshold) {
-      return { mode: "FIXED", label: `$${fixed.toFixed(2)} fijo`, amount: fixed, net: roundMoney(price - fixed) };
-    }
-    const rate = Number(commissionPolicy.rate_percent);
-    if (!commissionPolicy.available || !Number.isFinite(rate)) return { mode: "MISSING" };
-    const amount = roundMoney(price * rate / 100);
-    return { mode: "PERCENTAGE", label: `${rate.toFixed(2).replace(/\.00$/, "")}% / $${amount.toFixed(2)}`, amount, net: roundMoney(price - amount) };
-  };
+  const { roundMoney } = ecuvelPartnerCommissionPolicy;
+  const commissionEstimate = (rawPrice) => (
+    ecuvelPartnerCommissionPolicy.estimate(commissionPolicy, rawPrice)
+  );
 
   const renderSingleCommission = () => {
     const summary = document.querySelector("[data-single-commission-summary]");
@@ -159,10 +186,10 @@ globalThis.EcuvelPartnerFieldState = ecuvelPartnerFieldState;
       set("[data-commission-net]", "—");
       return;
     }
-    set("[data-commission-label]", estimate.mode === "FIXED" ? "Tarifa ECUVEL" : "Comisión ECUVEL");
-    set("[data-commission-value]", estimate.mode === "FIXED" ? `$${estimate.amount.toFixed(2)}` : estimate.label.split(" /")[0]);
-    set("[data-commission-source]", estimate.mode === "FIXED"
-      ? "Tarifa fija para productos menores a USD 3.00."
+    set("[data-commission-label]", estimate.mode === "MINIMUM" ? "Tarifa mínima ECUVEL" : "Comisión ECUVEL");
+    set("[data-commission-value]", estimate.mode === "MINIMUM" ? `$${estimate.amount.toFixed(2)}` : estimate.label.split(" /")[0]);
+    set("[data-commission-source]", estimate.mode === "MINIMUM"
+      ? `La comisión de la categoría es ${estimate.rate.toFixed(2).replace(/\.00$/, "")}%. Como el importe calculado es menor al mínimo ECUVEL, se aplica la tarifa mínima de $${estimate.amount.toFixed(2)}.`
       : `Determinada por: ${(commissionPolicy.category_path || []).join(" › ")}`);
     set("[data-commission-amount]", `$${estimate.amount.toFixed(2)}`);
     set("[data-commission-net]", `$${estimate.net.toFixed(2)}`);

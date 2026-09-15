@@ -280,8 +280,14 @@ def test_validate_template_registry_passes_with_quick_options():
     validate_template_registry()
 
 
-def test_non_phone_computer_templates_have_no_quick_options():
-    keys_with_quick_options = {"electronics_phones", "electronics_computers"}
+def test_quick_options_remain_scoped_to_electronics_templates():
+    keys_with_quick_options = {
+        "electronics_phones",
+        "electronics_computers",
+        "electronics_headphones",
+        "electronics_cameras",
+        "electronics_security",
+    }
     for key, template in PRODUCT_TEMPLATES.items():
         if key in keys_with_quick_options:
             continue
@@ -344,7 +350,7 @@ def test_phone_draft_form_one_tb_chip_has_data_value_1024(client, session):
     assert 'data-value="1024"' in html
 
 
-def test_camera_draft_form_has_no_quick_option_chips(client, session):
+def test_camera_draft_form_renders_video_quick_options(client, session):
     user = _user(session)
     _enabled_store(session, user)
     category, subcategory = _camera_category_tree(session)
@@ -356,8 +362,10 @@ def test_camera_draft_form_has_no_quick_option_chips(client, session):
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert 'partner-attribute-chip' not in html
-    assert 'data-quick-options' not in html
+    assert 'partner-attribute-chip' in html
+    assert 'data-quick-options' in html
+    assert 'data-value="1080p"' in html
+    assert 'data-value="4K"' in html
 
 
 # ---------------------------------------------------------------------------

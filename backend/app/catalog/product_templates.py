@@ -124,6 +124,26 @@ _FIELD_EXAMPLES = {
     "resolucion_pantalla": "1920x1080",
     "resolucion_video": "1080p o 4K",
     "proteccion_ip": "IP66",
+    "numero_puertos": "2",
+    "potencia_max_w": "100",
+    "velocidad_datos": "10 Gbps",
+    "version_bluetooth": "5.3",
+    "bluetooth_version": "5.3",
+    "driver_mm": "40",
+    "impedancia_ohm": "32",
+    "profundidad_agua_m": "10",
+    "campo_vision_grados": "90",
+    "canales": "8",
+    "bahias_hdd": "2",
+    "capacidad_max_hdd_tb": "8",
+    "capacidad_disco_incluido_tb": "4",
+    "puertos_red": "1",
+    "puertos_poe": "8",
+    "lente_mm": "2.8",
+    "distancia_ir_m": "30",
+    "cantidad_camaras": "4",
+    "resolucion_camaras_mp": "4",
+    "longitud_cable_m": "20",
 }
 
 _FIELD_HELP = {
@@ -202,6 +222,57 @@ _FIELD_ICONS = {
     "autonomia_horas": "clock",
     "surround": "waves",
     "plataformas": "gamepad-2",
+    "red_movil": "wifi",
+    "configuracion_sim": "scan-line",
+    "nfc": "scan-line",
+    "numero_puertos": "plug-zap",
+    "protocolos_carga": "zap",
+    "potencia_max_w": "zap",
+    "velocidad_datos": "activity",
+    "gpu": "monitor",
+    "pantalla_tactil": "monitor",
+    "puertos": "cable",
+    "wifi": "wifi",
+    "bluetooth_version": "bluetooth",
+    "version_bluetooth": "bluetooth",
+    "conector_fisico": "cable",
+    "driver_mm": "headphones",
+    "impedancia_ohm": "gauge",
+    "tipo_fotografica": "camera",
+    "profundidad_agua_m": "ruler",
+    "campo_vision_grados": "aperture",
+    "tapa_privacidad": "shield",
+    "tipo_seguridad": "shield-check",
+    "canales": "list-checks",
+    "resolucion_grabacion": "video",
+    "compresion_video": "video",
+    "bahias_hdd": "hard-drive",
+    "capacidad_max_hdd_tb": "hard-drive",
+    "disco_incluido": "hard-drive",
+    "capacidad_disco_incluido_tb": "hard-drive",
+    "salidas_video": "cable",
+    "puertos_red": "wifi",
+    "puertos_poe": "plug-zap",
+    "onvif": "wifi",
+    "acceso_remoto": "smartphone",
+    "formato_camara": "camera",
+    "tecnologia_camara": "camera",
+    "lente_mm": "focus",
+    "distancia_ir_m": "moon",
+    "audio_bidireccional": "mic",
+    "poe": "plug-zap",
+    "uso_instalacion": "shield-check",
+    "almacenamiento_soportado": "hard-drive",
+    "tipo_grabador": "video",
+    "cantidad_camaras": "camera",
+    "resolucion_camaras_mp": "camera",
+    "tipo_camaras_kit": "camera",
+    "cable_incluido": "cable",
+    "longitud_cable_m": "ruler",
+    "fuente_alimentacion_incluida": "plug",
+    "timbre_interior_incluido": "bell",
+    "tipo_accesorio_seguridad": "wrench",
+    "compatibilidad": "badge-check",
 }
 
 _UNIT_ICONS = {
@@ -212,6 +283,11 @@ _UNIT_ICONS = {
     "V": "plug-zap",
     "A": "gauge",
     "cm": "ruler",
+    "m": "ruler",
+    "mm": "ruler",
+    "TB": "hard-drive",
+    "Ω": "gauge",
+    "°": "aperture",
     "Hz": "activity",
     "horas": "clock",
     "in": "monitor",
@@ -385,6 +461,40 @@ def _electronics_phone() -> tuple[ProductTemplateField, ...]:
                   condition={"field": "tipo_producto", "values": _REPUESTO}),
         field_def("numero_parte", "Número de parte", section="compatibilidad", order=21,
                   condition={"field": "tipo_producto", "values": _REPUESTO}),
+
+        # Especificaciones opcionales ampliadas
+        field_def("procesador", "Procesador", section="tecnica", order=22,
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE}),
+        field_def("resolucion_pantalla", "Resolución de pantalla", section="pantalla", order=23,
+                  placeholder="Ej. 1920x1080, 2400x1080",
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE_BASIC}),
+        field_def("frecuencia_hz", "Frecuencia de refresco", type="integer", section="pantalla", order=24,
+                  unit="Hz", min=0, quick_options=("60 Hz|60", "90 Hz|90", "120 Hz|120", "144 Hz|144"),
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE}),
+        field_def("red_movil", "Red móvil", type="multiselect", section="conectividad", order=25,
+                  options=("2G", "3G", "4G LTE", "5G"),
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE_BASIC}),
+        field_def("configuracion_sim", "Configuración SIM", type="select", section="conectividad", order=26,
+                  options=("SIM", "Dual SIM", "eSIM", "SIM + eSIM"),
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE_BASIC}),
+        field_def("nfc", "NFC", type="boolean", section="conectividad", order=27,
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE}),
+        field_def("proteccion_ip", "Protección IP", section="proteccion", order=28,
+                  placeholder="Ej. IP67, IP68",
+                  condition={"field": "tipo_producto", "values": _SMARTPHONE}),
+        field_def("numero_puertos", "Número de puertos", type="integer", section="conectividad", order=29,
+                  min=1, quick_options=("1", "2", "3", "4"),
+                  condition={"field": "tipo_producto", "values": _CHARGER}),
+        field_def("protocolos_carga", "Protocolos de carga", type="multiselect", section="conectividad", order=30,
+                  options=("USB Power Delivery", "PPS", "Quick Charge", "Carga propietaria", "Otro"),
+                  condition={"field": "tipo_producto", "values": _CHARGER}),
+        field_def("potencia_max_w", "Potencia máxima", type="integer", section="tecnica", order=31,
+                  unit="W", min=0,
+                  quick_options=("20 W|20", "30 W|30", "60 W|60", "65 W|65", "100 W|100", "140 W|140", "240 W|240"),
+                  condition={"field": "tipo_producto", "values": _CABLE}),
+        field_def("velocidad_datos", "Velocidad de datos", section="conectividad", order=32,
+                  placeholder="Ej. 480 Mbps, 5 Gbps, 10 Gbps",
+                  condition={"field": "tipo_producto", "values": _CABLE}),
     )
 
 
@@ -392,6 +502,7 @@ def _electronics_computer() -> tuple[ProductTemplateField, ...]:
     _LAPTOP_DESKTOP_TABLET = ["Laptop", "Desktop", "Tablet"]
     _LAPTOP_DESKTOP = ["Laptop", "Desktop"]
     _LAPTOP_TABLET = ["Laptop", "Tablet"]
+    _LAPTOP_TABLET_MONITOR = ["Laptop", "Tablet", "Monitor"]
     _LAPTOP = ["Laptop"]
     _TABLET = ["Tablet"]
     _MONITOR = ["Monitor"]
@@ -418,7 +529,7 @@ def _electronics_computer() -> tuple[ProductTemplateField, ...]:
         # Laptop / Tablet / Monitor
         field_def("pantalla_pulgadas", "Tamaño de pantalla", type="decimal", section="pantalla", order=7, unit="in",
                   min=Decimal("0"), max=Decimal("100"),
-                  condition={"field": "tipo_equipo", "values": ["Laptop", "Tablet", "Monitor"]}),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_TABLET_MONITOR}),
 
         # Laptop / Tablet
         field_def("bateria_mah", "Batería", type="integer", section="energia", order=8, unit="mAh", min=0,
@@ -428,16 +539,18 @@ def _electronics_computer() -> tuple[ProductTemplateField, ...]:
         field_def("tiene_sim", "Ranura SIM", type="boolean", section="conectividad", order=9,
                   condition={"field": "tipo_equipo", "values": _TABLET}),
 
-        # Monitor
+        # Laptop / Tablet / Monitor
         field_def("resolucion_pantalla", "Resolución", section="pantalla", order=10,
                   placeholder="Ej. 1920x1080, 2560x1440",
-                  condition={"field": "tipo_equipo", "values": _MONITOR}),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_TABLET_MONITOR}),
         field_def("frecuencia_hz", "Frecuencia de refresco", type="integer", section="pantalla", order=11, unit="Hz", min=0,
                   quick_options=("60 Hz|60", "75 Hz|75", "120 Hz|120", "144 Hz|144", "165 Hz|165", "240 Hz|240"),
-                  condition={"field": "tipo_equipo", "values": _MONITOR}),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_TABLET_MONITOR}),
         field_def("tipo_panel", "Tipo de panel", type="select", section="pantalla", order=12,
                   options=("IPS", "VA", "TN", "OLED"),
-                  condition={"field": "tipo_equipo", "values": _MONITOR}),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_TABLET_MONITOR}),
+
+        # Monitor
         field_def("tipo_conexion_monitor", "Conexiones disponibles", type="chips", section="conectividad", order=13,
                   help="Ej. HDMI, DisplayPort, VGA, USB-C",
                   condition={"field": "tipo_equipo", "values": _MONITOR}),
@@ -445,7 +558,60 @@ def _electronics_computer() -> tuple[ProductTemplateField, ...]:
         # Accesorio
         field_def("tipo_accesorio", "Tipo de accesorio", section="tecnica", order=14,
                   placeholder="Ej. Teclado, Mouse, Hub USB",
+                  quick_options=("Teclado", "Mouse", "Hub USB", "Dock", "Disco externo", "Base para laptop", "Adaptador", "Otro"),
                   condition={"field": "tipo_equipo", "values": _ACCESORIO}),
+
+        # Especificaciones opcionales ampliadas
+        field_def("gpu", "Tarjeta gráfica / GPU", section="tecnica", order=15,
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP}),
+        field_def("pantalla_tactil", "Pantalla táctil", type="boolean", section="pantalla", order=16,
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_TABLET_MONITOR}),
+        field_def("puertos", "Puertos", type="chips", section="conectividad", order=17,
+                  quick_options=("USB-A", "USB-C", "Thunderbolt", "HDMI", "DisplayPort", "Ethernet", "microSD"),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP_TABLET}),
+        field_def("wifi", "Wi-Fi", type="select", section="conectividad", order=18,
+                  options=("Wi-Fi 4", "Wi-Fi 5", "Wi-Fi 6", "Wi-Fi 6E", "Wi-Fi 7", "No aplica"),
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP_TABLET}),
+        field_def("bluetooth_version", "Bluetooth", section="conectividad", order=19,
+                  placeholder="Ej. 5.3",
+                  condition={"field": "tipo_equipo", "values": _LAPTOP_DESKTOP_TABLET}),
+    )
+
+
+def _electronics_headphones() -> tuple[ProductTemplateField, ...]:
+    _BLUETOOTH_MIXED = ["Bluetooth", "Mixta"]
+    _WIRED = ["Cable", "USB", "Mixta"]
+    return _common(
+        field_def("tipo", "Tipo", type="select", required=True, section="audio", order=1,
+                  options=("In-ear", "On-ear", "Over-ear", "Gaming", "Otro")),
+        field_def("conexion", "Conexión", type="select", section="audio", order=2,
+                  options=("Bluetooth", "Cable", "USB", "Mixta")),
+        field_def("cancelacion_activa", "Cancelación activa", type="boolean", section="audio", order=3),
+        field_def("microfono", "Micrófono", type="boolean", section="audio", order=4),
+        field_def("autonomia_horas", "Autonomía", type="decimal", section="energia", order=5,
+                  unit="horas", min=Decimal("0"),
+                  condition={"field": "conexion", "values": _BLUETOOTH_MIXED}),
+        field_def("surround", "Sonido envolvente (7.1)", type="boolean", section="audio", order=6,
+                  condition={"field": "tipo", "values": ["Gaming"]}),
+        field_def("plataformas", "Plataformas compatibles", type="chips", section="compatibilidad", order=7,
+                  help="Ej. PC, PS5, Xbox, Switch",
+                  quick_options=("PC", "PS4", "PS5", "Xbox One", "Xbox Series", "Nintendo Switch", "Móvil"),
+                  condition={"field": "tipo", "values": ["Gaming"]}),
+        field_def("version_bluetooth", "Versión de Bluetooth", section="conectividad", order=8,
+                  placeholder="Ej. 5.3",
+                  condition={"field": "conexion", "values": _BLUETOOTH_MIXED}),
+        field_def("conector_fisico", "Conector físico", type="select", section="conectividad", order=9,
+                  options=("3.5 mm", "USB-A", "USB-C", "Lightning", "Otro"),
+                  condition={"field": "conexion", "values": _WIRED}),
+        field_def("driver_mm", "Tamaño del driver", type="decimal", section="audio", order=10,
+                  unit="mm", min=Decimal("0"),
+                  quick_options=("6 mm|6", "8 mm|8", "10 mm|10", "40 mm|40", "50 mm|50")),
+        field_def("impedancia_ohm", "Impedancia", type="integer", section="audio", order=11,
+                  unit="Ω", min=0,
+                  quick_options=("16 Ω|16", "32 Ω|32", "64 Ω|64", "80 Ω|80", "250 Ω|250")),
+        field_def("proteccion_ip", "Protección IP", section="proteccion", order=12,
+                  placeholder="Ej. IPX4, IPX5, IPX7",
+                  condition={"field": "tipo", "values": ["In-ear"]}),
     )
 
 
@@ -469,6 +635,7 @@ def _electronics_camera() -> tuple[ProductTemplateField, ...]:
         # Seguridad / Fotográfica / Deportiva / Webcam
         field_def("resolucion_video", "Resolución de video", section="video", order=3,
                   placeholder="Ej. 1920x1080, 4K",
+                  quick_options=("720p", "1080p", "2K", "4K", "8K"),
                   condition={"field": "tipo_camara", "values": _SEG_FOT_DEP_WEB}),
 
         # Seguridad
@@ -488,6 +655,7 @@ def _electronics_camera() -> tuple[ProductTemplateField, ...]:
         # Seguridad / Fotográfica / Deportiva
         field_def("conectividad", "Conectividad", type="chips", section="conectividad", order=8,
                   help="Ej. Wi-Fi, Ethernet, Bluetooth, 4G",
+                  quick_options=("Wi-Fi", "Ethernet", "Bluetooth", "4G", "USB"),
                   condition={"field": "tipo_camara", "values": _SEG_FOT_DEP}),
 
         # Fotográfica
@@ -522,6 +690,182 @@ def _electronics_camera() -> tuple[ProductTemplateField, ...]:
                   condition={"field": "tipo_camara", "values": _WEBCAM}),
         field_def("autofocus", "Enfoque automático", type="boolean", section="imagen", order=17,
                   condition={"field": "tipo_camara", "values": _WEBCAM}),
+        field_def("tipo_fotografica", "Tipo de cámara fotográfica", type="select", section="imagen", order=18,
+                  options=("Mirrorless", "DSLR", "Compacta", "Instantánea", "Otra"),
+                  condition={"field": "tipo_camara", "values": _FOTOGRAFICA}),
+        field_def("profundidad_agua_m", "Profundidad de resistencia al agua", type="decimal",
+                  section="proteccion", order=19, unit="m", min=Decimal("0"),
+                  condition={"field": "tipo_camara", "values": _DEPORTIVA}),
+        field_def("campo_vision_grados", "Campo de visión", type="integer", section="imagen", order=20,
+                  unit="°", min=0, max=360,
+                  quick_options=("60°|60", "70°|70", "78°|78", "90°|90", "110°|110", "120°|120"),
+                  condition={"field": "tipo_camara", "values": _WEBCAM}),
+        field_def("tapa_privacidad", "Tapa de privacidad", type="boolean", section="proteccion", order=21,
+                  condition={"field": "tipo_camara", "values": _WEBCAM}),
+    )
+
+
+def _electronics_security() -> tuple[ProductTemplateField, ...]:
+    _CAMERA = ["Cámara de seguridad"]
+    _RECORDERS = ["DVR", "NVR", "XVR / Grabador híbrido"]
+    _RECORDER_KIT = [*_RECORDERS, "Kit de videovigilancia"]
+    _NVR_XVR = ["NVR", "XVR / Grabador híbrido"]
+    _KIT = ["Kit de videovigilancia"]
+    _DOORBELL = ["Videoportero / Timbre inteligente"]
+    _ACCESSORY = ["Accesorio de videovigilancia"]
+    _CAMERA_DOORBELL = [*_CAMERA, *_DOORBELL]
+    return _common(
+        field_def(
+            "tipo_seguridad",
+            "Tipo de producto de seguridad",
+            type="select",
+            required=True,
+            section="seguridad",
+            order=1,
+            options=(
+                "Cámara de seguridad",
+                "DVR",
+                "NVR",
+                "XVR / Grabador híbrido",
+                "Kit de videovigilancia",
+                "Videoportero / Timbre inteligente",
+                "Accesorio de videovigilancia",
+                "Otro",
+            ),
+        ),
+
+        # Grabadores y kits
+        field_def("canales", "Número de canales", type="integer", section="tecnica", order=2,
+                  min=1, quick_options=("4", "8", "16", "32", "64"),
+                  condition={"field": "tipo_seguridad", "values": _RECORDER_KIT}),
+        field_def("resolucion_grabacion", "Resolución máxima de grabación", type="select",
+                  section="video", order=3,
+                  options=("1080p", "3 MP", "4 MP", "5 MP", "8 MP / 4K", "12 MP", "Otro"),
+                  condition={"field": "tipo_seguridad", "values": _RECORDERS}),
+        field_def("compresion_video", "Compresión de video", type="multiselect", section="video", order=4,
+                  options=("H.264", "H.264+", "H.265", "H.265+", "Otro"),
+                  condition={"field": "tipo_seguridad", "values": _RECORDERS}),
+        field_def("bahias_hdd", "Bahías para disco", type="integer", section="tecnica", order=5,
+                  min=0, quick_options=("1", "2", "4", "8"),
+                  condition={"field": "tipo_seguridad", "values": _RECORDERS}),
+        field_def("capacidad_max_hdd_tb", "Capacidad máxima de almacenamiento", type="decimal",
+                  section="tecnica", order=6, unit="TB", min=Decimal("0"),
+                  quick_options=("1 TB|1", "2 TB|2", "4 TB|4", "6 TB|6", "8 TB|8", "10 TB|10", "16 TB|16", "20 TB|20"),
+                  condition={"field": "tipo_seguridad", "values": _RECORDERS}),
+        field_def("disco_incluido", "Disco incluido", type="boolean", section="tecnica", order=7,
+                  condition={"field": "tipo_seguridad", "values": _RECORDER_KIT}),
+        field_def("capacidad_disco_incluido_tb", "Capacidad del disco incluido", type="decimal",
+                  section="tecnica", order=8, unit="TB", min=Decimal("0"),
+                  quick_options=("1 TB|1", "2 TB|2", "4 TB|4", "6 TB|6", "8 TB|8", "10 TB|10"),
+                  condition={"field": "tipo_seguridad", "values": _RECORDER_KIT}),
+        field_def("salidas_video", "Salidas de video", type="multiselect", section="video", order=9,
+                  options=("HDMI", "VGA", "DisplayPort", "Otro"),
+                  condition={"field": "tipo_seguridad", "values": _RECORDERS}),
+        field_def("puertos_red", "Puertos de red", type="integer", section="conectividad", order=10,
+                  min=0, condition={"field": "tipo_seguridad", "values": _RECORDERS}),
+        field_def("puertos_poe", "Puertos PoE", type="integer", section="conectividad", order=11,
+                  min=0, quick_options=("4", "8", "16", "24", "32"),
+                  condition={"field": "tipo_seguridad", "values": _NVR_XVR}),
+        field_def("acceso_remoto", "Acceso remoto / aplicación", type="boolean",
+                  section="conectividad", order=12,
+                  condition={"field": "tipo_seguridad", "values": _RECORDER_KIT}),
+
+        # Cámara individual
+        field_def("formato_camara", "Formato de cámara", type="select", section="imagen", order=13,
+                  options=("Bullet", "Domo", "Turret", "PTZ", "Fisheye", "Cubo / Interior", "Otra"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+        field_def("tecnologia_camara", "Tecnología", type="select", section="tecnica", order=14,
+                  options=("IP", "Analógica", "Wi-Fi", "Otra"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+        field_def("resolucion_mp", "Resolución", type="decimal", section="imagen", order=15,
+                  unit="MP", min=Decimal("0"), max=Decimal("500"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+        field_def("lente_mm", "Lente / distancia focal", type="decimal", section="imagen", order=16,
+                  unit="mm", min=Decimal("0"),
+                  quick_options=("2.8 mm|2.8", "3.6 mm|3.6", "4 mm|4", "6 mm|6", "8 mm|8", "12 mm|12"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+        field_def("distancia_ir_m", "Distancia de visión nocturna / IR", type="integer",
+                  section="deteccion", order=17, unit="m", min=0,
+                  quick_options=("10 m|10", "20 m|20", "30 m|30", "50 m|50", "80 m|80", "100 m|100"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+        field_def("uso_instalacion", "Uso", type="select", section="uso", order=18,
+                  options=("Interior", "Exterior", "Interior / Exterior"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+        field_def("proteccion_ip", "Protección IP", section="proteccion", order=19,
+                  placeholder="Ej. IP66, IP67",
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+
+        # Cámara y videoportero
+        field_def("resolucion_video", "Resolución de video", section="video", order=20,
+                  quick_options=("720p", "1080p", "2K", "4K", "8K"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA_DOORBELL}),
+        field_def("vision_nocturna", "Visión nocturna", type="boolean", section="deteccion", order=21,
+                  condition={"field": "tipo_seguridad", "values": _CAMERA_DOORBELL}),
+        field_def("deteccion_movimiento", "Detección de movimiento", type="boolean",
+                  section="deteccion", order=22,
+                  condition={"field": "tipo_seguridad", "values": _CAMERA_DOORBELL}),
+        field_def("audio_bidireccional", "Audio bidireccional", type="boolean", section="audio", order=23,
+                  condition={"field": "tipo_seguridad", "values": _CAMERA_DOORBELL}),
+        field_def("conectividad", "Conectividad", type="multiselect", section="conectividad", order=24,
+                  options=("Ethernet", "Wi-Fi", "4G", "Bluetooth", "Otro"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA_DOORBELL}),
+        field_def("almacenamiento_soportado", "Almacenamiento soportado", type="multiselect",
+                  section="tecnica", order=25,
+                  options=("MicroSD", "NVR", "DVR / XVR", "Nube", "NAS", "Otro"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA_DOORBELL}),
+        field_def("alimentacion", "Alimentación", section="alimentacion", order=26,
+                  placeholder="Ej. PoE, 12V DC, batería",
+                  quick_options=("Batería", "Cableado", "PoE", "Otro"),
+                  condition={"field": "tipo_seguridad", "values": _CAMERA_DOORBELL}),
+        field_def("microfono", "Micrófono", type="boolean", section="audio", order=27,
+                  condition={"field": "tipo_seguridad", "values": _CAMERA}),
+        field_def("onvif", "ONVIF", type="boolean", section="conectividad", order=28,
+                  condition={"field": "tipo_seguridad", "values": [*_CAMERA, *_NVR_XVR]}),
+
+        # Kit
+        field_def("tipo_grabador", "Tipo de grabador", type="select", section="tecnica", order=29,
+                  options=("DVR", "NVR", "XVR"),
+                  condition={"field": "tipo_seguridad", "values": _KIT}),
+        field_def("cantidad_camaras", "Cantidad de cámaras incluidas", type="integer",
+                  section="tecnica", order=30, min=1,
+                  quick_options=("2", "4", "6", "8", "16"),
+                  condition={"field": "tipo_seguridad", "values": _KIT}),
+        field_def("resolucion_camaras_mp", "Resolución de las cámaras", type="decimal",
+                  section="imagen", order=31, unit="MP", min=Decimal("0"),
+                  condition={"field": "tipo_seguridad", "values": _KIT}),
+        field_def("tipo_camaras_kit", "Formato de cámaras", type="select", section="imagen", order=32,
+                  options=("Bullet", "Domo", "Turret", "Mixto", "Otro"),
+                  condition={"field": "tipo_seguridad", "values": _KIT}),
+        field_def("cable_incluido", "Cable incluido", type="boolean", section="tecnica", order=33,
+                  condition={"field": "tipo_seguridad", "values": _KIT}),
+        field_def("longitud_cable_m", "Longitud de cable incluida", type="decimal", section="tecnica", order=34,
+                  unit="m", min=Decimal("0"),
+                  quick_options=("10 m|10", "20 m|20", "30 m|30", "50 m|50", "100 m|100"),
+                  condition={"field": "tipo_seguridad", "values": _KIT}),
+        field_def("fuente_alimentacion_incluida", "Fuente de alimentación incluida", type="boolean",
+                  section="alimentacion", order=35,
+                  condition={"field": "tipo_seguridad", "values": _KIT}),
+        field_def("poe", "PoE", type="boolean", section="conectividad", order=36,
+                  condition={"field": "tipo_seguridad", "values": [*_CAMERA, *_KIT]}),
+
+        # Videoportero
+        field_def("timbre_interior_incluido", "Timbre interior incluido", type="boolean",
+                  section="tecnica", order=37,
+                  condition={"field": "tipo_seguridad", "values": _DOORBELL}),
+
+        # Accesorios
+        field_def("tipo_accesorio_seguridad", "Tipo de accesorio", type="select",
+                  section="tecnica", order=38,
+                  options=(
+                      "Fuente de alimentación", "Balun", "Conector", "Cable coaxial", "Cable UTP",
+                      "Switch PoE", "Disco para videovigilancia", "Soporte / base",
+                      "Caja de conexiones", "Rack", "Adaptador", "Otro",
+                  ),
+                  condition={"field": "tipo_seguridad", "values": _ACCESSORY}),
+        field_def("compatibilidad", "Compatibilidad", section="compatibilidad", order=39,
+                  condition={"field": "tipo_seguridad", "values": _ACCESSORY}),
+        field_def("numero_parte", "Número de parte", section="compatibilidad", order=40,
+                  condition={"field": "tipo_seguridad", "values": _ACCESSORY}),
     )
 
 
@@ -596,6 +940,9 @@ _TEMPLATE_CATEGORY_BINDINGS = (
     ProductTemplateCategoryBinding(
         "electronics_cameras", "ELECTRONICS", "ELECTRONICS_CAMERAS"
     ),
+    ProductTemplateCategoryBinding(
+        "electronics_security", "ELECTRONICS", "ELECTRONICS_SECURITY"
+    ),
     ProductTemplateCategoryBinding("fashion_men", "FASHION", "FASHION_MEN"),
     ProductTemplateCategoryBinding("fashion_women", "FASHION", "FASHION_WOMEN"),
     ProductTemplateCategoryBinding("fashion_shoes", "FASHION", "FASHION_SHOES"),
@@ -634,19 +981,9 @@ _TEMPLATE_CATEGORY_BINDINGS = (
 _TEMPLATE_FIELD_SETS = {
     "electronics_phones": _electronics_phone(),
     "electronics_computers": _electronics_computer(),
-    "electronics_headphones": _common(
-        field_def("tipo", "Tipo", type="select", required=True, section="audio", order=1, options=("In-ear", "On-ear", "Over-ear", "Gaming", "Otro")),
-        field_def("conexion", "Conexión", type="select", section="audio", order=2, options=("Bluetooth", "Cable", "USB", "Mixta")),
-        field_def("cancelacion_activa", "Cancelación activa", type="boolean", section="audio", order=3),
-        field_def("microfono", "Micrófono", type="boolean", section="audio", order=4),
-        field_def("autonomia_horas", "Autonomía", type="decimal", section="energia", order=5, unit="horas", min=Decimal("0")),
-        field_def("surround", "Sonido envolvente (7.1)", type="boolean", section="audio", order=6,
-                  condition={"field": "tipo", "values": ["Gaming"]}),
-        field_def("plataformas", "Plataformas compatibles", type="chips", section="compatibilidad", order=7,
-                  help="Ej. PC, PS5, Xbox, Switch",
-                  condition={"field": "tipo", "values": ["Gaming"]}),
-    ),
+    "electronics_headphones": _electronics_headphones(),
     "electronics_cameras": _electronics_camera(),
+    "electronics_security": _electronics_security(),
     "fashion_men": _fashion_common(),
     "fashion_women": _fashion_common(),
     "fashion_shoes": _common(
@@ -766,6 +1103,13 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
         ),
     ),
     "electronics_cameras": (
+        axis_def(
+            "color", "Color", source_field="color_principal",
+            suggestions=("Negro", "Blanco", "Gris"),
+            is_visual=True, is_listing_axis=True,
+        ),
+    ),
+    "electronics_security": (
         axis_def(
             "color", "Color", source_field="color_principal",
             suggestions=("Negro", "Blanco", "Gris"),

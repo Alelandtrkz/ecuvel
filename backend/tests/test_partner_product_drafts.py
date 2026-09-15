@@ -64,6 +64,7 @@ CURRENT_CATEGORY_TEMPLATE_BINDINGS = {
     "ELECTRONICS_COMPUTERS": ("ELECTRONICS", "electronics_computers"),
     "ELECTRONICS_HEADPHONES": ("ELECTRONICS", "electronics_headphones"),
     "ELECTRONICS_CAMERAS": ("ELECTRONICS", "electronics_cameras"),
+    "ELECTRONICS_SECURITY": ("ELECTRONICS", "electronics_security"),
     "FASHION_MEN": ("FASHION", "fashion_men"),
     "FASHION_WOMEN": ("FASHION", "fashion_women"),
     "FASHION_SHOES": ("FASHION", "fashion_shoes"),
@@ -304,6 +305,7 @@ def test_template_registry_covers_seeded_subcategories():
         "electronics_computers",
         "electronics_headphones",
         "electronics_cameras",
+        "electronics_security",
         "fashion_men",
         "fashion_women",
         "fashion_shoes",
@@ -325,7 +327,7 @@ def test_template_registry_covers_seeded_subcategories():
 
 
 def test_exact_category_template_bindings_and_metadata_are_preserved():
-    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 20
+    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 21
     for leaf_code, binding in CURRENT_CATEGORY_TEMPLATE_BINDINGS.items():
         main_code, template_key = binding
         template = PRODUCT_TEMPLATES[template_key]
@@ -364,8 +366,8 @@ def test_template_registry_validation_rejects_binding_drift(monkeypatch):
     )
     with pytest.raises(ProductTemplateValidationError) as exc_info:
         validate_template_registry()
-    assert "binding.20.ELECTRONICS_PHONES" in exc_info.value.errors
-    assert "binding.20.missing_template" in exc_info.value.errors
+    assert "binding.21.ELECTRONICS_PHONES" in exc_info.value.errors
+    assert "binding.21.missing_template" in exc_info.value.errors
 
 
 def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(
@@ -515,9 +517,22 @@ def test_electronics_templates_expose_unit_guidance_and_icons():
         "electronics_cameras": {
             "resolucion_mp": "MP",
             "bateria_mah": "mAh",
+            "profundidad_agua_m": "m",
+            "campo_vision_grados": "°",
         },
         "electronics_headphones": {
             "autonomia_horas": "horas",
+            "driver_mm": "mm",
+            "impedancia_ohm": "Ω",
+        },
+        "electronics_security": {
+            "capacidad_max_hdd_tb": "TB",
+            "capacidad_disco_incluido_tb": "TB",
+            "resolucion_mp": "MP",
+            "lente_mm": "mm",
+            "distancia_ir_m": "m",
+            "resolucion_camaras_mp": "MP",
+            "longitud_cable_m": "m",
         },
     }
     for template_key, fields in required_units.items():

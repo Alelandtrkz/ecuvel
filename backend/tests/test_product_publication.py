@@ -54,6 +54,7 @@ from app.services.marketplace_policy import (
 )
 from app.services.product_drafts import (
     ProductDraftValidationError,
+    build_product_draft_view,
     capture_submission_commission_snapshots,
     draft_commission_display_rows,
     submit_saved_product_draft,
@@ -137,10 +138,10 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert seeded.exit_code == 0, seeded.output
     first = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert first.exit_code == 0, first.output
-    assert "Reglas creadas: 20; actualizadas: 0." in first.output
+    assert "Reglas creadas: 21; actualizadas: 0." in first.output
     second = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert second.exit_code == 0, second.output
-    assert "Reglas creadas: 0; actualizadas: 20." in second.output
+    assert "Reglas creadas: 0; actualizadas: 21." in second.output
 
     session.expire_all()
     rules = session.scalars(
@@ -151,7 +152,9 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     ).all()
     by_code = {rule.category.code: rule.commission_rate for rule in rules}
     assert by_code == INITIAL_CATEGORY_RATES
+    assert by_code["ELECTRONICS_PHONES"] == Decimal("6.00")
     assert by_code["ELECTRONICS_CAMERAS"] == Decimal("8.00")
+    assert by_code["ELECTRONICS_SECURITY"] == Decimal("8.00")
     assert by_code["AUTOMOTIVE_BASIC_PARTS"] == Decimal("8.00")
     assert by_code["BABIES_CARE"] == Decimal("10.00")
     assert by_code["BABIES_CLOTHING"] == Decimal("12.00")
@@ -174,22 +177,55 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
         )
         for category in publishable
     }
-    assert len(publishable) == 20
+    assert len(publishable) == 21
     assert set(resolutions) == {category.code for category in publishable}
     assert all(result.mode == SellerCommissionType.PERCENTAGE for result in resolutions.values())
 
-    low_price = resolve_marketplace_commission(
+    security = next(
+        category for category in publishable
+        if category.code == "ELECTRONICS_SECURITY"
+    )
+    security_rate = resolutions[security.code]
+    assert security_rate.rate_percent == Decimal("8.00")
+    assert security_rate.rule_id == next(
+        rule.id for rule in rules if rule.category_id == security.id
+    )
+
+    security_at_minimum = resolve_marketplace_commission(
         session,
-        category_id=next(
-            category.id
-            for category in publishable
-            if category.code == "BABIES_CLOTHING"
-        ),
+        category_id=security.id,
+        price="3.00",
+    )
+    assert security_at_minimum.mode == SellerCommissionType.FIXED
+    assert security_at_minimum.rate_percent == Decimal("8.00")
+    assert security_at_minimum.fixed_amount == Decimal("0.25")
+    assert security_at_minimum.commission_amount == Decimal("0.25")
+    assert security_at_minimum.rule_id == security_rate.rule_id
+
+    security_with_rounded_minimum = resolve_marketplace_commission(
+        session,
+        category_id=security.id,
+        price="3.01",
+    )
+    assert security_with_rounded_minimum.mode == SellerCommissionType.FIXED
+    assert security_with_rounded_minimum.rate_percent == Decimal("8.00")
+    assert security_with_rounded_minimum.fixed_amount == Decimal("0.25")
+    assert security_with_rounded_minimum.commission_amount == Decimal("0.25")
+    assert security_with_rounded_minimum.rule_id == security_rate.rule_id
+
+    phones = next(
+        category for category in publishable
+        if category.code == "ELECTRONICS_PHONES"
+    )
+    phone_floor = resolve_marketplace_commission(
+        session,
+        category_id=phones.id,
         price="2.99",
     )
-    assert low_price.mode == SellerCommissionType.FIXED
-    assert low_price.rate == Decimal("0.00")
-    assert low_price.fixed_amount == Decimal("0.25")
+    assert phone_floor.mode == SellerCommissionType.FIXED
+    assert phone_floor.rate_percent == Decimal("6.00")
+    assert phone_floor.rate == Decimal("0.00")
+    assert phone_floor.fixed_amount == Decimal("0.25")
 
 
 @pytest.mark.parametrize(
@@ -276,17 +312,19 @@ def test_commission_policy_precedence_and_explicit_fallback(session):
     category_rule.is_active = False
     session.commit()
     fallback = resolve_marketplace_commission(
-        session, store_id=second_store.id, category_id=child.id, price="3.00",
+        session, store_id=second_store.id, category_id=child.id, price="3.01",
     )
     assert fallback.rate == Decimal("12.00")
     assert fallback.rule_id == global_rule.id
     fixed = resolve_marketplace_commission(
-        session, store_id=first_store.id, category_id=child.id, price="2.99",
+        session, store_id=first_store.id, category_id=child.id, price="1.00",
     )
     assert fixed.mode == SellerCommissionType.FIXED
+    assert fixed.rate_percent == Decimal("12.00")
+    assert fixed.rule_id == global_rule.id
     assert fixed.fixed_amount == Decimal("0.25")
     assert fixed.commission_amount == Decimal("0.25")
-    assert fixed.seller_net_amount == Decimal("2.74")
+    assert fixed.seller_net_amount == Decimal("0.75")
     assert override.id is not None  # legacy store rules are deliberately ignored
     assert seller.id is not None
 
@@ -297,7 +335,7 @@ def test_missing_commission_has_no_implicit_default(session):
     session.commit()
     with pytest.raises(CommissionRuleMissingError):
         resolve_marketplace_commission(
-            session, store_id=store.id, category_id=child.id, price="3.00",
+            session, store_id=store.id, category_id=child.id, price="3.01",
         )
 
 
@@ -310,49 +348,88 @@ def test_minimum_price_is_rejected_with_canonical_message(session, price):
 
 
 @pytest.mark.parametrize(
-    ("price", "mode", "commission", "net"),
+    ("rate", "price", "mode", "commission", "net"),
     [
-        ("0.75", SellerCommissionType.FIXED, "0.25", "0.50"),
-        ("1.00", SellerCommissionType.FIXED, "0.25", "0.75"),
-        ("2.99", SellerCommissionType.FIXED, "0.25", "2.74"),
-        ("3.00", SellerCommissionType.PERCENTAGE, "0.24", "2.76"),
-        ("100.00", SellerCommissionType.PERCENTAGE, "8.00", "92.00"),
+        ("6.00", "0.26", SellerCommissionType.FIXED, "0.25", "0.01"),
+        ("6.00", "1.00", SellerCommissionType.FIXED, "0.25", "0.75"),
+        ("6.00", "2.99", SellerCommissionType.FIXED, "0.25", "2.74"),
+        ("6.00", "3.00", SellerCommissionType.FIXED, "0.25", "2.75"),
+        ("6.00", "3.01", SellerCommissionType.FIXED, "0.25", "2.76"),
+        ("6.00", "3.25", SellerCommissionType.FIXED, "0.25", "3.00"),
+        ("6.00", "4.00", SellerCommissionType.FIXED, "0.25", "3.75"),
+        ("6.00", "5.00", SellerCommissionType.PERCENTAGE, "0.30", "4.70"),
+        ("8.00", "3.00", SellerCommissionType.FIXED, "0.25", "2.75"),
+        ("8.00", "3.01", SellerCommissionType.FIXED, "0.25", "2.76"),
+        ("8.00", "3.25", SellerCommissionType.PERCENTAGE, "0.26", "2.99"),
     ],
 )
-def test_canonical_price_boundaries(session, price, mode, commission, net):
+def test_canonical_minimum_commission_floor(
+    session, rate, price, mode, commission, net
+):
     parent, child = create_phone_categories(session)
-    create_commission_rule(session, rate="8.00", category=parent)
+    rule = create_commission_rule(session, rate=rate, category=parent)
     session.commit()
     resolved = resolve_marketplace_commission(
         session, category_id=child.id, price=price
     )
     assert resolved.mode == mode
+    assert resolved.rate_percent == Decimal(rate)
+    assert resolved.rule_id == rule.id
     assert resolved.commission_amount == Decimal(commission)
     assert resolved.seller_net_amount == Decimal(net)
 
 
-def test_snapshot_validation_enforces_price_mode_boundaries(session):
+def test_snapshot_validation_enforces_minimum_commission_floor(session):
     parent, child = create_phone_categories(session)
-    create_commission_rule(session, rate="3.00", category=parent)
+    rule = create_commission_rule(session, rate="3.00", category=parent)
     session.commit()
 
     percentage = resolve_marketplace_commission(
-        session, category_id=child.id, price="3.50"
+        session, category_id=child.id, price="10.00"
     )
-    assert percentage.commission_amount == Decimal("0.11")
+    assert percentage.commission_amount == Decimal("0.30")
 
     invalid_percentage = percentage.as_snapshot(captured_at="2026-08-16T00:00:00+00:00")
     invalid_percentage.update({
-        "price": "2.99",
-        "commission_amount": "0.09",
-        "seller_net_amount": "2.90",
+        "price": "5.00",
+        "commission_amount": "0.15",
+        "seller_net_amount": "4.85",
     })
     with pytest.raises(CommissionSnapshotError):
         commission_from_snapshot(
             invalid_percentage,
-            expected_price="2.99",
+            expected_price="5.00",
             expected_category_id=child.id,
         )
+
+    floor = resolve_marketplace_commission(
+        session, category_id=child.id, price="5.00"
+    )
+    restored_floor = commission_from_snapshot(
+        floor.as_snapshot(captured_at="2026-08-16T00:00:00+00:00"),
+        expected_price="5.00",
+        expected_category_id=child.id,
+    )
+    assert restored_floor.mode == SellerCommissionType.FIXED
+    assert restored_floor.rate_percent == Decimal("3.00")
+    assert restored_floor.fixed_amount == Decimal("0.25")
+    assert restored_floor.rule_id == rule.id
+    assert restored_floor.source == "CATEGORY_MINIMUM"
+
+    legacy_fixed = floor.as_snapshot(captured_at="2026-08-16T00:00:00+00:00")
+    legacy_fixed.update({
+        "price": "1.00",
+        "rate_percent": None,
+        "commission_amount": "0.25",
+        "seller_net_amount": "0.75",
+        "rule_id": None,
+        "source": "LOW_PRICE_FIXED",
+    })
+    assert commission_from_snapshot(
+        legacy_fixed,
+        expected_price="1.00",
+        expected_category_id=child.id,
+    ).mode == SellerCommissionType.FIXED
 
     invalid_minimum = {
         **invalid_percentage,
@@ -370,6 +447,29 @@ def test_snapshot_validation_enforces_price_mode_boundaries(session):
             expected_price="0.25",
             expected_category_id=child.id,
         )
+
+
+def test_draft_commission_policy_exposes_rate_and_minimum_floor(session, tmp_path):
+    seller = create_user(session)
+    store = create_store(session)
+    parent, child = create_phone_categories(session)
+    create_commission_rule(session, rate="8.00", category=parent)
+    draft = create_complete_simple_draft(
+        session,
+        seller=seller,
+        store=store,
+        category=parent,
+        subcategory=child,
+        media_root=tmp_path / "drafts",
+    )
+    session.commit()
+
+    policy = build_product_draft_view(draft).commission_policy
+
+    assert "threshold" not in policy
+    assert policy["minimum_commission"] == "0.25"
+    assert policy["rate_percent"] == "8.00"
+    assert policy["available"] is True
 
 
 def test_simple_approval_materializes_only_explicit_seller_inventory(
@@ -808,8 +908,9 @@ def test_family_publication_uses_frozen_mixed_commissions(session, tmp_path):
     assert offers[0].commission_type == SellerCommissionType.FIXED
     assert offers[0].commission_rate == Decimal("0.00")
     assert offers[0].commission_fixed_amount == Decimal("0.25")
-    assert offers[1].commission_type == SellerCommissionType.PERCENTAGE
-    assert offers[1].commission_rate == Decimal("7.25")
+    assert offers[1].commission_type == SellerCommissionType.FIXED
+    assert offers[1].commission_rate == Decimal("0.00")
+    assert offers[1].commission_fixed_amount == Decimal("0.25")
     assert offers[1].price == Decimal("3.00")
     assert offers[2].commission_type == SellerCommissionType.PERCENTAGE
     assert offers[2].commission_rate == Decimal("7.25")
@@ -820,7 +921,20 @@ def test_family_publication_uses_frozen_mixed_commissions(session, tmp_path):
             ProductDraftModerationEvent.decision == "APPROVED",
         )
     )
-    assert len(event.checklist_snapshot["commission_snapshots"]) == 3
+    approved_snapshots = event.checklist_snapshot["commission_snapshots"]
+    assert len(approved_snapshots) == 3
+    floor_snapshots = {
+        snapshot["price"]: snapshot
+        for snapshot in approved_snapshots
+        if snapshot["mode"] == SellerCommissionType.FIXED.value
+    }
+    assert set(floor_snapshots) == {"2.50", "3.00"}
+    assert all(
+        snapshot["rate_percent"] == "7.25"
+        and snapshot["fixed_amount"] == "0.25"
+        and snapshot["source"] == "CATEGORY_MINIMUM"
+        for snapshot in floor_snapshots.values()
+    )
 
 
 def test_resubmission_replaces_active_commission_snapshot(session, tmp_path):

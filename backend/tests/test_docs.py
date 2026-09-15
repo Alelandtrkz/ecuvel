@@ -785,9 +785,12 @@ def test_lr5_2d_commission_policy_matches_resolver(app):
         )
 
     assert "superior a USD 0,25" in source
-    assert "menor a USD 3,00" in source
-    assert "USD 0,25" in source
-    assert "Desde <strong>USD 3,00</strong>" in source
+    assert "comisión mínima ECUVEL" in source
+    assert "USD 0,25 por unidad" in source
+    assert "mayor importe entre el resultado porcentual y el mínimo" in source
+    assert "sin modificar ni sustituir la tasa de la categoría" in source
+    assert "igual o superior a <strong>USD 0,25</strong>" in source
+    assert "USD 3,00" not in source
     assert "categoría concreta o su linaje" in source
     assert "regla global activa" in source
     assert "ignora el identificador de Tienda" in source
@@ -795,8 +798,8 @@ def test_lr5_2d_commission_policy_matches_resolver(app):
     for snapshot_field in (
         "categoría y su ruta",
         "precio",
-        "modo fijo o porcentual",
-        "porcentaje o tarifa fija",
+        "tasa de categoría",
+        "mínimo aplicado cuando corresponda",
         "comisión calculada",
         "neto Seller",
         "identificador de regla",
