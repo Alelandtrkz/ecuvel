@@ -333,6 +333,11 @@ _PRODUCT_CATEGORY_TREE = (
             {"code": "BEAUTY_PERSONAL_CARE", "name": "Cuidado personal", "slug": "cuidado-personal", "sort_order": 1},
             {"code": "BEAUTY_COSMETICS", "name": "Cosmética", "slug": "cosmetica", "sort_order": 2},
             {"code": "BEAUTY_SKINCARE", "name": "Skincare", "slug": "skincare", "sort_order": 3},
+            {"code": "BEAUTY_PERSONAL_HYGIENE", "name": "Cuidado personal e higiene", "slug": "cuidado-personal-e-higiene", "sort_order": 1},
+            {"code": "BEAUTY_MAKEUP", "name": "Maquillaje", "slug": "maquillaje", "sort_order": 2},
+            {"code": "BEAUTY_SKIN_CARE", "name": "Cuidado de la piel", "slug": "cuidado-de-la-piel", "sort_order": 3},
+            {"code": "BEAUTY_HAIR_CARE", "name": "Cuidado del cabello", "slug": "cuidado-del-cabello", "sort_order": 4},
+            {"code": "BEAUTY_FRAGRANCES", "name": "Fragancias", "slug": "fragancias", "sort_order": 5},
         ),
     ),
     (

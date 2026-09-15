@@ -297,6 +297,7 @@ def test_quick_options_remain_scoped_to_canonical_templates():
         "home_storage_organization",
         "home_textiles",
         "home_furniture",
+        "beauty_fragrances",
     }
     for key, template in PRODUCT_TEMPLATES.items():
         if key in keys_with_quick_options:

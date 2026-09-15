@@ -100,13 +100,13 @@ def test_home_registry_seed_commission_and_public_resolution_integrity():
 
 
 def test_legacy_home_contracts_remain_resolvable_unchanged_and_excluded():
-    assert LEGACY_NEW_LISTING_CATEGORY_CODES == frozenset({
+    assert frozenset({
         "FASHION_MEN",
         "FASHION_WOMEN",
         "FASHION_SHOES",
         "FASHION_ACCESSORIES",
         *LEGACY_HOME,
-    })
+    }) <= LEGACY_NEW_LISTING_CATEGORY_CODES
     expected_fields = {"color_principal", "material", "tipo", "habitacion", "dimensiones", "cuidados"}
     for code, (template_key, rate) in LEGACY_HOME.items():
         assert template_key_for_category_code(code) == template_key

@@ -419,6 +419,11 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "HOME_TEXTILES",
         "HOME_FURNITURE",
         "BEAUTY_HEALTH",
+        "BEAUTY_PERSONAL_HYGIENE",
+        "BEAUTY_MAKEUP",
+        "BEAUTY_SKIN_CARE",
+        "BEAUTY_HAIR_CARE",
+        "BEAUTY_FRAGRANCES",
         "AUTOMOTIVE",
         "BABIES_KIDS",
     }
@@ -480,6 +485,25 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "HOME_STORAGE_ORGANIZATION",
         "HOME_TEXTILES",
         "HOME_FURNITURE",
+    )
+    beauty_view = next(
+        category
+        for category in list_main_categories(session)
+        if category.code == "BEAUTY_HEALTH"
+    )
+    assert tuple(item.name for item in beauty_view.subcategories) == (
+        "Cuidado personal e higiene",
+        "Maquillaje",
+        "Cuidado de la piel",
+        "Cuidado del cabello",
+        "Fragancias",
+    )
+    assert tuple(item.code for item in beauty_view.subcategories) == (
+        "BEAUTY_PERSONAL_HYGIENE",
+        "BEAUTY_MAKEUP",
+        "BEAUTY_SKIN_CARE",
+        "BEAUTY_HAIR_CARE",
+        "BEAUTY_FRAGRANCES",
     )
 
     fashion = session.scalar(select(Category).where(Category.code == "FASHION"))
@@ -545,6 +569,39 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
     )
     assert historical_home_page.status_code == 200
     assert "Espejo" in historical_home_page.get_data(as_text=True)
+
+    beauty = session.scalar(select(Category).where(Category.code == "BEAUTY_HEALTH"))
+    legacy_personal_care = session.scalar(
+        select(Category).where(Category.code == "BEAUTY_PERSONAL_CARE")
+    )
+    crafted_beauty = client.post(
+        "/partners/products/drafts",
+        data={
+            "category_id": str(beauty.id),
+            "subcategory_id": str(legacy_personal_care.id),
+        },
+    )
+    assert crafted_beauty.status_code == 400
+    assert "no está disponible para publicaciones nuevas" in crafted_beauty.get_data(
+        as_text=True
+    )
+    assert session.scalar(select(func.count()).select_from(ProductDraft)) == 2
+
+    historical_beauty = ProductDraft(
+        store_id=store.id,
+        created_by_user_id=user.id,
+        category_id=beauty.id,
+        subcategory_id=legacy_personal_care.id,
+        template_key="beauty_personal_care",
+        attributes={"tipo": "Jabón", "presentacion": "Barra"},
+    )
+    session.add(historical_beauty)
+    session.commit()
+    historical_beauty_page = client.get(
+        f"/partners/products/drafts/{historical_beauty.id}"
+    )
+    assert historical_beauty_page.status_code == 200
+    assert "Jabón" in historical_beauty_page.get_data(as_text=True)
 
     category_count = session.scalar(select(func.count()).select_from(Category))
     third = runner.invoke(args=["seed-product-categories"])

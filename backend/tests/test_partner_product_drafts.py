@@ -85,6 +85,11 @@ CURRENT_CATEGORY_TEMPLATE_BINDINGS = {
     "BEAUTY_PERSONAL_CARE": ("BEAUTY_HEALTH", "beauty_personal_care"),
     "BEAUTY_COSMETICS": ("BEAUTY_HEALTH", "beauty_cosmetics"),
     "BEAUTY_SKINCARE": ("BEAUTY_HEALTH", "beauty_skincare"),
+    "BEAUTY_PERSONAL_HYGIENE": ("BEAUTY_HEALTH", "beauty_personal_hygiene"),
+    "BEAUTY_MAKEUP": ("BEAUTY_HEALTH", "beauty_makeup"),
+    "BEAUTY_SKIN_CARE": ("BEAUTY_HEALTH", "beauty_skin_care"),
+    "BEAUTY_HAIR_CARE": ("BEAUTY_HEALTH", "beauty_hair_care"),
+    "BEAUTY_FRAGRANCES": ("BEAUTY_HEALTH", "beauty_fragrances"),
     "AUTOMOTIVE_ACCESSORIES": ("AUTOMOTIVE", "automotive_accessories"),
     "AUTOMOTIVE_TOOLS": ("AUTOMOTIVE", "automotive_tools"),
     "AUTOMOTIVE_BASIC_PARTS": ("AUTOMOTIVE", "automotive_basic_parts"),
@@ -336,6 +341,11 @@ def test_template_registry_covers_seeded_subcategories():
         "beauty_personal_care",
         "beauty_cosmetics",
         "beauty_skincare",
+        "beauty_personal_hygiene",
+        "beauty_makeup",
+        "beauty_skin_care",
+        "beauty_hair_care",
+        "beauty_fragrances",
         "automotive_accessories",
         "automotive_tools",
         "automotive_basic_parts",
@@ -347,7 +357,7 @@ def test_template_registry_covers_seeded_subcategories():
 
 
 def test_exact_category_template_bindings_and_metadata_are_preserved():
-    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 31
+    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 36
     for leaf_code, binding in CURRENT_CATEGORY_TEMPLATE_BINDINGS.items():
         main_code, template_key = binding
         template = PRODUCT_TEMPLATES[template_key]
@@ -386,8 +396,8 @@ def test_template_registry_validation_rejects_binding_drift(monkeypatch):
     )
     with pytest.raises(ProductTemplateValidationError) as exc_info:
         validate_template_registry()
-    assert "binding.31.ELECTRONICS_PHONES" in exc_info.value.errors
-    assert "binding.31.missing_template" in exc_info.value.errors
+    assert "binding.36.ELECTRONICS_PHONES" in exc_info.value.errors
+    assert "binding.36.missing_template" in exc_info.value.errors
 
 
 def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(

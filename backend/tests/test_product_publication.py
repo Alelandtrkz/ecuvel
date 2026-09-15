@@ -138,10 +138,10 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert seeded.exit_code == 0, seeded.output
     first = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert first.exit_code == 0, first.output
-    assert "Reglas creadas: 31; actualizadas: 0." in first.output
+    assert "Reglas creadas: 36; actualizadas: 0." in first.output
     second = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert second.exit_code == 0, second.output
-    assert "Reglas creadas: 0; actualizadas: 31." in second.output
+    assert "Reglas creadas: 0; actualizadas: 36." in second.output
 
     session.expire_all()
     rules = session.scalars(
@@ -165,6 +165,11 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert by_code["HOME_STORAGE_ORGANIZATION"] == Decimal("10.00")
     assert by_code["HOME_TEXTILES"] == Decimal("12.00")
     assert by_code["HOME_FURNITURE"] == Decimal("10.00")
+    assert by_code["BEAUTY_PERSONAL_HYGIENE"] == Decimal("10.00")
+    assert by_code["BEAUTY_MAKEUP"] == Decimal("8.00")
+    assert by_code["BEAUTY_SKIN_CARE"] == Decimal("10.00")
+    assert by_code["BEAUTY_HAIR_CARE"] == Decimal("10.00")
+    assert by_code["BEAUTY_FRAGRANCES"] == Decimal("10.00")
     assert {
         by_code[code]
         for code in (
@@ -192,7 +197,7 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
         )
         for category in publishable
     }
-    assert len(publishable) == 31
+    assert len(publishable) == 36
     assert set(resolutions) == {category.code for category in publishable}
     assert all(result.mode == SellerCommissionType.PERCENTAGE for result in resolutions.values())
 
@@ -241,6 +246,19 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert phone_floor.rate_percent == Decimal("6.00")
     assert phone_floor.rate == Decimal("0.00")
     assert phone_floor.fixed_amount == Decimal("0.25")
+
+    makeup = next(
+        category for category in publishable if category.code == "BEAUTY_MAKEUP"
+    )
+    makeup_floor = resolve_marketplace_commission(
+        session,
+        category_id=makeup.id,
+        price="2.99",
+    )
+    assert makeup_floor.mode == SellerCommissionType.FIXED
+    assert makeup_floor.rate_percent == Decimal("8.00")
+    assert makeup_floor.fixed_amount == Decimal("0.25")
+    assert makeup_floor.commission_amount == Decimal("0.25")
 
 
 @pytest.mark.parametrize(

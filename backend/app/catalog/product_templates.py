@@ -109,6 +109,7 @@ _UNIT_LABELS = {
     "L": "L",
     "ml": "ml",
     "kg": "kg",
+    "g": "g",
     "g/m²": "g/m²",
     "°C": "°C",
 }
@@ -361,6 +362,36 @@ _FIELD_ICONS = {
     "tamano_colchon": "bed",
     "tamano_colchon_compatible": "bed",
     "tipo_colchon": "bed",
+    "tipo_piel": "droplets",
+    "zona_uso": "scan-face",
+    "zona_aplicacion": "scan-face",
+    "aroma": "flower-2",
+    "fragancia": "flower-2",
+    "ingredientes": "list-checks",
+    "ingredientes_destacados": "sparkles",
+    "publico_objetivo": "users",
+    "genero_objetivo": "users",
+    "tono_color": "palette",
+    "textura": "layers",
+    "acabado": "sparkles",
+    "cobertura": "layers",
+    "spf_declarado": "sun",
+    "dureza_cerdas": "brush",
+    "tamano_cabezal": "ruler",
+    "longitud_hilo_m": "ruler",
+    "numero_hojas": "list-ordered",
+    "familia_olfativa": "flower-2",
+    "notas_salida": "flower-2",
+    "notas_corazon": "flower-2",
+    "notas_fondo": "flower-2",
+    "volumen_ml": "flask-conical",
+    "tipo_cabello": "scissors",
+    "tipo_cuero_cabelludo": "scissors",
+    "efecto_beneficio": "sparkles",
+    "nivel_fijacion": "gauge",
+    "codigo_tono": "palette",
+    "tipo_coloracion": "palette",
+    "diametro_mm": "ruler",
 }
 
 _UNIT_ICONS = {
@@ -382,6 +413,7 @@ _UNIT_ICONS = {
     "L": "cup-soda",
     "ml": "cup-soda",
     "kg": "scale",
+    "g": "scale",
     "g/m²": "scale",
     "°C": "thermometer",
 }
@@ -1628,6 +1660,178 @@ def _home_furniture() -> tuple[ProductTemplateField, ...]:
     )
 
 
+_BEAUTY_PERSONAL_HYGIENE_TYPES = (
+    "Jabón corporal", "Gel de baño / ducha", "Espuma / Sales de baño",
+    "Crema / Loción corporal", "Crema de manos", "Exfoliante corporal",
+    "Desodorante / Antitranspirante", "Pasta dental", "Enjuague bucal",
+    "Cepillo dental manual", "Hilo dental", "Crema / Gel / Espuma de afeitar",
+    "Aftershave", "Rasuradora manual", "Algodón / Hisopos / Discos",
+    "Toallitas húmedas", "Set de cuidado personal", "Otro",
+)
+_BEAUTY_MAKEUP_TYPES = (
+    "Base / Foundation", "BB / CC Cream", "Corrector", "Polvo", "Rubor",
+    "Bronceador", "Iluminador", "Primer", "Spray fijador", "Máscara de pestañas",
+    "Sombra de ojos", "Delineador", "Producto para cejas", "Labial",
+    "Gloss / Brillo labial", "Delineador de labios", "Esmalte de uñas",
+    "Paleta / Set de maquillaje", "Brocha / Pincel", "Esponja / Aplicador", "Otro",
+)
+_BEAUTY_MAKEUP_SHADE_TYPES = (
+    "Base / Foundation", "BB / CC Cream", "Corrector", "Polvo", "Rubor",
+    "Bronceador", "Iluminador", "Máscara de pestañas", "Sombra de ojos",
+    "Delineador", "Producto para cejas", "Labial", "Gloss / Brillo labial",
+    "Delineador de labios", "Esmalte de uñas",
+)
+
+
+def _beauty_personal_hygiene() -> tuple[ProductTemplateField, ...]:
+    body_types = (
+        "Jabón corporal", "Gel de baño / ducha", "Crema / Loción corporal",
+        "Crema de manos", "Exfoliante corporal",
+    )
+    formulation_types = (
+        "Jabón corporal", "Gel de baño / ducha", "Espuma / Sales de baño",
+        "Crema / Loción corporal", "Crema de manos", "Exfoliante corporal",
+        "Desodorante / Antitranspirante", "Pasta dental", "Enjuague bucal",
+        "Crema / Gel / Espuma de afeitar", "Aftershave", "Toallitas húmedas",
+    )
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BEAUTY_PERSONAL_HYGIENE_TYPES, icon="sparkles"),
+        field_def("presentacion", "Presentación", type="select", section="producto", order=2, options=("Líquido", "Gel", "Crema", "Espuma", "Spray", "Roll-on", "Stick", "Barra / Sólido", "Polvo", "Toallitas", "Otro"), condition=_for_product_types(*formulation_types)),
+        field_def("contenido_neto", "Contenido neto", type="decimal", section="producto", order=3, min=Decimal("0"), condition=_for_product_types(*formulation_types)),
+        field_def("unidad", "Unidad", type="select", section="producto", order=4, options=("ml", "L", "g", "kg", "unidades"), condition=_for_product_types(*formulation_types)),
+        field_def("cantidad_paquete", "Cantidad por paquete", type="integer", section="producto", order=5, min=1),
+        field_def("aroma", "Aroma", section="producto", order=6, condition=_for_product_types(*formulation_types)),
+        field_def("ingredientes", "Ingredientes", type="textarea", section="materiales", order=7, condition=_for_product_types(*formulation_types)),
+        field_def("publico_objetivo", "Público objetivo", type="select", section="uso", order=8, options=("Adulto", "Adolescente", "Todo público")),
+        field_def("genero_objetivo", "Género objetivo", type="select", section="uso", order=9, options=("Hombre", "Mujer", "Unisex")),
+        field_def("tipo_piel", "Tipo de piel", type="multiselect", section="uso", order=10, options=("Normal", "Seca", "Grasa", "Mixta", "Sensible", "Todo tipo"), condition=_for_product_types(*body_types)),
+        field_def("zona_uso", "Zona de uso", type="multiselect", section="uso", order=11, options=("Cuerpo", "Manos", "Rostro y cuerpo", "Otra"), condition=_for_product_types(*body_types)),
+        field_def("formato_desodorante", "Formato de desodorante", type="select", section="producto", order=12, options=("Spray", "Roll-on", "Stick", "Crema", "Otro"), condition=_for_product_types("Desodorante / Antitranspirante")),
+        field_def("antitranspirante", "Antitranspirante", type="boolean", section="producto", order=13, condition=_for_product_types("Desodorante / Antitranspirante")),
+        field_def("dureza_cerdas", "Dureza de las cerdas", type="select", section="producto", order=14, options=("Suave", "Media", "Dura"), condition=_for_product_types("Cepillo dental manual")),
+        field_def("tamano_cabezal", "Tamaño del cabezal", type="select", section="producto", order=15, options=("Compacto", "Medio", "Grande"), condition=_for_product_types("Cepillo dental manual")),
+        field_def("longitud_hilo_m", "Longitud del hilo", type="decimal", unit="m", section="medidas", order=16, min=Decimal("0"), condition=_for_product_types("Hilo dental")),
+        field_def("encerado", "Encerado", type="boolean", section="producto", order=17, condition=_for_product_types("Hilo dental")),
+        field_def("numero_hojas", "Número de hojas", type="integer", section="producto", order=18, min=1, condition=_for_product_types("Rasuradora manual")),
+        field_def("desechable", "Desechable", type="boolean", section="producto", order=19, condition=_for_product_types("Rasuradora manual")),
+    )
+
+
+def _beauty_makeup() -> tuple[ProductTemplateField, ...]:
+    face_types = ("Base / Foundation", "BB / CC Cream", "Corrector", "Polvo", "Primer")
+    tools = ("Brocha / Pincel", "Esponja / Aplicador")
+    formulations = tuple(value for value in _BEAUTY_MAKEUP_TYPES if value not in tools)
+    water_resistant = (
+        "Máscara de pestañas", "Delineador", "Producto para cejas", "Labial",
+        "Gloss / Brillo labial", "Delineador de labios",
+    )
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BEAUTY_MAKEUP_TYPES, icon="sparkles"),
+        field_def("tono_color", "Tono / Color", type="variant_attribute", section="presentacion", order=2, condition=_for_product_types(*_BEAUTY_MAKEUP_SHADE_TYPES)),
+        field_def("textura", "Textura", type="select", section="presentacion", order=3, options=("Líquida", "Crema", "Polvo", "Compacta", "Stick", "Gel", "Mousse", "Lápiz", "Sólida", "Otra"), condition=_for_product_types(*formulations)),
+        field_def("acabado", "Acabado", type="select", section="presentacion", order=4, options=("Mate", "Satinado", "Natural", "Luminoso", "Metálico", "Glitter", "Gloss", "Otro"), condition=_for_product_types(*_BEAUTY_MAKEUP_SHADE_TYPES)),
+        field_def("contenido_neto", "Contenido neto", type="decimal", section="producto", order=5, min=Decimal("0"), condition=_for_product_types(*formulations)),
+        field_def("unidad", "Unidad", type="select", section="producto", order=6, options=("ml", "g", "unidades"), condition=_for_product_types(*formulations)),
+        field_def("ingredientes", "Ingredientes", type="textarea", section="materiales", order=7, condition=_for_product_types(*formulations)),
+        field_def("tipo_piel", "Tipo de piel", type="multiselect", section="uso", order=8, options=("Normal", "Seca", "Grasa", "Mixta", "Sensible", "Todo tipo"), condition=_for_product_types(*face_types)),
+        field_def("cobertura", "Cobertura", type="select", section="presentacion", order=9, options=("Ligera", "Media", "Alta", "Construible", "No aplica"), condition=_for_product_types(*face_types)),
+        field_def("spf_declarado", "SPF declarado", type="select", section="uso", order=10, options=("No aplica", "SPF 15", "SPF 30", "SPF 50", "SPF 50+", "Otro"), condition=_for_product_types(*face_types)),
+        field_def("efecto_mascara", "Efecto de máscara", type="multiselect", section="presentacion", order=11, options=("Volumen", "Alargamiento", "Curvatura", "Separación"), condition=_for_product_types("Máscara de pestañas")),
+        field_def("resistente_agua", "Resistente al agua", type="boolean", section="uso", order=12, condition=_for_product_types(*water_resistant)),
+        field_def("tipo_accesorio", "Tipo de accesorio", type="select", section="producto", order=13, options=("Brocha", "Pincel", "Esponja", "Aplicador", "Set", "Otro"), condition=_for_product_types(*tools)),
+        field_def("material", "Material", type="select", section="materiales", order=14, options=("Fibra sintética", "Fibra natural", "Espuma", "Silicona", "Plástico", "Madera", "Metal", "Mixto", "Otro"), condition=_for_product_types(*tools)),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=15, min=1, condition=_for_product_types(*tools)),
+    )
+
+
+_BEAUTY_SKIN_CARE_TYPES = (
+    "Limpiador facial", "Agua micelar", "Tónico", "Serum", "Crema / Hidratante",
+    "Gel facial", "Aceite facial", "Mascarilla", "Exfoliante", "Contorno de ojos",
+    "Parche / Cuidado localizado", "Protector solar", "Bálsamo labial", "Set de skincare", "Otro",
+)
+_BEAUTY_HAIR_CARE_TYPES = (
+    "Shampoo", "Acondicionador", "Mascarilla capilar", "Aceite / Serum capilar",
+    "Tratamiento sin enjuague", "Crema para peinar", "Gel / Cera / Pomada",
+    "Spray fijador", "Protector térmico", "Shampoo seco", "Exfoliante de cuero cabelludo",
+    "Tinte / Coloración", "Decolorante", "Set capilar", "Cepillo / Peine", "Otro",
+)
+_BEAUTY_HAIR_VOLUME_TYPES = ("Shampoo", "Acondicionador")
+_BEAUTY_FRAGRANCE_TYPES = (
+    "Perfume / Parfum", "Eau de Parfum", "Eau de Toilette", "Eau de Cologne",
+    "Body Mist / Body Spray", "Perfume en aceite", "Perfume sólido", "Set de fragancias", "Otro",
+)
+_BEAUTY_LIQUID_FRAGRANCE_TYPES = (
+    "Perfume / Parfum", "Eau de Parfum", "Eau de Toilette", "Eau de Cologne",
+    "Body Mist / Body Spray", "Perfume en aceite",
+)
+
+
+def _beauty_skin_care() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BEAUTY_SKIN_CARE_TYPES, icon="droplets"),
+        field_def("tipo_piel", "Tipo de piel", type="multiselect", section="uso", order=2, options=("Normal", "Seca", "Grasa", "Mixta", "Sensible", "Todo tipo")),
+        field_def("zona_aplicacion", "Zona de aplicación", type="multiselect", section="uso", order=3, options=("Rostro", "Ojos", "Labios", "Cuello / escote", "Otra")),
+        field_def("momento_uso", "Momento de uso", type="select", section="uso", order=4, options=("Día", "Noche", "Día y noche")),
+        field_def("necesidad_cuidado", "Necesidad de cuidado", type="multiselect", section="uso", order=5, options=("Hidratación", "Nutrición", "Limpieza", "Control de grasa", "Calmante", "Luminosidad", "Exfoliación", "Firmeza", "Cuidado de manchas", "Otro")),
+        field_def("textura", "Textura", type="select", section="presentacion", order=6, options=("Líquida", "Crema", "Gel", "Aceite", "Bálsamo", "Espuma", "Mascarilla", "Otra")),
+        field_def("ingredientes_destacados", "Ingredientes destacados", type="chips", section="materiales", order=7),
+        field_def("ingredientes", "Ingredientes", type="textarea", section="materiales", order=8),
+        field_def("contenido_neto", "Contenido neto", type="decimal", section="producto", order=9, min=Decimal("0")),
+        field_def("unidad", "Unidad", type="select", section="producto", order=10, options=("ml", "g", "unidades")),
+        field_def("aroma", "Aroma", section="producto", order=11),
+        field_def("spf_declarado", "SPF declarado", type="select", section="uso", order=12, options=("SPF 15", "SPF 30", "SPF 50", "SPF 50+", "Otro"), condition=_for_product_types("Protector solar")),
+        field_def("formato_solar", "Formato solar", type="select", section="presentacion", order=13, options=("Crema", "Gel", "Fluido", "Spray", "Stick", "Otro"), condition=_for_product_types("Protector solar")),
+        field_def("resistente_agua", "Resistente al agua", type="boolean", section="uso", order=14, condition=_for_product_types("Protector solar")),
+    )
+
+
+def _beauty_hair_care() -> tuple[ProductTemplateField, ...]:
+    styling = ("Gel / Cera / Pomada", "Spray fijador")
+    consumables = tuple(
+        value for value in _BEAUTY_HAIR_CARE_TYPES if value != "Cepillo / Peine"
+    )
+    variable_unit_formulations = tuple(
+        value for value in consumables if value not in _BEAUTY_HAIR_VOLUME_TYPES
+    )
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BEAUTY_HAIR_CARE_TYPES, icon="scissors"),
+        field_def("tipo_cabello", "Tipo de cabello", type="multiselect", section="uso", order=2, options=("Liso", "Ondulado", "Rizado", "Muy rizado / Afro", "Fino", "Grueso", "Seco", "Graso", "Dañado", "Teñido", "Todo tipo"), condition=_for_product_types(*consumables)),
+        field_def("tipo_cuero_cabelludo", "Tipo de cuero cabelludo", type="multiselect", section="uso", order=3, options=("Normal", "Seco", "Graso", "Sensible", "Todo tipo"), condition=_for_product_types(*consumables)),
+        field_def("efecto_beneficio", "Efecto / beneficio", type="multiselect", section="uso", order=4, options=("Hidratación", "Nutrición", "Reparación", "Brillo", "Volumen", "Anti-frizz", "Definición de rizos", "Protección del color", "Protección térmica", "Limpieza profunda", "Fijación", "Otro"), condition=_for_product_types(*consumables)),
+        field_def("contenido_neto", "Contenido neto", type="decimal", section="producto", order=5, min=Decimal("0"), condition=_for_product_types(*variable_unit_formulations)),
+        field_def("unidad", "Unidad", type="select", section="producto", order=6, options=("ml", "g", "unidades"), condition=_for_product_types(*variable_unit_formulations)),
+        field_def("volumen_ml", "Volumen", type="decimal", unit="ml", section="producto", order=6, min=Decimal("0.01"), condition=_for_product_types(*_BEAUTY_HAIR_VOLUME_TYPES)),
+        field_def("aroma", "Aroma", section="producto", order=7, condition=_for_product_types(*consumables)),
+        field_def("ingredientes_destacados", "Ingredientes destacados", type="chips", section="materiales", order=8, condition=_for_product_types(*consumables)),
+        field_def("ingredientes", "Ingredientes", type="textarea", section="materiales", order=9, condition=_for_product_types(*consumables)),
+        field_def("nivel_fijacion", "Nivel de fijación", type="select", section="producto", order=10, options=("Ligera", "Media", "Fuerte", "Extra fuerte"), condition=_for_product_types(*styling)),
+        field_def("sin_enjuague", "Sin enjuague", type="boolean", section="uso", order=11, condition=_for_product_types("Tratamiento sin enjuague")),
+        field_def("tono_color", "Tono / Color", type="variant_attribute", section="presentacion", order=12, condition=_for_product_types("Tinte / Coloración")),
+        field_def("codigo_tono", "Código de tono", section="presentacion", order=13, condition=_for_product_types("Tinte / Coloración")),
+        field_def("tipo_coloracion", "Tipo de coloración", type="select", section="producto", order=14, options=("Permanente", "Semipermanente", "Temporal", "Tonalizante", "Otro"), condition=_for_product_types("Tinte / Coloración")),
+        field_def("tipo_accesorio", "Tipo de accesorio", type="select", section="producto", order=15, options=("Cepillo plano", "Cepillo redondo", "Peine", "Desenredante", "Otro"), condition=_for_product_types("Cepillo / Peine")),
+        field_def("material", "Material", type="select", section="materiales", order=16, options=("Plástico", "Madera", "Metal", "Cerdas naturales", "Cerdas sintéticas", "Mixto", "Otro"), condition=_for_product_types("Cepillo / Peine")),
+        field_def("diametro_mm", "Diámetro", type="decimal", unit="mm", section="medidas", order=17, min=Decimal("0"), condition={"field": "tipo_accesorio", "values": ["Cepillo redondo"]}),
+        field_def("termico", "Térmico", type="boolean", section="producto", order=18, condition=_for_product_types("Cepillo / Peine")),
+    )
+
+
+def _beauty_fragrances() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BEAUTY_FRAGRANCE_TYPES, icon="flower-2"),
+        field_def("genero_objetivo", "Género objetivo", type="select", section="uso", order=2, options=("Hombre", "Mujer", "Unisex")),
+        field_def("familia_olfativa", "Familia olfativa", type="multiselect", section="presentacion", order=3, options=("Cítrica", "Floral", "Frutal", "Aromática", "Acuática / Fresca", "Amaderada", "Ámbar / Oriental", "Gourmand", "Chipre", "Cuero", "Especiada", "Otra")),
+        field_def("notas_salida", "Notas de salida", type="chips", section="presentacion", order=4, help="Primer aroma al aplicar, por ejemplo bergamota, limón o mandarina."),
+        field_def("notas_corazon", "Notas de corazón", type="chips", section="presentacion", order=5, help="Aroma principal de la fragancia, por ejemplo rosa, jazmín o lavanda."),
+        field_def("notas_fondo", "Notas de fondo", type="chips", section="presentacion", order=6, help="Aroma que permanece más tiempo, por ejemplo vainilla, madera o ámbar."),
+        field_def("presentacion", "Presentación", type="select", section="presentacion", order=7, options=("Spray", "Splash", "Roll-on", "Gotero", "Sólido", "Otra")),
+        field_def("volumen_ml", "Volumen", type="decimal", unit="ml", section="medidas", order=8, min=Decimal("0"), quick_options=("10", "30", "50", "75", "100", "150", "200"), condition=_for_product_types(*_BEAUTY_LIQUID_FRAGRANCE_TYPES)),
+        field_def("recargable", "Recargable", type="boolean", section="producto", order=9, condition=_for_product_types(*_BEAUTY_LIQUID_FRAGRANCE_TYPES)),
+        field_def("peso_g", "Peso", type="decimal", unit="g", section="medidas", order=10, min=Decimal("0"), condition=_for_product_types("Perfume sólido")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=11, min=1, condition=_for_product_types("Set de fragancias")),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProductTemplateCategoryBinding:
     template_key: str
@@ -1692,6 +1896,19 @@ _TEMPLATE_CATEGORY_BINDINGS = (
         "beauty_skincare", "BEAUTY_HEALTH", "BEAUTY_SKINCARE"
     ),
     ProductTemplateCategoryBinding(
+        "beauty_personal_hygiene", "BEAUTY_HEALTH", "BEAUTY_PERSONAL_HYGIENE"
+    ),
+    ProductTemplateCategoryBinding("beauty_makeup", "BEAUTY_HEALTH", "BEAUTY_MAKEUP"),
+    ProductTemplateCategoryBinding(
+        "beauty_skin_care", "BEAUTY_HEALTH", "BEAUTY_SKIN_CARE"
+    ),
+    ProductTemplateCategoryBinding(
+        "beauty_hair_care", "BEAUTY_HEALTH", "BEAUTY_HAIR_CARE"
+    ),
+    ProductTemplateCategoryBinding(
+        "beauty_fragrances", "BEAUTY_HEALTH", "BEAUTY_FRAGRANCES"
+    ),
+    ProductTemplateCategoryBinding(
         "automotive_accessories", "AUTOMOTIVE", "AUTOMOTIVE_ACCESSORIES"
     ),
     ProductTemplateCategoryBinding("automotive_tools", "AUTOMOTIVE", "AUTOMOTIVE_TOOLS"),
@@ -1736,6 +1953,11 @@ _TEMPLATE_FIELD_SETS = {
     "beauty_personal_care": _beauty_common(),
     "beauty_cosmetics": _beauty_common(),
     "beauty_skincare": _beauty_common(),
+    "beauty_personal_hygiene": _beauty_personal_hygiene(),
+    "beauty_makeup": _beauty_makeup(),
+    "beauty_skin_care": _beauty_skin_care(),
+    "beauty_hair_care": _beauty_hair_care(),
+    "beauty_fragrances": _beauty_fragrances(),
     "automotive_accessories": _automotive_common(),
     "automotive_tools": _automotive_common(),
     "automotive_basic_parts": _automotive_common(),
@@ -1950,6 +2172,32 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
         axis_def("tamano_colchon", "Tamaño", source_field="tamano_colchon", value_type="select", is_listing_axis=True,
                  condition={"field": "tipo_producto", "values": ["Colchón"]}),
     ),
+    "beauty_makeup": (
+        axis_def(
+            "tono_color", "Tono / Color", source_field="tono_color",
+            is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_BEAUTY_MAKEUP_SHADE_TYPES)},
+        ),
+    ),
+    "beauty_hair_care": (
+        axis_def(
+            "tono_color", "Tono / Color", source_field="tono_color",
+            is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": ["Tinte / Coloración"]},
+        ),
+        axis_def(
+            "volumen_ml", "Volumen", source_field="volumen_ml", unit="ml",
+            value_type="decimal", is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_BEAUTY_HAIR_VOLUME_TYPES)},
+        ),
+    ),
+    "beauty_fragrances": (
+        axis_def(
+            "volumen_ml", "Volumen", source_field="volumen_ml", unit="ml",
+            value_type="decimal", is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_BEAUTY_LIQUID_FRAGRANCE_TYPES)},
+        ),
+    ),
     "babies_clothing": (
         axis_def(
             "color", "Color", source_field="color_principal",
@@ -1969,6 +2217,12 @@ _TEMPLATE_KEYS_BY_CATEGORY_CODE = {
     for binding in _TEMPLATE_CATEGORY_BINDINGS
 }
 
+_LEGACY_BEAUTY_REQUIRED_DOCUMENT_TEMPLATES = frozenset({
+    "beauty_personal_care",
+    "beauty_cosmetics",
+    "beauty_skincare",
+})
+
 
 PRODUCT_TEMPLATES = {
     key: ProductTemplate(
@@ -1985,7 +2239,9 @@ PRODUCT_TEMPLATES = {
             else ""
         ),
         fields=fields,
-        required_documents=("registro_sanitario",) if key.startswith("beauty_") else (),
+        required_documents=("registro_sanitario",)
+        if key in _LEGACY_BEAUTY_REQUIRED_DOCUMENT_TEMPLATES
+        else (),
         variant_axes=_TEMPLATE_VARIANT_AXES.get(key, ()),
     )
     for key, fields in _TEMPLATE_FIELD_SETS.items()

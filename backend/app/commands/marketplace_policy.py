@@ -52,6 +52,11 @@ INITIAL_CATEGORY_RATES = {
     "HOME_STORAGE_ORGANIZATION": Decimal("10.00"),
     "HOME_TEXTILES": Decimal("12.00"),
     "HOME_FURNITURE": Decimal("10.00"),
+    "BEAUTY_PERSONAL_HYGIENE": Decimal("10.00"),
+    "BEAUTY_MAKEUP": Decimal("8.00"),
+    "BEAUTY_SKIN_CARE": Decimal("10.00"),
+    "BEAUTY_HAIR_CARE": Decimal("10.00"),
+    "BEAUTY_FRAGRANCES": Decimal("10.00"),
 }
 
 
