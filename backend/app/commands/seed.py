@@ -307,6 +307,10 @@ _PRODUCT_CATEGORY_TREE = (
             {"code": "FASHION_WOMEN", "name": "Mujer", "slug": "mujer", "sort_order": 2},
             {"code": "FASHION_SHOES", "name": "Calzado", "slug": "calzado", "sort_order": 3},
             {"code": "FASHION_ACCESSORIES", "name": "Accesorios", "slug": "accesorios-moda", "sort_order": 4},
+            {"code": "FASHION_CLOTHING", "name": "Ropa", "slug": "ropa", "sort_order": 1},
+            {"code": "FASHION_FOOTWEAR", "name": "Calzado", "slug": "calzado-moda", "sort_order": 2},
+            {"code": "FASHION_BAGS_ACCESSORIES", "name": "Bolsos y accesorios", "slug": "bolsos-y-accesorios", "sort_order": 3},
+            {"code": "FASHION_JEWELRY_WATCHES", "name": "Joyería, bisutería y relojes", "slug": "joyeria-bisuteria-y-relojes", "sort_order": 4},
         ),
     ),
     (

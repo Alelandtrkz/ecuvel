@@ -69,6 +69,10 @@ CURRENT_CATEGORY_TEMPLATE_BINDINGS = {
     "FASHION_WOMEN": ("FASHION", "fashion_women"),
     "FASHION_SHOES": ("FASHION", "fashion_shoes"),
     "FASHION_ACCESSORIES": ("FASHION", "fashion_accessories"),
+    "FASHION_CLOTHING": ("FASHION", "fashion_clothing"),
+    "FASHION_FOOTWEAR": ("FASHION", "fashion_footwear"),
+    "FASHION_BAGS_ACCESSORIES": ("FASHION", "fashion_bags_accessories"),
+    "FASHION_JEWELRY_WATCHES": ("FASHION", "fashion_jewelry_watches"),
     "HOME_DECORATION": ("HOME_KITCHEN", "home_decoration"),
     "HOME_KITCHEN_TOOLS": ("HOME_KITCHEN", "home_kitchen_tools"),
     "HOME_CLEANING": ("HOME_KITCHEN", "home_cleaning"),
@@ -310,6 +314,10 @@ def test_template_registry_covers_seeded_subcategories():
         "fashion_women",
         "fashion_shoes",
         "fashion_accessories",
+        "fashion_clothing",
+        "fashion_footwear",
+        "fashion_bags_accessories",
+        "fashion_jewelry_watches",
         "home_decoration",
         "home_kitchen_tools",
         "home_cleaning",
@@ -327,7 +335,7 @@ def test_template_registry_covers_seeded_subcategories():
 
 
 def test_exact_category_template_bindings_and_metadata_are_preserved():
-    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 21
+    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 25
     for leaf_code, binding in CURRENT_CATEGORY_TEMPLATE_BINDINGS.items():
         main_code, template_key = binding
         template = PRODUCT_TEMPLATES[template_key]
@@ -366,8 +374,8 @@ def test_template_registry_validation_rejects_binding_drift(monkeypatch):
     )
     with pytest.raises(ProductTemplateValidationError) as exc_info:
         validate_template_registry()
-    assert "binding.21.ELECTRONICS_PHONES" in exc_info.value.errors
-    assert "binding.21.missing_template" in exc_info.value.errors
+    assert "binding.25.ELECTRONICS_PHONES" in exc_info.value.errors
+    assert "binding.25.missing_template" in exc_info.value.errors
 
 
 def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(

@@ -29,7 +29,10 @@ from app.models.enums import (
     StoreStatus,
     UserStatus,
 )
-from app.services.partner_product_categories import PARTNER_PRODUCT_DRAFT_SESSION_KEY
+from app.services.partner_product_categories import (
+    PARTNER_PRODUCT_DRAFT_SESSION_KEY,
+    list_main_categories,
+)
 
 
 pytestmark = pytest.mark.integration
@@ -383,7 +386,7 @@ def test_cancel_keeps_product_tables_empty(client, session):
     assert session.scalar(select(func.count()).select_from(SellerOffer)) == 0
 
 
-def test_seed_product_categories_is_idempotent_and_exposes_security_leaf(
+def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
     app,
     session,
     client,
@@ -404,6 +407,10 @@ def test_seed_product_categories_is_idempotent_and_exposes_security_leaf(
         "ELECTRONICS_CAMERAS",
         "ELECTRONICS_SECURITY",
         "FASHION",
+        "FASHION_CLOTHING",
+        "FASHION_FOOTWEAR",
+        "FASHION_BAGS_ACCESSORIES",
+        "FASHION_JEWELRY_WATCHES",
         "HOME_KITCHEN",
         "BEAUTY_HEALTH",
         "AUTOMOTIVE",
@@ -423,12 +430,61 @@ def test_seed_product_categories_is_idempotent_and_exposes_security_leaf(
     assert template_key_for_category_code(security.code) == "electronics_security"
 
     user = _user(session)
-    _enabled_store(session, user)
+    store = _enabled_store(session, user)
     session.commit()
     _login(client, user)
     selector = client.get("/partners/products/new/category")
     assert selector.status_code == 200
-    assert "Seguridad y videovigilancia" in selector.get_data(as_text=True)
+    html = selector.get_data(as_text=True)
+    assert "Seguridad y videovigilancia" in html
+    fashion_view = next(
+        category
+        for category in list_main_categories(session)
+        if category.code == "FASHION"
+    )
+    assert tuple(item.name for item in fashion_view.subcategories) == (
+        "Ropa",
+        "Calzado",
+        "Bolsos y accesorios",
+        "Joyería, bisutería y relojes",
+    )
+    assert tuple(item.code for item in fashion_view.subcategories) == (
+        "FASHION_CLOTHING",
+        "FASHION_FOOTWEAR",
+        "FASHION_BAGS_ACCESSORIES",
+        "FASHION_JEWELRY_WATCHES",
+    )
+
+    fashion = session.scalar(select(Category).where(Category.code == "FASHION"))
+    legacy_men = session.scalar(
+        select(Category).where(Category.code == "FASHION_MEN")
+    )
+    crafted = client.post(
+        "/partners/products/drafts",
+        data={
+            "category_id": str(fashion.id),
+            "subcategory_id": str(legacy_men.id),
+        },
+    )
+    assert crafted.status_code == 400
+    assert "no está disponible para publicaciones nuevas" in crafted.get_data(
+        as_text=True
+    )
+    assert session.scalar(select(func.count()).select_from(ProductDraft)) == 0
+
+    historical = ProductDraft(
+        store_id=store.id,
+        created_by_user_id=user.id,
+        category_id=fashion.id,
+        subcategory_id=legacy_men.id,
+        template_key="fashion_men",
+        attributes={"tipo": "Camisa", "talla": "M"},
+    )
+    session.add(historical)
+    session.commit()
+    historical_page = client.get(f"/partners/products/drafts/{historical.id}")
+    assert historical_page.status_code == 200
+    assert "Hombre" in historical_page.get_data(as_text=True)
 
     category_count = session.scalar(select(func.count()).select_from(Category))
     third = runner.invoke(args=["seed-product-categories"])

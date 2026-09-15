@@ -280,13 +280,17 @@ def test_validate_template_registry_passes_with_quick_options():
     validate_template_registry()
 
 
-def test_quick_options_remain_scoped_to_electronics_templates():
+def test_quick_options_remain_scoped_to_canonical_templates():
     keys_with_quick_options = {
         "electronics_phones",
         "electronics_computers",
         "electronics_headphones",
         "electronics_cameras",
         "electronics_security",
+        "fashion_clothing",
+        "fashion_footwear",
+        "fashion_bags_accessories",
+        "fashion_jewelry_watches",
     }
     for key, template in PRODUCT_TEMPLATES.items():
         if key in keys_with_quick_options:

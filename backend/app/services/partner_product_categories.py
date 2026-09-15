@@ -19,6 +19,13 @@ from app.models.enums import (
 
 PARTNER_PRODUCT_DRAFT_SESSION_KEY = "partner_product_draft"
 
+LEGACY_NEW_LISTING_CATEGORY_CODES = frozenset({
+    "FASHION_MEN",
+    "FASHION_WOMEN",
+    "FASHION_SHOES",
+    "FASHION_ACCESSORIES",
+})
+
 
 class PartnerProductCategoryError(Exception):
     pass
@@ -188,6 +195,8 @@ def validate_category_selection(
         errors["subcategory_id"] = "La subcategoría ya no está disponible."
     elif category is not None and subcategory.parent_id != category.id:
         errors["subcategory_id"] = "La subcategoría seleccionada no pertenece a la categoría."
+    elif subcategory.code in LEGACY_NEW_LISTING_CATEGORY_CODES:
+        errors["subcategory_id"] = "La subcategoría ya no está disponible para publicaciones nuevas."
     if errors:
         raise PartnerProductCategoryValidationError("Revisa la selección.", errors)
     template_key = resolve_template_key(subcategory)
@@ -240,6 +249,7 @@ def _category_view(category: Category) -> PartnerMainCategoryView:
         (
             child for child in category.children
             if child.is_active
+            and child.code not in LEGACY_NEW_LISTING_CATEGORY_CODES
             and template_key_for_category_code(child.code) is not None
         ),
         key=lambda child: (child.sort_order, child.name, str(child.id)),

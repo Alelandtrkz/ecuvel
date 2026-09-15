@@ -138,10 +138,10 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert seeded.exit_code == 0, seeded.output
     first = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert first.exit_code == 0, first.output
-    assert "Reglas creadas: 21; actualizadas: 0." in first.output
+    assert "Reglas creadas: 25; actualizadas: 0." in first.output
     second = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert second.exit_code == 0, second.output
-    assert "Reglas creadas: 0; actualizadas: 21." in second.output
+    assert "Reglas creadas: 0; actualizadas: 25." in second.output
 
     session.expire_all()
     rules = session.scalars(
@@ -159,6 +159,15 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert by_code["BABIES_CARE"] == Decimal("10.00")
     assert by_code["BABIES_CLOTHING"] == Decimal("12.00")
     assert by_code["HOME_CLEANING"] == Decimal("10.00")
+    assert {
+        by_code[code]
+        for code in (
+            "FASHION_CLOTHING",
+            "FASHION_FOOTWEAR",
+            "FASHION_BAGS_ACCESSORIES",
+            "FASHION_JEWELRY_WATCHES",
+        )
+    } == {Decimal("12.00")}
 
     categories = list(session.scalars(
         select(Category).where(Category.is_active.is_(True)).order_by(Category.code)
@@ -177,7 +186,7 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
         )
         for category in publishable
     }
-    assert len(publishable) == 21
+    assert len(publishable) == 25
     assert set(resolutions) == {category.code for category in publishable}
     assert all(result.mode == SellerCommissionType.PERCENTAGE for result in resolutions.values())
 
