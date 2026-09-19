@@ -102,6 +102,7 @@ def test_legacy_beauty_contracts_documents_rates_and_exclusion_are_preserved():
         "FASHION_MEN", "FASHION_WOMEN", "FASHION_SHOES", "FASHION_ACCESSORIES",
         "HOME_DECORATION", "HOME_KITCHEN_TOOLS", "HOME_CLEANING",
         *LEGACY_BEAUTY,
+        "AUTOMOTIVE_ACCESSORIES", "AUTOMOTIVE_TOOLS", "AUTOMOTIVE_BASIC_PARTS",
     }
     assert LEGACY_NEW_LISTING_CATEGORY_CODES == frozenset(expected_legacy_codes)
     expected_fields = {"color_principal", "material", "tipo", "presentacion", "contenido_neto", "unidad", "ingredientes", "registro_sanitario"}

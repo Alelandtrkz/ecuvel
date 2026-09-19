@@ -425,6 +425,14 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "BEAUTY_HAIR_CARE",
         "BEAUTY_FRAGRANCES",
         "AUTOMOTIVE",
+        "AUTOMOTIVE_ACCESSORIES_GENERAL",
+        "AUTOMOTIVE_TOOLS_EQUIPMENT",
+        "AUTOMOTIVE_REPLACEMENT_PARTS",
+        "AUTOMOTIVE_OILS_FLUIDS",
+        "AUTOMOTIVE_CARE_DETAILING",
+        "AUTOMOTIVE_ELECTRONICS_AUDIO",
+        "AUTOMOTIVE_TIRES_WHEELS",
+        "AUTOMOTIVE_BATTERIES",
         "BABIES_KIDS",
     }
     rows = session.scalars(select(Category).where(Category.code.in_(managed_codes))).all()
@@ -504,6 +512,31 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "BEAUTY_SKIN_CARE",
         "BEAUTY_HAIR_CARE",
         "BEAUTY_FRAGRANCES",
+    )
+    automotive_view = next(
+        category
+        for category in list_main_categories(session)
+        if category.code == "AUTOMOTIVE"
+    )
+    assert tuple(item.name for item in automotive_view.subcategories) == (
+        "Accesorios para vehículo",
+        "Herramientas y equipo",
+        "Repuestos y mantenimiento",
+        "Aceites, lubricantes y fluidos",
+        "Cuidado y detailing",
+        "Electrónica y audio",
+        "Neumáticos y rines",
+        "Baterías y arranque",
+    )
+    assert tuple(item.code for item in automotive_view.subcategories) == (
+        "AUTOMOTIVE_ACCESSORIES_GENERAL",
+        "AUTOMOTIVE_TOOLS_EQUIPMENT",
+        "AUTOMOTIVE_REPLACEMENT_PARTS",
+        "AUTOMOTIVE_OILS_FLUIDS",
+        "AUTOMOTIVE_CARE_DETAILING",
+        "AUTOMOTIVE_ELECTRONICS_AUDIO",
+        "AUTOMOTIVE_TIRES_WHEELS",
+        "AUTOMOTIVE_BATTERIES",
     )
 
     fashion = session.scalar(select(Category).where(Category.code == "FASHION"))
@@ -602,6 +635,39 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
     )
     assert historical_beauty_page.status_code == 200
     assert "Jabón" in historical_beauty_page.get_data(as_text=True)
+
+    automotive = session.scalar(select(Category).where(Category.code == "AUTOMOTIVE"))
+    legacy_accessories = session.scalar(
+        select(Category).where(Category.code == "AUTOMOTIVE_ACCESSORIES")
+    )
+    crafted_automotive = client.post(
+        "/partners/products/drafts",
+        data={
+            "category_id": str(automotive.id),
+            "subcategory_id": str(legacy_accessories.id),
+        },
+    )
+    assert crafted_automotive.status_code == 400
+    assert "no está disponible para publicaciones nuevas" in crafted_automotive.get_data(
+        as_text=True
+    )
+    assert session.scalar(select(func.count()).select_from(ProductDraft)) == 3
+
+    historical_automotive = ProductDraft(
+        store_id=store.id,
+        created_by_user_id=user.id,
+        category_id=automotive.id,
+        subcategory_id=legacy_accessories.id,
+        template_key="automotive_accessories",
+        attributes={"tipo": "Cobertor", "numero_parte": "LEGACY-1"},
+    )
+    session.add(historical_automotive)
+    session.commit()
+    historical_automotive_page = client.get(
+        f"/partners/products/drafts/{historical_automotive.id}"
+    )
+    assert historical_automotive_page.status_code == 200
+    assert "Cobertor" in historical_automotive_page.get_data(as_text=True)
 
     category_count = session.scalar(select(func.count()).select_from(Category))
     third = runner.invoke(args=["seed-product-categories"])

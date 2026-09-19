@@ -1832,6 +1832,298 @@ def _beauty_fragrances() -> tuple[ProductTemplateField, ...]:
     )
 
 
+_AUTOMOTIVE_VEHICLE_TYPES = (
+    "Automóvil", "SUV / Camioneta", "Motocicleta", "Camión", "ATV / UTV", "Otro",
+)
+
+
+def _automotive_compatibility_fields(*, start_order: int) -> tuple[ProductTemplateField, ...]:
+    specific = {"field": "compatibilidad", "values": ["Específica"]}
+    return (
+        field_def("compatibilidad", "Compatibilidad", type="select", section="compatibilidad", order=start_order, options=("Universal", "Específica")),
+        field_def("tipo_vehiculo_compatible", "Tipo de vehículo compatible", type="select", section="compatibilidad", order=start_order + 1, options=_AUTOMOTIVE_VEHICLE_TYPES),
+        field_def("marca_vehiculo_compatible", "Marca compatible", section="compatibilidad", order=start_order + 2, condition=specific),
+        field_def("modelo_vehiculo_compatible", "Modelo compatible", section="compatibilidad", order=start_order + 3, condition=specific),
+        field_def("anio_desde", "Año desde", type="integer", section="compatibilidad", order=start_order + 4, min=1886, condition=specific),
+        field_def("anio_hasta", "Año hasta", type="integer", section="compatibilidad", order=start_order + 5, min=1886, condition=specific),
+        field_def("motor_compatible", "Motor compatible", section="compatibilidad", order=start_order + 6, condition=specific),
+        field_def("notas_compatibilidad", "Notas de compatibilidad", type="textarea", section="compatibilidad", order=start_order + 7, condition=specific),
+    )
+
+
+_AUTOMOTIVE_ACCESSORY_TYPES = (
+    "Alfombra / Tapete", "Forro de asiento", "Cubierta de volante", "Organizador",
+    "Soporte para celular", "Parasol", "Cobertor de vehículo",
+    "Barra / Portaequipaje de techo", "Protector / Deflector",
+    "Accesorio de maletero", "Marco / Accesorio de placa", "Otro",
+)
+_AUTOMOTIVE_ACCESSORY_COLOR_TYPES = tuple(
+    value for value in _AUTOMOTIVE_ACCESSORY_TYPES
+    if value != "Barra / Portaequipaje de techo"
+)
+_AUTOMOTIVE_ACCESSORY_SIZE_TYPES = (
+    "Alfombra / Tapete", "Forro de asiento", "Cubierta de volante", "Parasol",
+    "Cobertor de vehículo", "Barra / Portaequipaje de techo", "Protector / Deflector",
+)
+
+
+def _automotive_accessories_general() -> tuple[ProductTemplateField, ...]:
+    mounting_types = ("Soporte para celular", "Barra / Portaequipaje de techo")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_ACCESSORY_TYPES),
+        *_automotive_compatibility_fields(start_order=2),
+        field_def("material", "Material", type="select", section="materiales", order=10, options=("Plástico", "Caucho", "PVC", "Tela", "Poliéster", "Cuero sintético", "Cuero", "Metal", "Aluminio", "Acero", "Fibra", "Mixto", "Otro")),
+        field_def("color_principal", "Color principal", type="variant_attribute", section="presentacion", order=11, condition=_for_product_types(*_AUTOMOTIVE_ACCESSORY_COLOR_TYPES)),
+        field_def("tamano", "Tamaño", type="variant_attribute", section="presentacion", order=12, condition=_for_product_types(*_AUTOMOTIVE_ACCESSORY_SIZE_TYPES)),
+        field_def("cantidad_paquete", "Cantidad por paquete", type="integer", section="producto", order=13, min=1),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=14, min=Decimal("0.01"), condition=_for_product_types("Cobertor de vehículo")),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=15, min=Decimal("0.01"), condition=_for_product_types("Cobertor de vehículo")),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=16, min=Decimal("0.01"), condition=_for_product_types("Cobertor de vehículo")),
+        field_def("impermeable", "Impermeable", type="boolean", section="producto", order=17, condition=_for_product_types("Cobertor de vehículo")),
+        field_def("proteccion_uv", "Protección UV", type="boolean", section="producto", order=18, condition=_for_product_types("Cobertor de vehículo")),
+        field_def("tipo_montaje", "Tipo de montaje", type="select", section="compatibilidad", order=19, options=("Rejilla", "Tablero", "Parabrisas", "Consola", "Portavasos", "Techo", "Riel", "Abrazadera", "Otro"), condition=_for_product_types(*mounting_types)),
+        field_def("ubicacion_montaje", "Ubicación de montaje", type="select", section="compatibilidad", order=20, options=("Rejilla", "Tablero", "Parabrisas", "Consola", "Portavasos", "Otro"), condition=_for_product_types("Soporte para celular")),
+        field_def("ancho_dispositivo_min_mm", "Ancho mínimo del dispositivo", type="decimal", unit="mm", section="medidas", order=21, min=Decimal("0.01"), condition=_for_product_types("Soporte para celular")),
+        field_def("ancho_dispositivo_max_mm", "Ancho máximo del dispositivo", type="decimal", unit="mm", section="medidas", order=22, min=Decimal("0.01"), condition=_for_product_types("Soporte para celular")),
+        field_def("cantidad_asientos", "Cantidad de asientos", type="integer", section="producto", order=23, min=1, condition=_for_product_types("Forro de asiento")),
+        field_def("tipo_asiento", "Tipo de asiento", type="select", section="producto", order=24, options=("Delantero", "Trasero", "Juego completo", "Otro"), condition=_for_product_types("Forro de asiento")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=25, min=1, condition=_for_product_types("Alfombra / Tapete")),
+        field_def("capacidad_carga_kg", "Capacidad de carga", type="decimal", unit="kg", section="medidas", order=26, min=Decimal("0.01"), condition=_for_product_types("Barra / Portaequipaje de techo")),
+    )
+
+
+_AUTOMOTIVE_TOOL_TYPES = (
+    "Gato hidráulico", "Gato mecánico", "Compresor / Inflador", "Arrancador portátil",
+    "Cargador de batería", "Escáner OBD2", "Llave dinamométrica",
+    "Juego de herramientas", "Manómetro", "Extractor automotriz",
+    "Probador eléctrico", "Otro",
+)
+
+
+def _automotive_tools_equipment() -> tuple[ProductTemplateField, ...]:
+    jacks = ("Gato hidráulico", "Gato mecánico")
+    voltage_sources = (
+        "Sistema eléctrico del vehículo", "Batería recargable", "Red eléctrica",
+    )
+    cases = ("Llave dinamométrica", "Juego de herramientas", "Extractor automotriz", "Probador eléctrico")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_TOOL_TYPES),
+        field_def("fuente_energia", "Fuente de energía", type="select", section="energia", order=2, options=("Manual", "Sistema eléctrico del vehículo", "Batería recargable", "Red eléctrica")),
+        field_def("voltaje_v", "Voltaje de entrada", type="decimal", unit="V", section="energia", order=3, min=Decimal("0.01"), help="Voltaje nominal o de entrada indicado por el fabricante.", condition={"field": "fuente_energia", "values": list(voltage_sources)}),
+        field_def("material", "Material", type="select", section="materiales", order=4, options=("Acero", "Aluminio", "Plástico", "Caucho", "Mixto", "Otro")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=5, min=1, condition=_for_product_types("Juego de herramientas")),
+        field_def("incluye_estuche", "Incluye estuche", type="boolean", section="producto", order=6, condition=_for_product_types(*cases)),
+        field_def("capacidad_carga_t", "Capacidad de carga", type="decimal", unit="t", section="medidas", order=7, min=Decimal("0.01"), condition=_for_product_types(*jacks)),
+        field_def("altura_minima_cm", "Altura mínima", type="decimal", unit="cm", section="medidas", order=8, min=Decimal("0.01"), condition=_for_product_types(*jacks)),
+        field_def("altura_maxima_cm", "Altura máxima", type="decimal", unit="cm", section="medidas", order=9, min=Decimal("0.01"), condition=_for_product_types(*jacks)),
+        field_def("presion_max_psi", "Presión máxima", type="decimal", unit="PSI", section="tecnica", order=10, min=Decimal("0.01"), condition=_for_product_types("Compresor / Inflador", "Manómetro")),
+        field_def("caudal_l_min", "Caudal", type="decimal", unit="L/min", section="tecnica", order=11, min=Decimal("0.01"), condition=_for_product_types("Compresor / Inflador")),
+        field_def("corriente_pico_a", "Corriente pico", type="integer", unit="A", section="energia", order=12, min=1, condition=_for_product_types("Arrancador portátil")),
+        field_def("capacidad_mah", "Capacidad", type="integer", unit="mAh", section="energia", order=13, min=1, condition=_for_product_types("Arrancador portátil")),
+        field_def("voltajes_soportados", "Voltajes soportados", type="chips", section="energia", order=14, condition=_for_product_types("Cargador de batería")),
+        field_def("corriente_carga_a", "Corriente de carga", type="decimal", unit="A", section="energia", order=15, min=Decimal("0.01"), condition=_for_product_types("Cargador de batería")),
+        field_def("conector", "Conector", type="select", section="conectividad", order=16, options=("OBD2", "OBD1", "Otro"), condition=_for_product_types("Escáner OBD2")),
+        field_def("conectividad", "Conectividad", type="multiselect", section="conectividad", order=17, options=("Bluetooth", "Wi-Fi", "USB", "Cable"), condition=_for_product_types("Escáner OBD2")),
+        field_def("protocolos", "Protocolos", type="chips", section="conectividad", order=18, condition=_for_product_types("Escáner OBD2")),
+        field_def("torque_min_nm", "Torque mínimo", type="decimal", unit="Nm", section="tecnica", order=19, min=Decimal("0.01"), condition=_for_product_types("Llave dinamométrica")),
+        field_def("torque_max_nm", "Torque máximo", type="decimal", unit="Nm", section="tecnica", order=20, min=Decimal("0.01"), condition=_for_product_types("Llave dinamométrica")),
+        field_def("herramientas_incluidas", "Herramientas incluidas", type="chips", section="producto", order=21, condition=_for_product_types("Juego de herramientas")),
+        field_def("unidades_medicion", "Unidades de medición", type="multiselect", section="tecnica", order=22, options=("PSI", "bar", "kPa"), condition=_for_product_types("Manómetro")),
+        field_def("tipo_extractor", "Tipo de extractor", type="select", section="producto", order=23, options=("Rodamientos", "Poleas", "Rótulas", "Engranajes", "Otro"), condition=_for_product_types("Extractor automotriz")),
+        field_def("voltaje_min_v", "Voltaje mínimo", type="decimal", unit="V", section="energia", order=24, min=Decimal("0"), condition=_for_product_types("Probador eléctrico")),
+        field_def("voltaje_max_v", "Voltaje máximo", type="decimal", unit="V", section="energia", order=25, min=Decimal("0.01"), condition=_for_product_types("Probador eléctrico")),
+    )
+
+
+_AUTOMOTIVE_REPLACEMENT_TYPES = (
+    "Filtro de aceite", "Filtro de aire", "Filtro de cabina", "Filtro de combustible",
+    "Pastillas de freno", "Disco de freno", "Bujía", "Correa", "Junta / Empaque",
+    "Manguera", "Rodamiento", "Componente de suspensión", "Plumilla / Limpiaparabrisas",
+    "Bombillo / Lámpara", "Sensor", "Otro repuesto",
+)
+
+
+def _automotive_replacement_parts() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_REPLACEMENT_TYPES),
+        *_automotive_compatibility_fields(start_order=2),
+        field_def("numero_parte", "Número de parte", section="tecnica", order=10),
+        field_def("codigo_oem", "Código OEM", type="chips", section="tecnica", order=11),
+        field_def("posicion", "Posición", type="select", section="compatibilidad", order=12, options=("Delantero", "Trasero", "Izquierdo", "Derecho", "Delantero izquierdo", "Delantero derecho", "Trasero izquierdo", "Trasero derecho", "Motor", "Interior", "Exterior", "Universal", "No aplica", "Otro")),
+        field_def("cantidad_paquete", "Cantidad por paquete", type="integer", section="producto", order=13, min=1),
+        field_def("diametro_mm", "Diámetro", type="decimal", unit="mm", section="medidas", order=14, min=Decimal("0.01"), condition=_for_product_types("Disco de freno")),
+        field_def("espesor_mm", "Espesor", type="decimal", unit="mm", section="medidas", order=15, min=Decimal("0.01"), condition=_for_product_types("Disco de freno")),
+        field_def("eje", "Eje", type="select", section="compatibilidad", order=16, options=("Delantero", "Trasero"), condition=_for_product_types("Disco de freno", "Pastillas de freno")),
+        field_def("diametro_rosca_mm", "Diámetro de rosca", type="decimal", unit="mm", section="medidas", order=17, min=Decimal("0.01"), condition=_for_product_types("Bujía")),
+        field_def("longitud_rosca_mm", "Longitud de rosca", type="decimal", unit="mm", section="medidas", order=18, min=Decimal("0.01"), condition=_for_product_types("Bujía")),
+        field_def("separacion_electrodo_mm", "Separación del electrodo", type="decimal", unit="mm", section="medidas", order=19, min=Decimal("0.01"), condition=_for_product_types("Bujía")),
+        field_def("longitud_mm", "Longitud", type="decimal", unit="mm", section="medidas", order=20, min=Decimal("0.01"), condition=_for_product_types("Plumilla / Limpiaparabrisas", "Correa")),
+        field_def("base_socket", "Base / Socket", section="tecnica", order=21, condition=_for_product_types("Bombillo / Lámpara")),
+        field_def("voltaje_v", "Voltaje", type="decimal", unit="V", section="energia", order=22, min=Decimal("0.01"), condition=_for_product_types("Bombillo / Lámpara")),
+        field_def("potencia_w", "Potencia", type="decimal", unit="W", section="energia", order=23, min=Decimal("0.01"), condition=_for_product_types("Bombillo / Lámpara")),
+        field_def("tecnologia", "Tecnología", type="select", section="tecnica", order=24, options=("Halógeno", "LED", "HID / Xenón", "Otro"), condition=_for_product_types("Bombillo / Lámpara")),
+        field_def("numero_canales", "Número de canales", type="integer", section="tecnica", order=25, min=1, condition=_for_product_types("Correa")),
+        field_def("tipo_sensor", "Tipo de sensor", type="select", section="tecnica", order=26, options=("Oxígeno", "Temperatura", "Presión", "Posición", "Velocidad", "ABS", "Otro"), condition=_for_product_types("Sensor")),
+        field_def("numero_pines", "Número de pines", type="integer", section="tecnica", order=27, min=1, condition=_for_product_types("Sensor")),
+    )
+
+
+_AUTOMOTIVE_OIL_FLUID_TYPES = (
+    "Aceite de motor", "Aceite de transmisión", "Líquido de frenos",
+    "Refrigerante / Anticongelante", "Líquido de dirección hidráulica",
+    "Aditivo", "Grasa", "Líquido limpiaparabrisas", "Otro fluido",
+)
+_AUTOMOTIVE_FLUID_TYPES = tuple(
+    value for value in _AUTOMOTIVE_OIL_FLUID_TYPES if value != "Grasa"
+)
+
+
+def _automotive_oils_fluids() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_OIL_FLUID_TYPES),
+        field_def("presentacion", "Presentación", type="select", section="producto", order=2, options=("Botella", "Bidón", "Lata", "Tubo", "Sachet", "Balde", "Otro")),
+        field_def("volumen_l", "Volumen", type="decimal", unit="L", section="medidas", order=3, min=Decimal("0.01"), condition=_for_product_types(*_AUTOMOTIVE_FLUID_TYPES)),
+        field_def("peso_g", "Peso", type="decimal", unit="g", section="medidas", order=4, min=Decimal("0.01"), condition=_for_product_types("Grasa")),
+        field_def("viscosidad_sae", "Viscosidad SAE", type="select", section="tecnica", order=5, options=("0W-20", "0W-30", "5W-20", "5W-30", "5W-40", "10W-30", "10W-40", "15W-40", "20W-50", "Otro"), condition=_for_product_types("Aceite de motor")),
+        field_def("base_aceite", "Base del aceite", type="select", section="tecnica", order=6, options=("Mineral", "Semisintético", "Sintético", "Otro"), condition=_for_product_types("Aceite de motor")),
+        field_def("clasificacion_api", "Clasificación API", section="tecnica", order=7, condition=_for_product_types("Aceite de motor")),
+        field_def("clasificacion_acea", "Clasificación ACEA", section="tecnica", order=8, condition=_for_product_types("Aceite de motor")),
+        field_def("especificaciones", "Especificaciones", type="chips", section="tecnica", order=9, condition=_for_product_types("Aceite de motor")),
+        field_def("tipo_transmision", "Tipo de transmisión", type="multiselect", section="tecnica", order=10, options=("Manual", "Automática", "CVT", "DCT", "Diferencial", "Otra"), condition=_for_product_types("Aceite de transmisión")),
+        field_def("especificacion", "Especificación", type="chips", section="tecnica", order=11, condition=_for_product_types("Aceite de transmisión")),
+        field_def("dot", "Clasificación DOT", type="select", section="tecnica", order=12, options=("DOT 3", "DOT 4", "DOT 5", "DOT 5.1", "Otro"), condition=_for_product_types("Líquido de frenos")),
+        field_def("tipo_refrigerante", "Tipo de refrigerante", type="select", section="tecnica", order=13, options=("Concentrado", "Premezclado", "Orgánico", "Inorgánico", "Híbrido", "Otro"), condition=_for_product_types("Refrigerante / Anticongelante")),
+        field_def("proteccion_temperatura_c", "Protección de temperatura", type="decimal", unit="°C", section="tecnica", order=14, condition=_for_product_types("Refrigerante / Anticongelante")),
+        field_def("sistema_aplicacion", "Sistema de aplicación", type="select", section="uso", order=15, options=("Motor", "Combustible", "Aceite", "Transmisión", "Refrigeración", "Otro"), condition=_for_product_types("Aditivo")),
+        field_def("tipo_grasa", "Tipo de grasa", type="select", section="tecnica", order=16, options=("Multipropósito", "Rodamientos", "Chasis", "Alta temperatura", "Otro"), condition=_for_product_types("Grasa")),
+        field_def("base_grasa", "Base de la grasa", type="select", section="tecnica", order=17, options=("Litio", "Calcio", "Complejo de litio", "Sintética", "Otra"), condition=_for_product_types("Grasa")),
+    )
+
+
+_AUTOMOTIVE_DETAILING_TYPES = (
+    "Champú automotriz", "Cera / Sellador", "Pulimento", "Limpiador interior",
+    "Limpiador de vidrios", "Limpiador / Abrillantador de neumáticos",
+    "Acondicionador de cuero", "Restaurador de faros", "Microfibra",
+    "Esponja / Aplicador", "Kit de detailing", "Otro",
+)
+_AUTOMOTIVE_DETAILING_CONSUMABLES = _AUTOMOTIVE_DETAILING_TYPES[:8]
+
+
+def _automotive_care_detailing() -> tuple[ProductTemplateField, ...]:
+    physical = ("Microfibra", "Esponja / Aplicador")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_DETAILING_TYPES),
+        field_def("presentacion", "Presentación", type="select", section="producto", order=2, options=("Botella", "Spray", "Aerosol", "Pasta", "Crema", "Gel", "Otro"), condition=_for_product_types(*_AUTOMOTIVE_DETAILING_CONSUMABLES)),
+        field_def("superficie_uso", "Superficie de uso", type="multiselect", section="uso", order=3, options=("Pintura", "Vidrio", "Plástico", "Caucho", "Neumáticos", "Cuero", "Tela", "Vinilo", "Metal", "Interior", "Exterior", "Otra"), condition=_for_product_types(*_AUTOMOTIVE_DETAILING_CONSUMABLES)),
+        field_def("efecto", "Efecto", type="multiselect", section="uso", order=4, options=("Limpieza", "Brillo", "Protección", "Pulido", "Descontaminación", "Hidrofóbico", "Restauración", "Otro"), condition=_for_product_types(*_AUTOMOTIVE_DETAILING_CONSUMABLES)),
+        field_def("volumen_ml", "Volumen", type="decimal", unit="ml", section="medidas", order=5, min=Decimal("0.01"), condition=_for_product_types(*_AUTOMOTIVE_DETAILING_CONSUMABLES)),
+        field_def("aroma", "Aroma", section="producto", order=6, condition=_for_product_types(*_AUTOMOTIVE_DETAILING_CONSUMABLES)),
+        field_def("concentrado", "Concentrado", type="boolean", section="producto", order=7, condition=_for_product_types(*_AUTOMOTIVE_DETAILING_CONSUMABLES)),
+        field_def("dilucion_recomendada", "Dilución recomendada", section="uso", order=8, condition=_for_product_types(*_AUTOMOTIVE_DETAILING_CONSUMABLES)),
+        field_def("material", "Material", type="select", section="materiales", order=9, options=("Microfibra", "Espuma", "Algodón", "Lana", "Sintético", "Otro"), condition=_for_product_types(*physical)),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=10, min=Decimal("0.01"), condition=_for_product_types("Microfibra")),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=11, min=Decimal("0.01"), condition=_for_product_types("Microfibra")),
+        field_def("gramaje_g_m2", "Gramaje", type="decimal", unit="g/m²", section="medidas", order=12, min=Decimal("0.01"), condition=_for_product_types("Microfibra")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=13, min=1, condition=_for_product_types("Microfibra", "Esponja / Aplicador", "Kit de detailing")),
+        field_def("contenido_kit", "Contenido del kit", type="chips", section="producto", order=14, condition=_for_product_types("Kit de detailing")),
+    )
+
+
+_AUTOMOTIVE_ELECTRONICS_TYPES = (
+    "Unidad principal / Radio", "Pantalla / CarPlay", "Parlante", "Subwoofer",
+    "Amplificador", "Dashcam", "Cámara de reversa", "Sensor de estacionamiento",
+    "Alarma", "TPMS", "GPS Tracker", "Adaptador Bluetooth / FM", "Cargador USB",
+    "Inversor", "Otro",
+)
+_AUTOMOTIVE_RADIO_DISPLAY_TYPES = ("Unidad principal / Radio", "Pantalla / CarPlay")
+
+
+def _automotive_electronics_audio() -> tuple[ProductTemplateField, ...]:
+    audio = ("Parlante", "Subwoofer")
+    cameras = ("Dashcam", "Cámara de reversa")
+    powered = tuple(value for value in _AUTOMOTIVE_ELECTRONICS_TYPES if value != "Otro")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_ELECTRONICS_TYPES),
+        *_automotive_compatibility_fields(start_order=2),
+        field_def("voltaje_entrada_v", "Voltaje de entrada", type="decimal", unit="V", section="energia", order=10, min=Decimal("0.01"), condition=_for_product_types(*powered)),
+        field_def("potencia_w", "Potencia", type="decimal", unit="W", section="energia", order=11, min=Decimal("0.01"), condition=_for_product_types("Unidad principal / Radio", "Pantalla / CarPlay", "Amplificador", "Cargador USB", "Inversor")),
+        field_def("conectividad", "Conectividad", type="multiselect", section="conectividad", order=12, options=("Bluetooth", "Wi-Fi", "USB", "AUX", "RCA", "HDMI", "GPS", "4G", "Otro")),
+        field_def("pantalla_pulgadas", "Tamaño de pantalla", type="decimal", unit="in", section="pantalla", order=13, min=Decimal("0.01"), condition=_for_product_types(*_AUTOMOTIVE_RADIO_DISPLAY_TYPES)),
+        field_def("resolucion_pantalla", "Resolución de pantalla", section="pantalla", order=14, condition=_for_product_types(*_AUTOMOTIVE_RADIO_DISPLAY_TYPES)),
+        field_def("ram_gb", "RAM", type="integer", unit="GB", section="tecnica", order=15, min=1, condition=_for_product_types(*_AUTOMOTIVE_RADIO_DISPLAY_TYPES)),
+        field_def("almacenamiento_gb", "Almacenamiento", type="integer", unit="GB", section="tecnica", order=16, min=1, condition=_for_product_types(*_AUTOMOTIVE_RADIO_DISPLAY_TYPES)),
+        field_def("apple_carplay", "Apple CarPlay", type="boolean", section="conectividad", order=17, condition=_for_product_types(*_AUTOMOTIVE_RADIO_DISPLAY_TYPES)),
+        field_def("android_auto", "Android Auto", type="boolean", section="conectividad", order=18, condition=_for_product_types(*_AUTOMOTIVE_RADIO_DISPLAY_TYPES)),
+        field_def("diametro_pulgadas", "Diámetro", type="decimal", unit="in", section="medidas", order=19, min=Decimal("0.01"), condition=_for_product_types(*audio)),
+        field_def("potencia_rms_w", "Potencia RMS", type="decimal", unit="W", section="energia", order=20, min=Decimal("0.01"), condition=_for_product_types("Parlante", "Subwoofer", "Amplificador")),
+        field_def("impedancia_ohm", "Impedancia", type="decimal", unit="Ω", section="tecnica", order=21, min=Decimal("0.01"), condition=_for_product_types(*audio)),
+        field_def("numero_canales", "Número de canales", type="integer", section="tecnica", order=22, min=1, condition=_for_product_types("Amplificador")),
+        field_def("resolucion_video", "Resolución de video", type="select", section="video", order=23, options=("720p", "1080p", "2K", "4K", "Otro"), condition=_for_product_types(*cameras)),
+        field_def("fps", "Fotogramas por segundo", type="integer", unit="fps", section="video", order=24, min=1, condition=_for_product_types("Dashcam")),
+        field_def("angulo_vision_grados", "Ángulo de visión", type="decimal", unit="°", section="video", order=25, min=Decimal("0.01"), condition=_for_product_types(*cameras)),
+        field_def("vision_nocturna", "Visión nocturna", type="boolean", section="video", order=26, condition=_for_product_types("Dashcam")),
+        field_def("impermeable", "Impermeable", type="boolean", section="video", order=27, condition=_for_product_types("Cámara de reversa")),
+        field_def("numero_sensores", "Número de sensores", type="integer", section="tecnica", order=28, min=1, condition=_for_product_types("Sensor de estacionamiento", "TPMS")),
+        field_def("voltaje_salida_v", "Voltaje de salida", type="decimal", unit="V", section="energia", order=29, min=Decimal("0.01"), condition=_for_product_types("Inversor")),
+    )
+
+
+_AUTOMOTIVE_TIRE_WHEEL_TYPES = (
+    "Neumático", "Rin", "Rueda completa", "Cámara",
+    "Accesorio para rin / neumático", "Otro",
+)
+
+
+def _automotive_tires_wheels() -> tuple[ProductTemplateField, ...]:
+    tire = ("Neumático", "Rueda completa")
+    wheel = ("Rin", "Rueda completa")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_TIRE_WHEEL_TYPES),
+        *_automotive_compatibility_fields(start_order=2),
+        field_def("ancho_neumatico_mm", "Ancho del neumático", type="decimal", unit="mm", section="medidas", order=10, min=Decimal("0.01"), condition=_for_product_types(*tire)),
+        field_def("perfil_neumatico", "Perfil del neumático", type="decimal", section="medidas", order=11, min=Decimal("0.01"), condition=_for_product_types(*tire)),
+        field_def("diametro_rin_pulgadas", "Diámetro del rin", type="decimal", unit="in", section="medidas", order=12, min=Decimal("0.01"), condition=_for_product_types("Neumático", "Rin", "Rueda completa")),
+        field_def("indice_carga", "Índice de carga", section="tecnica", order=13, condition=_for_product_types(*tire)),
+        field_def("indice_velocidad", "Índice de velocidad", section="tecnica", order=14, condition=_for_product_types(*tire)),
+        field_def("temporada", "Temporada", type="select", section="tecnica", order=15, options=("Verano", "Invierno", "Todo clima", "Todo terreno", "Otro"), condition=_for_product_types(*tire)),
+        field_def("run_flat", "Run-flat", type="boolean", section="tecnica", order=16, condition=_for_product_types(*tire)),
+        field_def("tubeless", "Sin cámara / Tubeless", type="boolean", section="tecnica", order=17, condition=_for_product_types(*tire)),
+        field_def("ancho_rin_pulgadas", "Ancho del rin", type="decimal", unit="in", section="medidas", order=18, min=Decimal("0.01"), condition=_for_product_types(*wheel)),
+        field_def("numero_pernos", "Número de pernos", type="integer", section="tecnica", order=19, min=1, condition=_for_product_types(*wheel)),
+        field_def("pcd_mm", "PCD", type="decimal", unit="mm", section="medidas", order=20, min=Decimal("0.01"), condition=_for_product_types(*wheel)),
+        field_def("offset_et_mm", "Offset ET", type="decimal", unit="mm", section="medidas", order=21, condition=_for_product_types(*wheel)),
+        field_def("diametro_central_mm", "Diámetro central", type="decimal", unit="mm", section="medidas", order=22, min=Decimal("0.01"), condition=_for_product_types(*wheel)),
+        field_def("material_rin", "Material del rin", type="select", section="materiales", order=23, options=("Acero", "Aleación", "Aluminio", "Otro"), condition=_for_product_types(*wheel)),
+        field_def("diametro_compatible_pulgadas", "Diámetro compatible", type="decimal", unit="in", section="medidas", order=24, min=Decimal("0.01"), condition=_for_product_types("Cámara")),
+        field_def("ancho_compatible", "Ancho compatible", section="medidas", order=25, condition=_for_product_types("Cámara")),
+        field_def("tipo_valvula", "Tipo de válvula", type="select", section="tecnica", order=26, options=("Schrader", "Presta", "Otra"), condition=_for_product_types("Cámara")),
+    )
+
+
+_AUTOMOTIVE_BATTERY_TYPES = (
+    "Batería plomo-ácido convencional", "Batería AGM", "Batería EFB",
+    "Batería de litio automotriz", "Otra batería",
+)
+
+
+def _automotive_batteries() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_AUTOMOTIVE_BATTERY_TYPES),
+        field_def("tecnologia_bateria", "Tecnología de batería", type="select", section="tecnica", order=2, options=("Convencional", "AGM", "EFB", "Litio", "Otra")),
+        field_def("voltaje_v", "Voltaje", type="decimal", unit="V", section="energia", order=3, min=Decimal("0.01")),
+        field_def("capacidad_ah", "Capacidad", type="decimal", unit="Ah", section="energia", order=4, min=Decimal("0.01")),
+        field_def("corriente_arranque_a", "Corriente de arranque", type="integer", unit="A", section="energia", order=5, min=1),
+        field_def("polaridad", "Polaridad", type="select", section="tecnica", order=6, options=("Positivo derecha", "Positivo izquierda", "Central", "Otra")),
+        field_def("start_stop", "Compatible con Start-Stop", type="boolean", section="tecnica", order=7),
+        field_def("libre_mantenimiento", "Libre de mantenimiento", type="boolean", section="tecnica", order=8),
+        field_def("largo_mm", "Largo", type="decimal", unit="mm", section="medidas", order=9, min=Decimal("0.01")),
+        field_def("ancho_mm", "Ancho", type="decimal", unit="mm", section="medidas", order=10, min=Decimal("0.01")),
+        field_def("alto_mm", "Alto", type="decimal", unit="mm", section="medidas", order=11, min=Decimal("0.01")),
+        field_def("tipo_terminal", "Tipo de terminal", type="select", section="tecnica", order=12, options=("Poste superior", "Poste lateral", "Perno", "Otro")),
+        *_automotive_compatibility_fields(start_order=13),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProductTemplateCategoryBinding:
     template_key: str
@@ -1915,6 +2207,30 @@ _TEMPLATE_CATEGORY_BINDINGS = (
     ProductTemplateCategoryBinding(
         "automotive_basic_parts", "AUTOMOTIVE", "AUTOMOTIVE_BASIC_PARTS"
     ),
+    ProductTemplateCategoryBinding(
+        "automotive_accessories_general", "AUTOMOTIVE", "AUTOMOTIVE_ACCESSORIES_GENERAL"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_tools_equipment", "AUTOMOTIVE", "AUTOMOTIVE_TOOLS_EQUIPMENT"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_replacement_parts", "AUTOMOTIVE", "AUTOMOTIVE_REPLACEMENT_PARTS"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_oils_fluids", "AUTOMOTIVE", "AUTOMOTIVE_OILS_FLUIDS"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_care_detailing", "AUTOMOTIVE", "AUTOMOTIVE_CARE_DETAILING"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_electronics_audio", "AUTOMOTIVE", "AUTOMOTIVE_ELECTRONICS_AUDIO"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_tires_wheels", "AUTOMOTIVE", "AUTOMOTIVE_TIRES_WHEELS"
+    ),
+    ProductTemplateCategoryBinding(
+        "automotive_batteries", "AUTOMOTIVE", "AUTOMOTIVE_BATTERIES"
+    ),
     ProductTemplateCategoryBinding("babies_toys", "BABIES_KIDS", "BABIES_TOYS"),
     ProductTemplateCategoryBinding("babies_clothing", "BABIES_KIDS", "BABIES_CLOTHING"),
     ProductTemplateCategoryBinding("babies_care", "BABIES_KIDS", "BABIES_CARE"),
@@ -1961,6 +2277,14 @@ _TEMPLATE_FIELD_SETS = {
     "automotive_accessories": _automotive_common(),
     "automotive_tools": _automotive_common(),
     "automotive_basic_parts": _automotive_common(),
+    "automotive_accessories_general": _automotive_accessories_general(),
+    "automotive_tools_equipment": _automotive_tools_equipment(),
+    "automotive_replacement_parts": _automotive_replacement_parts(),
+    "automotive_oils_fluids": _automotive_oils_fluids(),
+    "automotive_care_detailing": _automotive_care_detailing(),
+    "automotive_electronics_audio": _automotive_electronics_audio(),
+    "automotive_tires_wheels": _automotive_tires_wheels(),
+    "automotive_batteries": _automotive_batteries(),
     "babies_toys": _babies_common(),
     "babies_clothing": _fashion_common(),
     "babies_care": _babies_common(),
@@ -2196,6 +2520,43 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
             "volumen_ml", "Volumen", source_field="volumen_ml", unit="ml",
             value_type="decimal", is_listing_axis=True,
             condition={"field": "tipo_producto", "values": list(_BEAUTY_LIQUID_FRAGRANCE_TYPES)},
+        ),
+    ),
+    "automotive_accessories_general": (
+        axis_def(
+            "color_principal", "Color", source_field="color_principal",
+            is_visual=True, is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_AUTOMOTIVE_ACCESSORY_COLOR_TYPES)},
+        ),
+        axis_def(
+            "tamano", "Tamaño", source_field="tamano", is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_AUTOMOTIVE_ACCESSORY_SIZE_TYPES)},
+        ),
+    ),
+    "automotive_oils_fluids": (
+        axis_def(
+            "volumen_l", "Volumen", source_field="volumen_l", unit="L",
+            value_type="decimal", is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_AUTOMOTIVE_FLUID_TYPES)},
+        ),
+    ),
+    "automotive_care_detailing": (
+        axis_def(
+            "volumen_ml", "Volumen", source_field="volumen_ml", unit="ml",
+            value_type="decimal", is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_AUTOMOTIVE_DETAILING_CONSUMABLES)},
+        ),
+    ),
+    "automotive_electronics_audio": (
+        axis_def(
+            "ram_gb", "RAM", source_field="ram_gb", unit="GB",
+            value_type="integer", is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_AUTOMOTIVE_RADIO_DISPLAY_TYPES)},
+        ),
+        axis_def(
+            "almacenamiento_gb", "Almacenamiento", source_field="almacenamiento_gb", unit="GB",
+            value_type="integer", is_listing_axis=True,
+            condition={"field": "tipo_producto", "values": list(_AUTOMOTIVE_RADIO_DISPLAY_TYPES)},
         ),
     ),
     "babies_clothing": (

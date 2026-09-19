@@ -93,6 +93,14 @@ CURRENT_CATEGORY_TEMPLATE_BINDINGS = {
     "AUTOMOTIVE_ACCESSORIES": ("AUTOMOTIVE", "automotive_accessories"),
     "AUTOMOTIVE_TOOLS": ("AUTOMOTIVE", "automotive_tools"),
     "AUTOMOTIVE_BASIC_PARTS": ("AUTOMOTIVE", "automotive_basic_parts"),
+    "AUTOMOTIVE_ACCESSORIES_GENERAL": ("AUTOMOTIVE", "automotive_accessories_general"),
+    "AUTOMOTIVE_TOOLS_EQUIPMENT": ("AUTOMOTIVE", "automotive_tools_equipment"),
+    "AUTOMOTIVE_REPLACEMENT_PARTS": ("AUTOMOTIVE", "automotive_replacement_parts"),
+    "AUTOMOTIVE_OILS_FLUIDS": ("AUTOMOTIVE", "automotive_oils_fluids"),
+    "AUTOMOTIVE_CARE_DETAILING": ("AUTOMOTIVE", "automotive_care_detailing"),
+    "AUTOMOTIVE_ELECTRONICS_AUDIO": ("AUTOMOTIVE", "automotive_electronics_audio"),
+    "AUTOMOTIVE_TIRES_WHEELS": ("AUTOMOTIVE", "automotive_tires_wheels"),
+    "AUTOMOTIVE_BATTERIES": ("AUTOMOTIVE", "automotive_batteries"),
     "BABIES_TOYS": ("BABIES_KIDS", "babies_toys"),
     "BABIES_CLOTHING": ("BABIES_KIDS", "babies_clothing"),
     "BABIES_CARE": ("BABIES_KIDS", "babies_care"),
@@ -357,7 +365,7 @@ def test_template_registry_covers_seeded_subcategories():
 
 
 def test_exact_category_template_bindings_and_metadata_are_preserved():
-    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 36
+    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 44
     for leaf_code, binding in CURRENT_CATEGORY_TEMPLATE_BINDINGS.items():
         main_code, template_key = binding
         template = PRODUCT_TEMPLATES[template_key]
@@ -396,8 +404,8 @@ def test_template_registry_validation_rejects_binding_drift(monkeypatch):
     )
     with pytest.raises(ProductTemplateValidationError) as exc_info:
         validate_template_registry()
-    assert "binding.36.ELECTRONICS_PHONES" in exc_info.value.errors
-    assert "binding.36.missing_template" in exc_info.value.errors
+    assert "binding.44.ELECTRONICS_PHONES" in exc_info.value.errors
+    assert "binding.44.missing_template" in exc_info.value.errors
 
 
 def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(
