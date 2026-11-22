@@ -362,6 +362,11 @@ _PRODUCT_CATEGORY_TREE = (
             {"code": "BABIES_TOYS", "name": "Juguetes", "slug": "juguetes", "sort_order": 1},
             {"code": "BABIES_CLOTHING", "name": "Ropa", "slug": "ropa-bebes-y-ninos", "sort_order": 2},
             {"code": "BABIES_CARE", "name": "Cuidado del bebé", "slug": "cuidado-del-bebe", "sort_order": 3},
+            {"code": "BABIES_TOYS_DEVELOPMENT", "name": "Juguetes y desarrollo", "slug": "juguetes-y-desarrollo", "sort_order": 1},
+            {"code": "BABIES_CLOTHING_FOOTWEAR", "name": "Ropa y calzado", "slug": "ropa-y-calzado", "sort_order": 2},
+            {"code": "BABIES_HYGIENE_CARE", "name": "Higiene y cuidado", "slug": "higiene-y-cuidado", "sort_order": 3},
+            {"code": "BABIES_FEEDING", "name": "Alimentación y lactancia", "slug": "alimentacion-y-lactancia", "sort_order": 4},
+            {"code": "BABIES_TRAVEL_SAFETY", "name": "Paseo y seguridad", "slug": "paseo-y-seguridad", "sort_order": 5},
         ),
     ),
 )

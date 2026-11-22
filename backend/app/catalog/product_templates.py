@@ -2124,6 +2124,157 @@ def _automotive_batteries() -> tuple[ProductTemplateField, ...]:
     )
 
 
+_BABIES_TOY_TYPES = (
+    "Sonajero / Mordedor", "Juguete sensorial", "Peluche", "Bloques / Construcción",
+    "Encaje / Clasificación", "Juguete musical", "Gimnasio / Manta de actividades",
+    "Juguete de baño", "Libro infantil / sensorial", "Rompecabezas", "Muñeco / Figura",
+    "Vehículo de juguete", "Correpasillos / Montable", "Otro",
+)
+
+
+def _babies_toys_development() -> tuple[ProductTemplateField, ...]:
+    powered = ("Juguete musical", "Vehículo de juguete", "Correpasillos / Montable")
+    measured = ("Gimnasio / Manta de actividades", "Correpasillos / Montable")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BABIES_TOY_TYPES),
+        field_def("edad_minima_meses", "Edad mínima", type="integer", unit="meses", section="uso", order=2, min=0, max=240),
+        field_def("edad_maxima_meses", "Edad máxima", type="integer", unit="meses", section="uso", order=3, min=0, max=240),
+        field_def("habilidades_desarrollo", "Habilidades de desarrollo", type="multiselect", section="uso", order=4, options=("Motricidad fina", "Motricidad gruesa", "Sensorial", "Coordinación", "Cognitivo", "Lenguaje", "Creatividad / imaginación")),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=5, options=("Plástico", "Madera", "Tela", "Silicona", "Caucho", "Cartón", "Metal", "Mixto", "Otro")),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=6),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=7, min=1),
+        field_def("lavable", "Lavable", type="boolean", section="cuidados", order=8),
+        field_def("contiene_piezas_pequenas", "Contiene piezas pequeñas", type="boolean", section="seguridad", order=9),
+        field_def("advertencias", "Advertencias", type="textarea", section="seguridad", order=10),
+        field_def("fuente_energia", "Fuente de energía", type="select", section="energia", order=11, options=("No requiere", "Pilas", "Batería recargable"), condition=_for_product_types(*powered)),
+        field_def("sonido", "Sonido", type="boolean", section="producto", order=12, condition=_for_product_types(*powered)),
+        field_def("luces", "Luces", type="boolean", section="producto", order=13, condition=_for_product_types(*powered)),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=14, min=Decimal("0.01"), condition=_for_product_types(*measured)),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=15, min=Decimal("0.01"), condition=_for_product_types(*measured)),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=16, min=Decimal("0.01"), condition=_for_product_types(*measured)),
+    )
+
+
+_BABIES_CLOTHING_TYPES = (
+    "Body / Onesie", "Camiseta", "Camisa / Blusa", "Suéter", "Sudadera", "Chaqueta / Abrigo",
+    "Pantalón", "Jean", "Short", "Legging", "Falda", "Vestido", "Conjunto", "Pijama",
+    "Ropa interior", "Medias / Calcetines", "Gorro / Sombrero", "Zapatos", "Tenis",
+    "Sandalias", "Botas", "Pantuflas", "Otro",
+)
+_BABIES_FOOTWEAR_TYPES = ("Zapatos", "Tenis", "Sandalias", "Botas", "Pantuflas")
+_FASHION_MATERIAL_OPTIONS = ("Algodón", "Poliéster", "Lana", "Lino", "Viscosa / Rayón", "Nylon / Poliamida", "Elastano", "Denim", "Cuero", "Cuero sintético", "Mezcla", "Otro")
+_FASHION_CARE_OPTIONS = ("Lavar a mano", "Lavado a máquina", "Lavar con agua fría", "Lavar con colores similares", "No usar blanqueador", "No usar secadora", "Secar a la sombra", "Secar en plano", "Planchar a baja temperatura", "No planchar", "Limpieza en seco", "No limpiar en seco")
+
+
+def _babies_clothing_footwear() -> tuple[ProductTemplateField, ...]:
+    upper = ("Body / Onesie", "Camiseta", "Camisa / Blusa", "Suéter", "Sudadera", "Chaqueta / Abrigo", "Vestido")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BABIES_CLOTHING_TYPES),
+        field_def("genero", "Género", type="select", section="producto", order=2, options=("Niño", "Niña", "Unisex")),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=3),
+        field_def("talla", "Talla", type="variant_attribute", required=True, section="tallas", order=4, quick_options=("Prematuro", "RN", "0–3M", "3–6M", "6–9M", "9–12M", "12–18M", "18–24M", "2T", "3T", "4T", "5T")),
+        field_def("sistema_talla", "Sistema de talla", type="select", section="tallas", order=5, options=("Por edad", "US", "EU", "LATAM", "cm", "Otro")),
+        field_def("tipo_talla", "Tipo de talla", type="select", section="tallas", order=6, options=("Edad", "Alfabética", "Numérica", "Longitud", "Única", "Otra")),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=7, options=_FASHION_MATERIAL_OPTIONS),
+        field_def("composicion", "Composición", type="chips", section="materiales", order=8),
+        field_def("temporada", "Temporada", type="select", section="producto", order=9, options=("Todo el año", "Clima cálido", "Clima frío", "Entretiempo")),
+        field_def("cuidados", "Cuidados", type="multiselect", section="cuidados", order=10, options=_FASHION_CARE_OPTIONS),
+        field_def("largo_manga", "Largo de manga", type="select", section="prenda", order=11, options=("Sin mangas", "Corta", "Tres cuartos", "Larga", "Otro"), condition=_for_product_types(*upper)),
+        field_def("cuello_escote", "Cuello / escote", type="select", section="prenda", order=12, options=("Redondo", "V", "Camisa", "Cuello alto", "Sin cuello", "Otro"), condition=_for_product_types(*upper)),
+        field_def("longitud_pie_cm", "Longitud del pie", type="decimal", unit="cm", section="medidas", order=13, min=Decimal("0.01"), condition=_for_product_types(*_BABIES_FOOTWEAR_TYPES)),
+        field_def("ancho_horma", "Ancho de horma", type="select", section="calzado", order=14, options=("Estrecha", "Regular", "Ancha", "Otro"), condition=_for_product_types(*_BABIES_FOOTWEAR_TYPES)),
+        field_def("material_exterior", "Material exterior", type="select", section="materiales", order=15, options=("Cuero", "Cuero sintético", "Textil", "Malla", "Gamuza", "Caucho", "Otro"), condition=_for_product_types(*_BABIES_FOOTWEAR_TYPES)),
+        field_def("material_suela", "Material de la suela", type="select", section="materiales", order=16, options=("Caucho", "EVA", "TPU", "PU", "Cuero", "Otro"), condition=_for_product_types(*_BABIES_FOOTWEAR_TYPES)),
+        field_def("tipo_cierre", "Tipo de cierre", type="select", section="calzado", order=17, options=("Cordones", "Velcro", "Elástico", "Hebilla", "Slip-on", "Cremallera", "Otro"), condition=_for_product_types(*_BABIES_FOOTWEAR_TYPES)),
+    )
+
+
+_BABIES_HYGIENE_TYPES = ("Pañal desechable", "Pañal para natación", "Pañal reutilizable", "Toallitas húmedas", "Crema para pañal", "Shampoo / Gel para bebé", "Aceite / Loción para bebé", "Bañera", "Esponja de baño", "Termómetro de baño", "Cepillo / Peine para bebé", "Cortaúñas / Kit de cuidado", "Aspirador nasal", "Cambiador", "Orinal / Entrenador", "Otro")
+_BABIES_DIAPER_TYPES = _BABIES_HYGIENE_TYPES[:3]
+_BABIES_LIQUID_CARE_TYPES = ("Shampoo / Gel para bebé", "Aceite / Loción para bebé")
+_BABIES_PHYSICAL_CARE_TYPES = ("Bañera", "Esponja de baño", "Termómetro de baño", "Cepillo / Peine para bebé", "Cortaúñas / Kit de cuidado", "Aspirador nasal", "Cambiador", "Orinal / Entrenador", "Otro")
+
+
+def _babies_hygiene_care() -> tuple[ProductTemplateField, ...]:
+    formulation = (*_BABIES_LIQUID_CARE_TYPES, "Crema para pañal")
+    quantity = (*_BABIES_DIAPER_TYPES, "Toallitas húmedas", "Cortaúñas / Kit de cuidado")
+    measured = ("Bañera", "Cambiador")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BABIES_HYGIENE_TYPES),
+        field_def("edad_minima_meses", "Edad mínima", type="integer", unit="meses", section="uso", order=2, min=0, max=240),
+        field_def("edad_maxima_meses", "Edad máxima", type="integer", unit="meses", section="uso", order=3, min=0, max=240),
+        field_def("talla_panal", "Talla", type="variant_attribute", section="tallas", order=4, quick_options=("RN", "P", "M", "G", "XG", "XXG"), condition=_for_product_types(*_BABIES_DIAPER_TYPES)),
+        field_def("peso_min_kg", "Peso mínimo", type="decimal", unit="kg", section="medidas", order=5, min=Decimal("0"), condition=_for_product_types(*_BABIES_DIAPER_TYPES)),
+        field_def("peso_max_kg", "Peso máximo", type="decimal", unit="kg", section="medidas", order=6, min=Decimal("0"), condition=_for_product_types(*_BABIES_DIAPER_TYPES)),
+        field_def("cantidad_paquete", "Cantidad por paquete", type="integer", section="producto", order=7, min=1, condition=_for_product_types(*quantity)),
+        field_def("tipo_cierre", "Tipo de cierre", type="select", section="producto", order=8, options=("Cintas adhesivas", "Pants / Pull-up", "Broches", "Velcro", "Otro"), condition=_for_product_types(*_BABIES_DIAPER_TYPES)),
+        field_def("volumen_ml", "Volumen", type="decimal", unit="ml", section="medidas", order=9, min=Decimal("0.01"), condition=_for_product_types(*_BABIES_LIQUID_CARE_TYPES)),
+        field_def("peso_g", "Peso", type="decimal", unit="g", section="medidas", order=10, min=Decimal("0.01"), condition=_for_product_types("Crema para pañal")),
+        field_def("aroma", "Aroma", section="producto", order=11, condition=_for_product_types("Toallitas húmedas", *formulation)),
+        field_def("ingredientes", "Ingredientes", type="textarea", section="materiales", order=12, condition=_for_product_types(*formulation)),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=13, options=("Plástico", "Silicona", "Tela", "Esponja", "Metal", "Mixto", "Otro"), condition=_for_product_types(*_BABIES_PHYSICAL_CARE_TYPES)),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=14, min=1, condition=_for_product_types("Cortaúñas / Kit de cuidado", "Cepillo / Peine para bebé")),
+        field_def("lavable", "Lavable", type="boolean", section="cuidados", order=15, condition=_for_product_types("Bañera", "Esponja de baño", "Cambiador", "Orinal / Entrenador")),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=16, min=Decimal("0.01"), condition=_for_product_types(*measured)),
+        field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=17, min=Decimal("0.01"), condition=_for_product_types(*measured)),
+        field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=18, min=Decimal("0.01"), condition=_for_product_types(*measured)),
+    )
+
+
+_BABIES_FEEDING_TYPES = ("Biberón / Botella", "Tetina", "Vaso entrenador", "Extractor de leche", "Bolsa / Recipiente para leche", "Esterilizador", "Calentador de biberón", "Plato / Bowl", "Cubiertos infantiles", "Babero", "Cepillo para biberón", "Dispensador / Contenedor", "Silla alta / Booster", "Otro accesorio de alimentación")
+_BABIES_FEEDING_COLOR_TYPES = ("Biberón / Botella", "Vaso entrenador", "Plato / Bowl", "Babero")
+
+
+def _babies_feeding() -> tuple[ProductTemplateField, ...]:
+    containers = ("Biberón / Botella", "Vaso entrenador")
+    packs = ("Biberón / Botella", "Tetina", "Bolsa / Recipiente para leche", "Plato / Bowl", "Cubiertos infantiles", "Babero", "Cepillo para biberón")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BABIES_FEEDING_TYPES),
+        field_def("edad_minima_meses", "Edad mínima", type="integer", unit="meses", section="uso", order=2, min=0, max=240),
+        field_def("edad_maxima_meses", "Edad máxima", type="integer", unit="meses", section="uso", order=3, min=0, max=240),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=4, options=("Plástico", "Silicona", "Vidrio", "Acero inoxidable", "Bambú", "Tela", "Mixto", "Otro")),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=5),
+        field_def("cantidad_paquete", "Cantidad por paquete", type="integer", section="producto", order=6, min=1, condition=_for_product_types(*packs)),
+        field_def("capacidad_ml", "Capacidad", type="decimal", unit="ml", section="medidas", order=7, min=Decimal("0.01"), condition=_for_product_types(*containers)),
+        field_def("tipo_boquilla", "Tipo de boquilla", type="select", section="producto", order=8, options=("Tetina", "Boquilla blanda", "Boquilla rígida", "Sorbete / Pajilla", "360°", "Otro"), condition=_for_product_types(*containers)),
+        field_def("anti_colico", "Anticólico", type="boolean", section="producto", order=9, condition=_for_product_types("Biberón / Botella")),
+        field_def("apto_lavavajillas", "Apto para lavavajillas", type="boolean", section="cuidados", order=10, condition=_for_product_types(*containers)),
+        field_def("apto_microondas", "Apto para microondas", type="boolean", section="cuidados", order=11, condition=_for_product_types(*containers)),
+        field_def("flujo_tetina", "Flujo", type="variant_attribute", section="producto", order=12, quick_options=("Lento", "Medio", "Rápido", "Variable", "Otro"), condition=_for_product_types("Tetina")),
+        field_def("material_tetina", "Material de la tetina", type="select", section="materiales", order=13, options=("Silicona", "Látex", "Otro"), condition=_for_product_types("Tetina")),
+        field_def("tipo_extractor", "Tipo de extractor", type="select", section="producto", order=14, options=("Manual", "Eléctrico simple", "Eléctrico doble"), condition=_for_product_types("Extractor de leche")),
+        field_def("fuente_energia", "Fuente de energía", type="select", section="energia", order=15, options=("Manual", "Batería recargable", "Red eléctrica"), condition=_for_product_types("Extractor de leche")),
+        field_def("niveles_succion", "Niveles de succión", type="integer", section="producto", order=16, min=1, condition=_for_product_types("Extractor de leche")),
+        field_def("voltaje_v", "Voltaje de entrada", type="decimal", unit="V", section="energia", order=17, min=Decimal("0.01"), condition={"field": "fuente_energia", "values": ["Batería recargable", "Red eléctrica"]}),
+        field_def("peso_max_kg", "Peso máximo", type="decimal", unit="kg", section="medidas", order=18, min=Decimal("0.01"), condition=_for_product_types("Silla alta / Booster")),
+        field_def("plegable", "Plegable", type="boolean", section="producto", order=19, condition=_for_product_types("Silla alta / Booster")),
+        field_def("bandeja_removible", "Bandeja removible", type="boolean", section="producto", order=20, condition=_for_product_types("Silla alta / Booster")),
+        field_def("arnes_puntos", "Arnés", type="select", section="seguridad", order=21, options=("3 puntos", "5 puntos", "Otro"), condition=_for_product_types("Silla alta / Booster")),
+        field_def("ajustable", "Ajustable", type="boolean", section="producto", order=22, condition=_for_product_types("Silla alta / Booster")),
+    )
+
+
+_BABIES_TRAVEL_TYPES = ("Coche / Stroller", "Silla para auto", "Portabebé / Mochila", "Cuna de viaje", "Corral / Playard", "Barrera de seguridad", "Cubierta de lluvia / Mosquitero", "Espejo para auto", "Protector de asiento", "Otro")
+
+
+def _babies_travel_safety() -> tuple[ProductTemplateField, ...]:
+    weighted = ("Coche / Stroller", "Silla para auto", "Portabebé / Mochila", "Cuna de viaje", "Corral / Playard")
+    foldable = ("Coche / Stroller", "Cuna de viaje", "Corral / Playard")
+    crib = ("Cuna de viaje", "Corral / Playard")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_BABIES_TRAVEL_TYPES),
+        field_def("edad_minima_meses", "Edad mínima", type="integer", unit="meses", section="uso", order=2, min=0, max=240), field_def("edad_maxima_meses", "Edad máxima", type="integer", unit="meses", section="uso", order=3, min=0, max=240),
+        field_def("peso_min_kg", "Peso mínimo", type="decimal", unit="kg", section="medidas", order=4, min=Decimal("0"), condition=_for_product_types(*weighted)), field_def("peso_max_kg", "Peso máximo", type="decimal", unit="kg", section="medidas", order=5, min=Decimal("0"), condition=_for_product_types(*weighted)),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=6), field_def("material_principal", "Material principal", type="select", section="materiales", order=7, options=("Aluminio", "Acero", "Plástico", "Tela", "Malla", "Mixto", "Otro")), field_def("peso_producto_kg", "Peso del producto", type="decimal", unit="kg", section="medidas", order=8, min=Decimal("0.01")), field_def("plegable", "Plegable", type="boolean", section="producto", order=9, condition=_for_product_types(*foldable)),
+        field_def("numero_ruedas", "Número de ruedas", type="integer", section="tecnica", order=10, min=3, condition=_for_product_types("Coche / Stroller")), field_def("posiciones_reclinado", "Posiciones de reclinado", type="integer", section="tecnica", order=11, min=1, condition=_for_product_types("Coche / Stroller")), field_def("asiento_reversible", "Asiento reversible", type="boolean", section="producto", order=12, condition=_for_product_types("Coche / Stroller")), field_def("arnes_puntos", "Arnés", type="select", section="seguridad", order=13, options=("3 puntos", "5 puntos", "Otro"), condition=_for_product_types("Coche / Stroller", "Silla para auto")), field_def("freno", "Freno", type="boolean", section="seguridad", order=14, condition=_for_product_types("Coche / Stroller")),
+        field_def("largo_plegado_cm", "Largo plegado", type="decimal", unit="cm", section="medidas", order=15, min=Decimal("0.01"), condition=_for_product_types("Coche / Stroller")), field_def("ancho_plegado_cm", "Ancho plegado", type="decimal", unit="cm", section="medidas", order=16, min=Decimal("0.01"), condition=_for_product_types("Coche / Stroller")), field_def("alto_plegado_cm", "Alto plegado", type="decimal", unit="cm", section="medidas", order=17, min=Decimal("0.01"), condition=_for_product_types("Coche / Stroller")),
+        field_def("orientacion", "Orientación", type="select", section="seguridad", order=18, options=("Contramarcha", "A favor de la marcha", "Convertible"), condition=_for_product_types("Silla para auto")), field_def("tipo_instalacion", "Tipo de instalación", type="select", section="seguridad", order=19, options=("Cinturón del vehículo", "ISOFIX / LATCH", "Ambos"), condition=_for_product_types("Silla para auto")), field_def("altura_min_cm", "Altura mínima", type="decimal", unit="cm", section="medidas", order=20, min=Decimal("0"), condition=_for_product_types("Silla para auto")), field_def("altura_max_cm", "Altura máxima", type="decimal", unit="cm", section="medidas", order=21, min=Decimal("0"), condition=_for_product_types("Silla para auto")),
+        field_def("tipo_portabebe", "Tipo de portabebé", type="select", section="producto", order=22, options=("Mochila ergonómica", "Fular", "Mei Tai", "Hip seat", "Otro"), condition=_for_product_types("Portabebé / Mochila")), field_def("posiciones_transporte", "Posiciones de transporte", type="multiselect", section="uso", order=23, options=("Frontal hacia el adulto", "Frontal hacia afuera", "Espalda", "Cadera"), condition=_for_product_types("Portabebé / Mochila")), field_def("ajustable", "Ajustable", type="boolean", section="producto", order=24, condition=_for_product_types("Portabebé / Mochila")),
+        field_def("ancho_min_cm", "Ancho mínimo", type="decimal", unit="cm", section="medidas", order=25, min=Decimal("0.01"), condition=_for_product_types("Barrera de seguridad")), field_def("ancho_max_cm", "Ancho máximo", type="decimal", unit="cm", section="medidas", order=26, min=Decimal("0.01"), condition=_for_product_types("Barrera de seguridad")), field_def("tipo_montaje", "Tipo de montaje", type="select", section="seguridad", order=27, options=("Presión", "Tornillos", "Mixto", "Otro"), condition=_for_product_types("Barrera de seguridad")), field_def("altura_cm", "Altura", type="decimal", unit="cm", section="medidas", order=28, min=Decimal("0.01"), condition=_for_product_types("Barrera de seguridad")),
+        field_def("largo_cm", "Largo", type="decimal", unit="cm", section="medidas", order=29, min=Decimal("0.01"), condition=_for_product_types(*crib)), field_def("ancho_cm", "Ancho", type="decimal", unit="cm", section="medidas", order=30, min=Decimal("0.01"), condition=_for_product_types(*crib)), field_def("alto_cm", "Alto", type="decimal", unit="cm", section="medidas", order=31, min=Decimal("0.01"), condition=_for_product_types(*crib)),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProductTemplateCategoryBinding:
     template_key: str
@@ -2234,6 +2385,11 @@ _TEMPLATE_CATEGORY_BINDINGS = (
     ProductTemplateCategoryBinding("babies_toys", "BABIES_KIDS", "BABIES_TOYS"),
     ProductTemplateCategoryBinding("babies_clothing", "BABIES_KIDS", "BABIES_CLOTHING"),
     ProductTemplateCategoryBinding("babies_care", "BABIES_KIDS", "BABIES_CARE"),
+    ProductTemplateCategoryBinding("babies_toys_development", "BABIES_KIDS", "BABIES_TOYS_DEVELOPMENT"),
+    ProductTemplateCategoryBinding("babies_clothing_footwear", "BABIES_KIDS", "BABIES_CLOTHING_FOOTWEAR"),
+    ProductTemplateCategoryBinding("babies_hygiene_care", "BABIES_KIDS", "BABIES_HYGIENE_CARE"),
+    ProductTemplateCategoryBinding("babies_feeding", "BABIES_KIDS", "BABIES_FEEDING"),
+    ProductTemplateCategoryBinding("babies_travel_safety", "BABIES_KIDS", "BABIES_TRAVEL_SAFETY"),
 )
 
 
@@ -2288,6 +2444,11 @@ _TEMPLATE_FIELD_SETS = {
     "babies_toys": _babies_common(),
     "babies_clothing": _fashion_common(),
     "babies_care": _babies_common(),
+    "babies_toys_development": _babies_toys_development(),
+    "babies_clothing_footwear": _babies_clothing_footwear(),
+    "babies_hygiene_care": _babies_hygiene_care(),
+    "babies_feeding": _babies_feeding(),
+    "babies_travel_safety": _babies_travel_safety(),
 }
 
 
@@ -2565,6 +2726,27 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
             is_visual=True, is_listing_axis=True,
         ),
         axis_def("talla", "Talla"),
+    ),
+    "babies_toys_development": (
+        axis_def("color_principal", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+    ),
+    "babies_clothing_footwear": (
+        axis_def("color_principal", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+        axis_def("talla", "Talla", source_field="talla", is_listing_axis=True),
+    ),
+    "babies_hygiene_care": (
+        axis_def("talla_panal", "Talla", source_field="talla_panal", is_listing_axis=True, condition={"field": "tipo_producto", "values": list(_BABIES_DIAPER_TYPES)}),
+        axis_def("cantidad_paquete", "Cantidad por paquete", source_field="cantidad_paquete", value_type="integer", is_listing_axis=True, condition={"field": "tipo_producto", "values": [*_BABIES_DIAPER_TYPES, "Toallitas húmedas"]}),
+        axis_def("volumen_ml", "Volumen", source_field="volumen_ml", unit="ml", value_type="decimal", is_listing_axis=True, condition={"field": "tipo_producto", "values": list(_BABIES_LIQUID_CARE_TYPES)}),
+        axis_def("peso_g", "Peso", source_field="peso_g", unit="g", value_type="decimal", is_listing_axis=True, condition={"field": "tipo_producto", "values": ["Crema para pañal"]}),
+    ),
+    "babies_feeding": (
+        axis_def("capacidad_ml", "Capacidad", source_field="capacidad_ml", unit="ml", value_type="decimal", is_listing_axis=True, condition={"field": "tipo_producto", "values": ["Biberón / Botella", "Vaso entrenador"]}),
+        axis_def("flujo_tetina", "Flujo", source_field="flujo_tetina", is_listing_axis=True, condition={"field": "tipo_producto", "values": ["Tetina"]}),
+        axis_def("color_principal", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True, condition={"field": "tipo_producto", "values": list(_BABIES_FEEDING_COLOR_TYPES)}),
+    ),
+    "babies_travel_safety": (
+        axis_def("color_principal", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
     ),
 }
 

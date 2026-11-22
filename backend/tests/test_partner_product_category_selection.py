@@ -434,6 +434,11 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "AUTOMOTIVE_TIRES_WHEELS",
         "AUTOMOTIVE_BATTERIES",
         "BABIES_KIDS",
+        "BABIES_TOYS_DEVELOPMENT",
+        "BABIES_CLOTHING_FOOTWEAR",
+        "BABIES_HYGIENE_CARE",
+        "BABIES_FEEDING",
+        "BABIES_TRAVEL_SAFETY",
     }
     rows = session.scalars(select(Category).where(Category.code.in_(managed_codes))).all()
     assert {row.code for row in rows} == managed_codes
@@ -537,6 +542,18 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
         "AUTOMOTIVE_ELECTRONICS_AUDIO",
         "AUTOMOTIVE_TIRES_WHEELS",
         "AUTOMOTIVE_BATTERIES",
+    )
+    babies_view = next(
+        category for category in list_main_categories(session)
+        if category.code == "BABIES_KIDS"
+    )
+    assert tuple(item.name for item in babies_view.subcategories) == (
+        "Juguetes y desarrollo", "Ropa y calzado", "Higiene y cuidado",
+        "Alimentación y lactancia", "Paseo y seguridad",
+    )
+    assert tuple(item.code for item in babies_view.subcategories) == (
+        "BABIES_TOYS_DEVELOPMENT", "BABIES_CLOTHING_FOOTWEAR",
+        "BABIES_HYGIENE_CARE", "BABIES_FEEDING", "BABIES_TRAVEL_SAFETY",
     )
 
     fashion = session.scalar(select(Category).where(Category.code == "FASHION"))
@@ -668,6 +685,26 @@ def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
     )
     assert historical_automotive_page.status_code == 200
     assert "Cobertor" in historical_automotive_page.get_data(as_text=True)
+
+    babies = session.scalar(select(Category).where(Category.code == "BABIES_KIDS"))
+    legacy_toys = session.scalar(select(Category).where(Category.code == "BABIES_TOYS"))
+    crafted_babies = client.post(
+        "/partners/products/drafts",
+        data={"category_id": str(babies.id), "subcategory_id": str(legacy_toys.id)},
+    )
+    assert crafted_babies.status_code == 400
+    assert "no está disponible para publicaciones nuevas" in crafted_babies.get_data(as_text=True)
+    assert session.scalar(select(func.count()).select_from(ProductDraft)) == 4
+    historical_babies = ProductDraft(
+        store_id=store.id, created_by_user_id=user.id, category_id=babies.id,
+        subcategory_id=legacy_toys.id, template_key="babies_toys",
+        attributes={"tipo": "Sonajero", "lavable": True},
+    )
+    session.add(historical_babies)
+    session.commit()
+    historical_babies_page = client.get(f"/partners/products/drafts/{historical_babies.id}")
+    assert historical_babies_page.status_code == 200
+    assert "Sonajero" in historical_babies_page.get_data(as_text=True)
 
     category_count = session.scalar(select(func.count()).select_from(Category))
     third = runner.invoke(args=["seed-product-categories"])

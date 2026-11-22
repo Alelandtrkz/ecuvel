@@ -104,6 +104,11 @@ CURRENT_CATEGORY_TEMPLATE_BINDINGS = {
     "BABIES_TOYS": ("BABIES_KIDS", "babies_toys"),
     "BABIES_CLOTHING": ("BABIES_KIDS", "babies_clothing"),
     "BABIES_CARE": ("BABIES_KIDS", "babies_care"),
+    "BABIES_TOYS_DEVELOPMENT": ("BABIES_KIDS", "babies_toys_development"),
+    "BABIES_CLOTHING_FOOTWEAR": ("BABIES_KIDS", "babies_clothing_footwear"),
+    "BABIES_HYGIENE_CARE": ("BABIES_KIDS", "babies_hygiene_care"),
+    "BABIES_FEEDING": ("BABIES_KIDS", "babies_feeding"),
+    "BABIES_TRAVEL_SAFETY": ("BABIES_KIDS", "babies_travel_safety"),
 }
 
 @pytest.fixture
@@ -365,7 +370,7 @@ def test_template_registry_covers_seeded_subcategories():
 
 
 def test_exact_category_template_bindings_and_metadata_are_preserved():
-    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 44
+    assert len(CURRENT_CATEGORY_TEMPLATE_BINDINGS) == 49
     for leaf_code, binding in CURRENT_CATEGORY_TEMPLATE_BINDINGS.items():
         main_code, template_key = binding
         template = PRODUCT_TEMPLATES[template_key]
@@ -404,8 +409,8 @@ def test_template_registry_validation_rejects_binding_drift(monkeypatch):
     )
     with pytest.raises(ProductTemplateValidationError) as exc_info:
         validate_template_registry()
-    assert "binding.44.ELECTRONICS_PHONES" in exc_info.value.errors
-    assert "binding.44.missing_template" in exc_info.value.errors
+    assert "binding.49.ELECTRONICS_PHONES" in exc_info.value.errors
+    assert "binding.49.missing_template" in exc_info.value.errors
 
 
 def test_template_registry_validation_rejects_missing_and_inconsistent_metadata(

@@ -103,6 +103,7 @@ def test_legacy_beauty_contracts_documents_rates_and_exclusion_are_preserved():
         "HOME_DECORATION", "HOME_KITCHEN_TOOLS", "HOME_CLEANING",
         *LEGACY_BEAUTY,
         "AUTOMOTIVE_ACCESSORIES", "AUTOMOTIVE_TOOLS", "AUTOMOTIVE_BASIC_PARTS",
+        "BABIES_TOYS", "BABIES_CLOTHING", "BABIES_CARE",
     }
     assert LEGACY_NEW_LISTING_CATEGORY_CODES == frozenset(expected_legacy_codes)
     expected_fields = {"color_principal", "material", "tipo", "presentacion", "contenido_neto", "unidad", "ingredientes", "registro_sanitario"}
