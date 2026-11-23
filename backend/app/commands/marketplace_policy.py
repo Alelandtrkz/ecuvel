@@ -18,9 +18,24 @@ from app.services.product_publication import (
 )
 
 
+# Proposed PP1.8A rates, pending owner acceptance. Adult categories remain inactive;
+# these rules do not authorize publication or public sales before PP1.8B.
+PROPOSED_ADULT_CATEGORY_RATES = {
+    "ADULT_CONDOMS": Decimal("10.00"),
+    "ADULT_LUBRICANTS": Decimal("10.00"),
+    "ADULT_TOYS": Decimal("12.00"),
+    "ADULT_ANAL": Decimal("12.00"),
+    "ADULT_BDSM": Decimal("12.00"),
+    "ADULT_LINGERIE": Decimal("12.00"),
+    "ADULT_INTIMATE_CARE": Decimal("10.00"),
+    "ADULT_GAMES": Decimal("10.00"),
+}
+
+
 # Only codes that exist in the beta taxonomy are included. More-specific matrix
 # entries must wait until those leaf categories exist; names are never matched.
 INITIAL_CATEGORY_RATES = {
+    **PROPOSED_ADULT_CATEGORY_RATES,
     "ELECTRONICS_PHONES": Decimal("6.00"),
     "ELECTRONICS_COMPUTERS": Decimal("6.00"),
     "ELECTRONICS_HEADPHONES": Decimal("9.00"),

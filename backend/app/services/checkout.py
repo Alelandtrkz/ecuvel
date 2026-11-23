@@ -33,6 +33,7 @@ from app.models.enums import (
     UserStatus,
 )
 from app.services.age_eligibility import is_at_least_18
+from app.services.adult_access_policy import adult_public_product_clause
 from app.services.cart import get_cart_state
 from app.services.inventory import (
     InventoryServiceError,
@@ -238,6 +239,7 @@ def _load_rows(
     selected: dict[uuid.UUID, int],
     *,
     lock_offers: bool,
+    user=None,
 ) -> list[_CheckoutRow]:
     offer_ids = set(selected)
     statement = (
@@ -247,6 +249,7 @@ def _load_rows(
         .join(Category, Category.id == Product.category_id)
         .join(Store, Store.id == SellerOffer.store_id)
         .where(SellerOffer.id.in_(offer_ids))
+        .where(adult_public_product_clause(user=user))
         .order_by(SellerOffer.id)
     )
     if lock_offers:
@@ -531,7 +534,7 @@ def create_checkout_order(
             "Para comprar en ECUVEL debes tener al menos 18 años."
         )
 
-    rows = _load_rows(session, selected, lock_offers=True)
+    rows = _load_rows(session, selected, lock_offers=True, user=buyer)
     preview = _preview_from_rows(selected, rows)
     if preview.issues:
         message = " ".join(issue.message for issue in preview.issues)

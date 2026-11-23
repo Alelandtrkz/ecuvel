@@ -36,6 +36,7 @@ from app.services.cart import (
     guest_cart_payload,
 )
 from app.services.inventory import get_sellable_quantities_for_offers
+from app.services.adult_access_policy import adult_public_product_clause, adult_category_expression
 
 
 CART_SESSION_KEY = "cart"
@@ -85,6 +86,7 @@ def _pending_guest_cart() -> tuple[dict[str, Any], str] | None:
 
 
 def _save_guest_cart_state(state: object) -> dict[str, Any]:
+    request.environ.pop("ecuvel.adult_filtered_guest_cart", None)
     raw_cart = flask_session.get(CART_SESSION_KEY)
     merge_token = get_guest_cart_merge_token(raw_cart)
     if merge_token is None:
@@ -111,7 +113,12 @@ def _user_cart_state(
             CartItem.selected,
         )
         .join(Cart, Cart.id == CartItem.cart_id)
+        .join(SellerOffer, SellerOffer.id == CartItem.seller_offer_id)
+        .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
+        .join(Product, Product.id == ProductVariant.product_id)
+        .join(Category, Category.id == Product.category_id)
         .where(Cart.user_id == user_id)
+        .where(adult_public_product_clause())
         .order_by(CartItem.created_at, CartItem.id)
     ).all()
     return {
@@ -136,7 +143,21 @@ def load_cart_state_for_user(
 def load_cart_state_for_identity() -> dict[str, Any]:
     if current_user.is_authenticated:
         return _user_cart_state(db.session, current_user.id)
-    return get_cart_state(flask_session.get(CART_SESSION_KEY))
+    if "ecuvel.adult_filtered_guest_cart" in request.environ:
+        return get_cart_state(request.environ["ecuvel.adult_filtered_guest_cart"])
+    state = get_cart_state(flask_session.get(CART_SESSION_KEY))
+    if state["items"]:
+        denied = db.session.scalars(
+            select(SellerOffer.id)
+            .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
+            .join(Product, Product.id == ProductVariant.product_id)
+            .join(Category, Category.id == Product.category_id)
+            .where(SellerOffer.id.in_([uuid.UUID(key) for key in state["items"]]),
+                   adult_category_expression(), ~adult_public_product_clause())
+        ).all()
+        for offer_id in denied:
+            state["items"].pop(str(offer_id), None)
+    return state
 
 
 def _lock_or_create_cart(database_session: Session, user_id: uuid.UUID) -> Cart:
@@ -301,6 +322,7 @@ def _rehydrate_state_for_persistence(
         .join(Category, Category.id == Product.category_id)
         .join(Store, Store.id == SellerOffer.store_id)
         .where(SellerOffer.id.in_(offer_ids))
+        .where(adult_public_product_clause())
     ).all()
     rows_by_offer_id = {row.offer_id: row for row in rows}
     availability = get_sellable_quantities_for_offers(
@@ -404,13 +426,14 @@ def adopt_guest_cart_for_authenticated_user() -> bool:
 
 def cart_count_for_identity() -> int:
     if not current_user.is_authenticated:
-        return get_cart_item_count(flask_session.get(CART_SESSION_KEY))
-    return int(
-        db.session.scalar(
-            select(func.coalesce(func.sum(CartItem.quantity), 0))
-            .select_from(CartItem)
-            .join(Cart, Cart.id == CartItem.cart_id)
-            .where(Cart.user_id == current_user.id)
-        )
-        or 0
-    )
+        return get_cart_item_count(load_cart_state_for_identity())
+    return int(db.session.scalar(
+        select(func.coalesce(func.sum(CartItem.quantity), 0))
+        .select_from(CartItem)
+        .join(Cart, Cart.id == CartItem.cart_id)
+        .join(SellerOffer, SellerOffer.id == CartItem.seller_offer_id)
+        .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
+        .join(Product, Product.id == ProductVariant.product_id)
+        .join(Category, Category.id == Product.category_id)
+        .where(Cart.user_id == current_user.id, adult_public_product_clause())
+    ) or 0)

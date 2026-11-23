@@ -90,6 +90,9 @@ from app.services.customer_orders import (
 )
 from app.services.safe_redirects import safe_local_redirect
 from app.services.catalog_listings import load_public_listings
+from app.services.adult_access_policy import (
+    adult_public_category_clause, adult_public_product_clause, adult_product_visible,
+)
 from app.services.catalog_ranking import (
     LIVE_RANKER_VERSION,
     SHADOW_RANKER_VERSION,
@@ -570,10 +573,22 @@ def cart_header_context() -> dict[str, int]:
     }
 
 
+@storefront.after_request
+def adult_response_privacy(response):
+    if request.environ.get("ecuvel.adult_sensitive_response", False):
+        response.headers["Cache-Control"] = "private, no-store"
+        response.headers.pop("Expires", None)
+        response.vary.add("Cookie")
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    return response
+
+
 def _load_categories():
     return db.session.execute(
         select(Category.name, Category.slug)
         .where(Category.is_active.is_(True))
+        .where(adult_public_category_clause())
         .order_by(Category.sort_order, Category.name)
     ).all()
 
@@ -583,8 +598,9 @@ def _load_nav_categories():
     return db.session.scalars(
         select(Category)
         .where(Category.parent_id.is_(None), Category.is_active.is_(True))
+        .where(adult_public_category_clause())
         .order_by(Category.sort_order, Category.name)
-        .options(selectinload(Category.children))
+        .options(selectinload(Category.children.and_(adult_public_category_clause())))
     ).all()
 
 
@@ -1278,6 +1294,7 @@ def _cart_offer_rows(offer_ids: set[uuid.UUID]):
         .join(Category, Category.id == Product.category_id)
         .join(Store, Store.id == SellerOffer.store_id)
         .where(SellerOffer.id.in_(offer_ids))
+        .where(adult_public_product_clause())
     ).all()
 
 
@@ -1295,7 +1312,10 @@ def _rehydrate_cart() -> tuple[
         if not current_user.is_authenticated
         else None
     )
-    state = load_cart_state_for_identity()
+    # The batched offer query below applies the policy. Avoid a duplicate guest
+    # lookup; only its filtered result is used by this request's header.
+    state = (load_cart_state_for_identity() if current_user.is_authenticated
+             else get_cart_state(raw_guest_state))
     original_state = get_cart_state(state)
     item_states = state["items"]
     offer_ids = {uuid.UUID(offer_id) for offer_id in item_states}
@@ -1416,6 +1436,8 @@ def _rehydrate_cart() -> tuple[
         and raw_guest_state != state
     ):
         _save_cart_state(state)
+    if not current_user.is_authenticated:
+        request.environ["ecuvel.adult_filtered_guest_cart"] = get_cart_state(state)
 
     eligible_selected = [
         line for line in lines if line.available and line.selected
@@ -2870,6 +2892,8 @@ def product_review_image(public_id: str):
     if image is None:
         abort(404)
     review = image.review
+    if not adult_product_visible(db.session, review.product_id):
+        abort(404)
     is_current = image.revision_id == review.current_revision_id
     is_published = review.status == ProductReviewStatus.PUBLISHED and is_current
     is_owner = current_user.is_authenticated and review.user_id == current_user.id
@@ -3420,10 +3444,12 @@ def store_products_summary(store_slug: str) -> str:
 def product_detail(product_slug: str) -> str:
     product_record = db.session.scalar(
         select(Product)
+        .join(Category, Category.id == Product.category_id)
         .options(selectinload(Product.media))
         .where(
             Product.slug == product_slug,
             Product.is_active.is_(True),
+            adult_public_product_clause(),
         )
     )
     if product_record is None:
@@ -3618,11 +3644,13 @@ def product_media(product_slug: str, public_id: str):
     media = db.session.scalar(
         select(ProductMedia)
         .join(Product, Product.id == ProductMedia.product_id)
+        .join(Category, Category.id == Product.category_id)
         .where(
             Product.slug == product_slug,
             Product.is_active.is_(True),
             ProductMedia.public_id == public_id,
             ProductMedia.is_active.is_(True),
+            adult_public_product_clause(),
         )
     )
     if media is None:
@@ -3655,11 +3683,13 @@ def product_media_thumbnail(product_slug: str, public_id: str):
     media = db.session.scalar(
         select(ProductMedia)
         .join(Product, Product.id == ProductMedia.product_id)
+        .join(Category, Category.id == Product.category_id)
         .where(
             Product.slug == product_slug,
             Product.is_active.is_(True),
             ProductMedia.public_id == public_id,
             ProductMedia.is_active.is_(True),
+            adult_public_product_clause(),
         )
     )
     if media is None or not has_complete_product_thumbnail(media):

@@ -345,6 +345,9 @@ def publish_product_draft(
         raise ProductModerationValidationError("La tienda debe estar activa y verificada.")
     if category is None or not category.is_active or not draft.category.is_active:
         raise ProductModerationValidationError("La categoría seleccionada no está activa.")
+    from app.services.adult_access_policy import adult_partner_enabled, is_adult_category
+    if is_adult_category(category) and not adult_partner_enabled():
+        raise ProductModerationValidationError("La publicación de esta categoría no está habilitada.")
 
     try:
         inventory_location = ensure_store_inventory_location(session, store=store)

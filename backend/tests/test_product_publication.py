@@ -138,10 +138,10 @@ def test_commission_bootstrap_is_reproducible_and_idempotent(app, session):
     assert seeded.exit_code == 0, seeded.output
     first = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert first.exit_code == 0, first.output
-    assert "Reglas creadas: 49; actualizadas: 0." in first.output
+    assert "Reglas creadas: 57; actualizadas: 0." in first.output
     second = runner.invoke(args=["marketplace-policy", "bootstrap"])
     assert second.exit_code == 0, second.output
-    assert "Reglas creadas: 0; actualizadas: 49." in second.output
+    assert "Reglas creadas: 0; actualizadas: 57." in second.output
 
     session.expire_all()
     rules = session.scalars(

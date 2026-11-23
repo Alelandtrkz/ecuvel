@@ -42,6 +42,20 @@ def _rejected_review(session):
     return session.get(ProductReview, created.review_id)
 
 
+def test_adult_review_notification_keeps_sensitive_details_inside_account(session, monkeypatch):
+    review = _rejected_review(session)
+    review.product.category.code = "ADULT_TOYS"
+    session.flush()
+    sent = []
+    monkeypatch.setattr("app.services.review_notifications.mail_service.send", sent.append)
+    result = dispatch_review_notifications(session)
+    assert result["sent"] == 1
+    assert review.product.title not in sent[0].text_body
+    assert review.public_rejection_reason not in sent[0].text_body
+    assert review.product.title not in sent[0].html_body
+    assert "Revisa los detalles en tu cuenta" in sent[0].text_body
+
+
 def test_rejection_creates_one_durable_outbox_event(session):
     review = _rejected_review(session)
 

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.catalog.product_templates import template_key_for_category_code
+from app.services.adult_access_policy import adult_partner_category_clause, adult_partner_enabled, is_adult_category
 from app.models import Category, Store, StoreContractAcceptance, StoreMember, StoreOnboarding
 from app.models.enums import (
     StoreContractAcceptanceStatus,
@@ -110,6 +111,7 @@ _CATEGORY_ICONS = {
     "BEAUTY_HEALTH": "flower-2",
     "AUTOMOTIVE": "car",
     "BABIES_KIDS": "baby",
+    "ADULT": "lock-keyhole",
 }
 
 
@@ -176,6 +178,7 @@ def list_main_categories(session: Session) -> tuple[PartnerMainCategoryView, ...
         select(Category)
         .options(selectinload(Category.children))
         .where(Category.parent_id.is_(None), Category.is_active.is_(True))
+        .where(adult_partner_category_clause())
         .order_by(Category.sort_order, Category.name, Category.id)
     ).all()
     return tuple(_category_view(category) for category in rows)
@@ -209,6 +212,8 @@ def validate_category_selection(
         errors["subcategory_id"] = "La subcategoría seleccionada no pertenece a la categoría."
     elif subcategory.code in LEGACY_NEW_LISTING_CATEGORY_CODES:
         errors["subcategory_id"] = "La subcategoría ya no está disponible para publicaciones nuevas."
+    if (is_adult_category(category) or is_adult_category(subcategory)) and not adult_partner_enabled():
+        errors["subcategory_id"] = "La categoría ya no está disponible."
     if errors:
         raise PartnerProductCategoryValidationError("Revisa la selección.", errors)
     template_key = resolve_template_key(subcategory)
@@ -262,6 +267,7 @@ def _category_view(category: Category) -> PartnerMainCategoryView:
             child for child in category.children
             if child.is_active
             and child.code not in LEGACY_NEW_LISTING_CATEGORY_CODES
+            and (adult_partner_enabled() or not is_adult_category(child))
             and template_key_for_category_code(child.code) is not None
         ),
         key=lambda child: (child.sort_order, child.name, str(child.id)),

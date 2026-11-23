@@ -59,11 +59,13 @@ def dispatch_review_notifications(
                 order_number=event.review.order.order_number,
                 order_item_id=event.review.order_item_id,
             )
+            from app.services.adult_access_policy import product_is_adult
+            sensitive = product_is_adult(session, event.review.product_id)
             mail_service.send(review_rejected_mail(
                 to=event.user.email,
                 action_url=action_url,
-                product_title=event.review.product.title,
-                public_reason=event.review.public_rejection_reason,
+                product_title=("Tu producto" if sensitive else event.review.product.title),
+                public_reason=("Revisa los detalles en tu cuenta de ECUVEL." if sensitive else event.review.public_rejection_reason),
             ))
         except Exception as exc:  # El correo nunca revierte la moderación.
             event.attempts += 1

@@ -386,6 +386,28 @@ def test_cancel_keeps_product_tables_empty(client, session):
     assert session.scalar(select(func.count()).select_from(SellerOffer)) == 0
 
 
+def test_staged_adult_categories_are_hidden_and_crafted_new_drafts_rejected(app, session, client):
+    seeded = app.test_cli_runner().invoke(args=["seed-product-categories"])
+    assert seeded.exit_code == 0, seeded.output
+    user = _user(session)
+    _enabled_store(session, user)
+    session.commit()
+    _login(client, user)
+    assert "ADULT" not in {category.code for category in list_main_categories(session)}
+    selector = client.get("/partners/products/new/category")
+    assert selector.status_code == 200
+    assert "Productos para adultos" not in selector.get_data(as_text=True)
+    parent = session.scalar(select(Category).where(Category.code == "ADULT"))
+    leaves = session.scalars(select(Category).where(Category.parent_id == parent.id)).all()
+    assert len(leaves) == 8
+    for leaf in leaves:
+        response = client.post("/partners/products/drafts", data={
+            "category_id": str(parent.id), "subcategory_id": str(leaf.id),
+        })
+        assert response.status_code == 400
+    assert session.scalar(select(func.count()).select_from(ProductDraft)) == 0
+
+
 def test_seed_product_categories_is_idempotent_and_exposes_canonical_leaves(
     app,
     session,

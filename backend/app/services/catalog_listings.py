@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models import Category, Product, ProductVariant, SellerOffer, Store
 from app.models.enums import OfferStatus, StoreStatus
 from app.services.inventory import get_sellable_quantities_for_offers
+from app.services.adult_access_policy import adult_public_product_clause
 
 
 LISTING_IDENTITY_VERSION = 1
@@ -208,6 +209,7 @@ def public_offer_candidates_statement(
             ProductVariant.is_active.is_(True),
             Product.is_active.is_(True),
             Category.is_active.is_(True),
+            adult_public_product_clause(),
             Store.status == StoreStatus.ACTIVE,
             Store.is_verified.is_(True),
         )

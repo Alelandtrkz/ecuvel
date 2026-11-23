@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import CatalogInteractionEvent
 from app.models.catalog_interaction import CATALOG_EVENT_SURFACES, CATALOG_EVENT_TYPES
+from app.services.adult_access_policy import product_is_adult
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,10 @@ def record_context_event(
         raise CatalogTelemetryError("Tipo de evento de catálogo no permitido.")
     if context.surface not in CATALOG_EVENT_SURFACES:
         raise CatalogTelemetryError("Superficie de catálogo no permitida.")
+    # Sensitive catalog activity is excluded from optional ranking telemetry,
+    # including previously issued signed contexts and server-side purchase events.
+    if product_is_adult(session, context.product_id):
+        return False
     event = CatalogInteractionEvent(
         id=uuid.uuid4(),
         event_type=event_type,

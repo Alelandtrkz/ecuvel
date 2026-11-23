@@ -2275,6 +2275,135 @@ def _babies_travel_safety() -> tuple[ProductTemplateField, ...]:
     )
 
 
+_ADULT_CONDOM_TYPES = ("Preservativo externo", "Preservativo interno", "Otro tipo de preservativo")
+_ADULT_LUBRICANT_TYPES = ("Lubricante base agua", "Lubricante base silicona", "Lubricante híbrido", "Otro lubricante íntimo")
+_ADULT_TOY_TYPES = (
+    "Vibrador", "Masajeador íntimo", "Estimulador", "Masturbador", "Consolador",
+    "Anillo vibrador", "Juguete para parejas", "Muñeca o figura adulta", "Otro",
+)
+_ADULT_POWERED_TOY_TYPES = ("Vibrador", "Masajeador íntimo", "Estimulador", "Masturbador", "Anillo vibrador", "Juguete para parejas")
+_ADULT_TOY_SIZE_TYPES = ("Consolador", "Anillo vibrador")
+_ADULT_ANAL_TYPES = ("Plug", "Dilatador", "Set de accesorios", "Estimulador", "Otro")
+_ADULT_ANAL_INDIVIDUAL_TYPES = ("Plug", "Dilatador", "Estimulador")
+_ADULT_BDSM_TYPES = ("Antifaz", "Esposas o sujeciones", "Kit de accesorios", "Accesorio decorativo", "Otros accesorios no peligrosos")
+_ADULT_BDSM_SIZE_TYPES = ("Antifaz", "Esposas o sujeciones", "Accesorio decorativo")
+_ADULT_LINGERIE_TYPES = ("Conjunto de lencería", "Body", "Babydoll", "Corsé", "Medias", "Disfraz para adultos", "Accesorio de vestuario", "Otro")
+_ADULT_CARE_TYPES = ("Limpiador íntimo", "Gel de higiene", "Limpiador de juguetes", "Accesorio de limpieza", "Bolsa o estuche", "Otro")
+_ADULT_CARE_FORMULATION_TYPES = ("Limpiador íntimo", "Gel de higiene", "Limpiador de juguetes")
+_ADULT_CARE_ACCESSORY_TYPES = ("Accesorio de limpieza", "Bolsa o estuche", "Otro")
+_ADULT_GAME_TYPES = ("Juego de cartas", "Juego de mesa", "Dados", "Kit de regalo", "Artículo recreativo", "Otro")
+
+
+def _adult_condoms() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_CONDOM_TYPES),
+        field_def("material", "Material", type="select", section="materiales", order=2, options=("Látex", "Poliisopreno", "Poliuretano", "Nitrilo", "Otro")),
+        field_def("ancho_nominal_mm", "Ancho nominal", type="decimal", unit="mm", section="medidas", order=3, min=Decimal("0.01"), condition=_for_product_types("Preservativo externo")),
+        field_def("cantidad_paquete", "Cantidad por paquete", type="integer", section="producto", order=4, min=1),
+        field_def("lubricado", "Lubricado", type="boolean", section="producto", order=5),
+        field_def("caracteristicas", "Características declaradas", type="multiselect", section="producto", order=6, options=("Liso", "Texturizado", "Anatómico", "Con aroma", "Sin aroma", "Otra"), help="Selecciona solo características indicadas por el fabricante."),
+        field_def("fabricante", "Fabricante", section="producto", order=7),
+        field_def("instrucciones_fabricante", "Instrucciones del fabricante", type="textarea", section="cuidados", order=8),
+    )
+
+
+def _adult_lubricants() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_LUBRICANT_TYPES),
+        field_def("base_lubricante", "Base del lubricante", type="select", section="producto", order=2, options=("Agua", "Silicona", "Híbrida", "Otra")),
+        field_def("volumen_ml", "Volumen", type="decimal", unit="ml", section="medidas", order=3, min=Decimal("0.01")),
+        field_def("textura", "Textura", type="select", section="producto", order=4, options=("Líquida", "Gel", "Crema", "Otra")),
+        field_def("ingredientes", "Ingredientes", type="textarea", section="materiales", order=5),
+        field_def("aroma", "Aroma", section="producto", order=6),
+        field_def("compatibilidad_declarada", "Compatibilidad declarada por el fabricante", type="textarea", section="compatibilidad", order=7, help="Transcribe únicamente compatibilidades verificables indicadas por el fabricante; no se deducen de la base del producto."),
+        field_def("presentacion", "Presentación", type="select", section="producto", order=8, options=("Botella", "Tubo", "Sachet", "Dispensador", "Otra")),
+    )
+
+
+def _adult_toys() -> tuple[ProductTemplateField, ...]:
+    measured = ("Vibrador", "Masajeador íntimo", "Estimulador", "Masturbador", "Consolador", "Juguete para parejas")
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_TOY_TYPES),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=2, options=("Silicona", "Plástico ABS", "TPE", "TPR", "Vidrio", "Acero inoxidable", "Mixto", "Otro")),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=3),
+        field_def("tamano", "Tamaño", type="variant_attribute", section="tallas", order=4, condition=_for_product_types(*_ADULT_TOY_SIZE_TYPES)),
+        field_def("longitud_cm", "Longitud", type="decimal", unit="cm", section="medidas", order=5, min=Decimal("0.01"), condition=_for_product_types(*measured)),
+        field_def("diametro_mm", "Diámetro", type="decimal", unit="mm", section="medidas", order=6, min=Decimal("0.01"), condition=_for_product_types("Vibrador", "Estimulador", "Consolador", "Anillo vibrador")),
+        field_def("fuente_energia", "Fuente de energía", type="select", section="energia", order=7, options=("No requiere", "Pilas", "Batería recargable", "Red eléctrica"), condition=_for_product_types(*_ADULT_POWERED_TOY_TYPES)),
+        field_def("voltaje_v", "Voltaje de entrada", type="decimal", unit="V", section="energia", order=8, min=Decimal("0.01"), help="Voltaje nominal o de entrada indicado por el fabricante.", condition={"field": "fuente_energia", "values": ["Batería recargable", "Red eléctrica"]}),
+        field_def("recargable", "Recargable", type="boolean", section="energia", order=9, condition=_for_product_types(*_ADULT_POWERED_TOY_TYPES)),
+        field_def("tipo_carga", "Tipo de carga", type="select", section="energia", order=10, options=("USB-C", "Micro-USB", "Magnética", "Base de carga", "Otra"), condition={"field": "fuente_energia", "values": ["Batería recargable"]}),
+        field_def("modos_funcionamiento", "Modos de funcionamiento", type="chips", section="tecnica", order=11, condition=_for_product_types(*_ADULT_POWERED_TOY_TYPES)),
+        field_def("resistencia_agua_declarada", "Resistencia al agua declarada", section="proteccion", order=12, help="Indica exclusivamente la resistencia o clasificación informada por el fabricante."),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=13, min=1),
+    )
+
+
+def _adult_anal() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_ANAL_TYPES),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=2, options=("Silicona", "Vidrio", "Acero inoxidable", "Plástico ABS", "TPE", "Mixto", "Otro")),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=3),
+        field_def("tamano", "Tamaño", type="variant_attribute", section="tallas", order=4, condition=_for_product_types(*_ADULT_ANAL_INDIVIDUAL_TYPES)),
+        field_def("longitud_cm", "Longitud", type="decimal", unit="cm", section="medidas", order=5, min=Decimal("0.01"), condition=_for_product_types(*_ADULT_ANAL_INDIVIDUAL_TYPES)),
+        field_def("diametro_max_mm", "Diámetro máximo", type="decimal", unit="mm", section="medidas", order=6, min=Decimal("0.01"), condition=_for_product_types(*_ADULT_ANAL_INDIVIDUAL_TYPES)),
+        field_def("tipo_base", "Tipo de base", type="select", section="producto", order=7, options=("Ensanchada", "Anillo", "Asa", "Otra"), condition=_for_product_types(*_ADULT_ANAL_INDIVIDUAL_TYPES)),
+        field_def("flexibilidad", "Flexibilidad", type="select", section="producto", order=8, options=("Rígido", "Semiflexible", "Flexible", "Otra")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=9, min=1),
+        field_def("instrucciones_cuidado", "Instrucciones de cuidado", type="textarea", section="cuidados", order=10),
+    )
+
+
+def _adult_bdsm() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_BDSM_TYPES),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=2, options=("Tela", "Cuero", "Cuero sintético", "Nylon", "Silicona", "Metal", "Mixto", "Otro")),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=3),
+        field_def("talla", "Talla", type="variant_attribute", section="tallas", order=4, condition=_for_product_types(*_ADULT_BDSM_SIZE_TYPES)),
+        field_def("ajustable", "Ajustable", type="boolean", section="producto", order=5, condition=_for_product_types(*_ADULT_BDSM_SIZE_TYPES)),
+        field_def("longitud_cm", "Longitud", type="decimal", unit="cm", section="medidas", order=6, min=Decimal("0.01"), condition=_for_product_types("Esposas o sujeciones", "Accesorio decorativo")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=7, min=1),
+    )
+
+
+def _adult_lingerie() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_LINGERIE_TYPES),
+        field_def("genero", "Género", type="select", section="prenda", order=2, options=_FASHION_GENDERS),
+        field_def("color_principal", "Color principal", type="color", section="presentacion", order=3),
+        field_def("talla", "Talla", type="variant_attribute", required=True, section="tallas", order=4),
+        field_def("sistema_talla", "Sistema de talla", type="select", section="tallas", order=5, options=("Internacional", "US", "EU", "LATAM", "Otro")),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=6, options=_FASHION_MATERIAL_OPTIONS),
+        field_def("composicion", "Composición", type="chips", section="materiales", order=7),
+        field_def("cuidados", "Cuidados", type="multiselect", section="cuidados", order=8, options=_FASHION_CARE_OPTIONS),
+        field_def("incluye_piezas", "Piezas incluidas", type="chips", section="producto", order=9),
+    )
+
+
+def _adult_intimate_care() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_CARE_TYPES),
+        field_def("volumen_ml", "Volumen", type="decimal", unit="ml", section="medidas", order=2, min=Decimal("0.01"), condition=_for_product_types(*_ADULT_CARE_FORMULATION_TYPES)),
+        field_def("ingredientes", "Ingredientes", type="textarea", section="materiales", order=3, condition=_for_product_types(*_ADULT_CARE_FORMULATION_TYPES)),
+        field_def("aroma", "Aroma", section="producto", order=4, condition=_for_product_types(*_ADULT_CARE_FORMULATION_TYPES)),
+        field_def("presentacion", "Presentación", type="select", section="producto", order=5, options=("Botella", "Tubo", "Spray", "Dispensador", "Otra"), condition=_for_product_types(*_ADULT_CARE_FORMULATION_TYPES)),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=6, options=("Tela", "Silicona", "Plástico", "Metal", "Mixto", "Otro"), condition=_for_product_types(*_ADULT_CARE_ACCESSORY_TYPES)),
+        field_def("dimensiones", "Dimensión principal", type="dimension", unit="cm", section="medidas", order=7, min=Decimal("0.01"), help="Indica la medida principal del accesorio en centímetros.", condition=_for_product_types(*_ADULT_CARE_ACCESSORY_TYPES)),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=8, min=1, condition=_for_product_types(*_ADULT_CARE_ACCESSORY_TYPES)),
+    )
+
+
+def _adult_games() -> tuple[ProductTemplateField, ...]:
+    return (
+        field_def("tipo_producto", "Tipo de producto", type="select", required=True, section="producto", order=1, options=_ADULT_GAME_TYPES),
+        field_def("numero_jugadores", "Número de jugadores", type="integer", section="uso", order=2, min=1, condition=_for_product_types("Juego de cartas", "Juego de mesa", "Dados")),
+        field_def("cantidad_piezas", "Cantidad de piezas", type="integer", section="producto", order=3, min=1),
+        field_def("material_principal", "Material principal", type="select", section="materiales", order=4, options=("Cartón", "Papel", "Plástico", "Madera", "Tela", "Mixto", "Otro")),
+        field_def("idioma", "Idioma", type="select", section="producto", order=5, options=("Español", "Inglés", "Multilingüe", "Sin texto", "Otro")),
+        field_def("contenido_paquete", "Artículos incluidos", type="chips", section="producto", order=6),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ProductTemplateCategoryBinding:
     template_key: str
@@ -2390,6 +2519,14 @@ _TEMPLATE_CATEGORY_BINDINGS = (
     ProductTemplateCategoryBinding("babies_hygiene_care", "BABIES_KIDS", "BABIES_HYGIENE_CARE"),
     ProductTemplateCategoryBinding("babies_feeding", "BABIES_KIDS", "BABIES_FEEDING"),
     ProductTemplateCategoryBinding("babies_travel_safety", "BABIES_KIDS", "BABIES_TRAVEL_SAFETY"),
+    ProductTemplateCategoryBinding("adult_condoms", "ADULT", "ADULT_CONDOMS"),
+    ProductTemplateCategoryBinding("adult_lubricants", "ADULT", "ADULT_LUBRICANTS"),
+    ProductTemplateCategoryBinding("adult_toys", "ADULT", "ADULT_TOYS"),
+    ProductTemplateCategoryBinding("adult_anal", "ADULT", "ADULT_ANAL"),
+    ProductTemplateCategoryBinding("adult_bdsm", "ADULT", "ADULT_BDSM"),
+    ProductTemplateCategoryBinding("adult_lingerie", "ADULT", "ADULT_LINGERIE"),
+    ProductTemplateCategoryBinding("adult_intimate_care", "ADULT", "ADULT_INTIMATE_CARE"),
+    ProductTemplateCategoryBinding("adult_games", "ADULT", "ADULT_GAMES"),
 )
 
 
@@ -2449,6 +2586,14 @@ _TEMPLATE_FIELD_SETS = {
     "babies_hygiene_care": _babies_hygiene_care(),
     "babies_feeding": _babies_feeding(),
     "babies_travel_safety": _babies_travel_safety(),
+    "adult_condoms": _adult_condoms(),
+    "adult_lubricants": _adult_lubricants(),
+    "adult_toys": _adult_toys(),
+    "adult_anal": _adult_anal(),
+    "adult_bdsm": _adult_bdsm(),
+    "adult_lingerie": _adult_lingerie(),
+    "adult_intimate_care": _adult_intimate_care(),
+    "adult_games": _adult_games(),
 }
 
 
@@ -2747,6 +2892,32 @@ _TEMPLATE_VARIANT_AXES: dict[str, tuple[VariantAxis, ...]] = {
     ),
     "babies_travel_safety": (
         axis_def("color_principal", "Color", source_field="color_principal", is_visual=True, is_listing_axis=True),
+    ),
+    "adult_condoms": (
+        axis_def("cantidad_paquete", "Cantidad por paquete", value_type="integer", is_listing_axis=True, condition=_for_product_types("Preservativo externo", "Preservativo interno")),
+        axis_def("ancho_nominal_mm", "Ancho nominal", unit="mm", value_type="decimal", is_listing_axis=True, condition=_for_product_types("Preservativo externo")),
+    ),
+    "adult_lubricants": (
+        axis_def("volumen_ml", "Volumen", unit="ml", value_type="decimal", is_listing_axis=True),
+    ),
+    "adult_toys": (
+        axis_def("color_principal", "Color", is_visual=True, is_listing_axis=True, condition=_for_product_types(*_ADULT_TOY_TYPES[:-1])),
+        axis_def("tamano", "Tamaño", is_listing_axis=True, condition=_for_product_types(*_ADULT_TOY_SIZE_TYPES)),
+    ),
+    "adult_anal": (
+        axis_def("color_principal", "Color", is_visual=True, is_listing_axis=True, condition=_for_product_types(*_ADULT_ANAL_INDIVIDUAL_TYPES)),
+        axis_def("tamano", "Tamaño", is_listing_axis=True, condition=_for_product_types(*_ADULT_ANAL_INDIVIDUAL_TYPES)),
+    ),
+    "adult_bdsm": (
+        axis_def("color_principal", "Color", is_visual=True, is_listing_axis=True, condition=_for_product_types(*_ADULT_BDSM_TYPES[:-1])),
+        axis_def("talla", "Talla", is_listing_axis=True, condition=_for_product_types(*_ADULT_BDSM_SIZE_TYPES)),
+    ),
+    "adult_lingerie": (
+        axis_def("color_principal", "Color", is_visual=True, is_listing_axis=True),
+        axis_def("talla", "Talla", is_listing_axis=True),
+    ),
+    "adult_intimate_care": (
+        axis_def("volumen_ml", "Volumen", unit="ml", value_type="decimal", is_listing_axis=True, condition=_for_product_types(*_ADULT_CARE_FORMULATION_TYPES)),
     ),
 }
 

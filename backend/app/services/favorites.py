@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Category, Favorite, Product
 from app.services.catalog_listings import PublicListing, load_public_listings
+from app.services.adult_access_policy import adult_public_product_clause
 
 
 class FavoriteServiceError(Exception):
@@ -105,7 +106,10 @@ def _public_product_by_slug(session: Session, product_slug: str) -> Product | No
 def favorite_count_for_user(session: Session, user_id: uuid.UUID) -> int:
     return int(
         session.scalar(
-            select(func.count(Favorite.id)).where(Favorite.user_id == user_id)
+            select(func.count(Favorite.id))
+            .join(Product, Product.id == Favorite.product_id)
+            .join(Category, Category.id == Product.category_id)
+            .where(Favorite.user_id == user_id, adult_public_product_clause())
         )
         or 0
     )
@@ -120,9 +124,13 @@ def favorite_product_ids_for_user(
         return set()
     return set(
         session.scalars(
-            select(Favorite.product_id).where(
+            select(Favorite.product_id)
+            .join(Product, Product.id == Favorite.product_id)
+            .join(Category, Category.id == Product.category_id)
+            .where(
                 Favorite.user_id == user_id,
                 Favorite.product_id.in_(product_ids),
+                adult_public_product_clause(),
             )
         ).all()
     )
@@ -186,7 +194,10 @@ def remove_favorite_by_slug(
     user_id: uuid.UUID,
     product_slug: str,
 ) -> FavoriteMutationResult:
-    product = session.scalar(select(Product).where(Product.slug == product_slug))
+    product = session.scalar(
+        select(Product).join(Category, Category.id == Product.category_id)
+        .where(Product.slug == product_slug, adult_public_product_clause())
+    )
     if product is None:
         raise FavoriteProductNotFoundError("Producto no encontrado.")
 
@@ -237,6 +248,7 @@ def get_favorites_page(
         .join(Product, Product.id == Favorite.product_id)
         .join(Category, Category.id == Product.category_id)
         .where(Favorite.user_id == user_id)
+        .where(adult_public_product_clause())
         .order_by(Favorite.created_at.desc(), Favorite.id.desc())
         .limit(page_size)
         .offset((page - 1) * page_size)

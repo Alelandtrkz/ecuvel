@@ -369,6 +369,20 @@ _PRODUCT_CATEGORY_TREE = (
             {"code": "BABIES_TRAVEL_SAFETY", "name": "Paseo y seguridad", "slug": "paseo-y-seguridad", "sort_order": 5},
         ),
     ),
+    # PP1.8A foundation only. PP1.8B must explicitly authorize activation.
+    (
+        {"code": "ADULT", "name": "Productos para adultos", "slug": "productos-para-adultos", "sort_order": 7, "is_active": False},
+        (
+            {"code": "ADULT_CONDOMS", "name": "Preservativos", "slug": "preservativos", "sort_order": 1, "is_active": False},
+            {"code": "ADULT_LUBRICANTS", "name": "Lubricantes íntimos", "slug": "lubricantes-intimos", "sort_order": 2, "is_active": False},
+            {"code": "ADULT_TOYS", "name": "Juguetes íntimos", "slug": "juguetes-intimos", "sort_order": 3, "is_active": False},
+            {"code": "ADULT_ANAL", "name": "Accesorios anales", "slug": "accesorios-anales", "sort_order": 4, "is_active": False},
+            {"code": "ADULT_BDSM", "name": "Accesorios BDSM", "slug": "accesorios-bdsm", "sort_order": 5, "is_active": False},
+            {"code": "ADULT_LINGERIE", "name": "Lencería y disfraces", "slug": "lenceria-y-disfraces", "sort_order": 6, "is_active": False},
+            {"code": "ADULT_INTIMATE_CARE", "name": "Cuidado íntimo", "slug": "cuidado-intimo", "sort_order": 7, "is_active": False},
+            {"code": "ADULT_GAMES", "name": "Juegos y artículos para adultos", "slug": "juegos-y-articulos-para-adultos", "sort_order": 8, "is_active": False},
+        ),
+    ),
 )
 
 
@@ -409,7 +423,7 @@ def _upsert_category(data: dict, *, parent_id):
     category.name = data["name"]
     category.slug = _available_category_slug(data["slug"], data["code"])
     category.parent_id = parent_id
-    category.is_active = True
+    category.is_active = data.get("is_active", True)
     category.sort_order = data["sort_order"]
     return category, created
 

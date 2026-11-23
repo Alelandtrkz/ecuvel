@@ -157,6 +157,10 @@ class Config:
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     TESTING = _environment_bool("TESTING", False)
     ECUVEL_PRODUCTION = _environment_bool("ECUVEL_PRODUCTION", False)
+    ADULT_PARTNER_ENABLED = _environment_bool("ADULT_PARTNER_ENABLED", False)
+    ADULT_PUBLIC_ENABLED = _environment_bool("ADULT_PUBLIC_ENABLED", False)
+    # Explicit ECUVEL release after individual review; no automatic category approval.
+    ADULT_RELEASED_PRODUCT_IDS = os.getenv("ADULT_RELEASED_PRODUCT_IDS", "")
     WTF_CSRF_ENABLED = not TESTING
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"

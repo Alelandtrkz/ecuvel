@@ -188,6 +188,11 @@ def get_product_draft_for_user(
     draft = session.scalar(query)
     if draft is None or draft.store_id != store.store_id:
         raise ProductDraftAccessError("No encontramos ese borrador.")
+    from app.services.adult_access_policy import adult_partner_enabled, is_adult_category
+    if is_adult_category(draft.subcategory) and (
+        not adult_partner_enabled() or not draft.category.is_active or not draft.subcategory.is_active
+    ):
+        raise ProductDraftAccessError("No encontramos ese borrador.")
     return draft
 
 
