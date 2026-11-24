@@ -18,6 +18,7 @@ from app.models.enums import (
 )
 from app.services.account_tokens import create_account_token, hash_account_token
 from app.services.mail import MailDeliveryError, mail_service
+from tests.assertions import checkout_form_token
 from tests.factories import create_catalog_and_stock, create_order_items
 
 
@@ -363,8 +364,7 @@ def test_verified_checkout_uses_current_user_as_buyer(client, session):
         }
 
     page = client.get("/checkout")
-    with client.session_transaction() as browser_session:
-        token = browser_session["checkout_draft"]["token"]
+    token = checkout_form_token(page)
     response = client.post(
         "/checkout",
         data={"checkout_token": token, "payment_method": "BANK_TRANSFER"},

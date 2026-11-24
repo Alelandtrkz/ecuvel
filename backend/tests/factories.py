@@ -29,6 +29,8 @@ from app.models.enums import (
     StoreStatus,
     UserStatus,
 )
+from app.services.cart_storage import _lock_or_create_cart, _persist_cart_state
+from app.services.checkout import CheckoutConfirmation, prepare_checkout
 from app.services.fulfillment import (
     create_packages_for_order,
     handover_order_packages,
@@ -66,6 +68,14 @@ class ReadyOrderData:
 
 def _token() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def prepare_cart_confirmation(session: Session, buyer_id: uuid.UUID, cart_state: dict) -> CheckoutConfirmation:
+    """Stage a persistent cart in the caller's transaction and quote it as its buyer."""
+    cart = _lock_or_create_cart(session, buyer_id)
+    _persist_cart_state(session, cart, cart_state)
+    _, confirmation = prepare_checkout(session, session.get(User, buyer_id))
+    return confirmation
 
 
 def create_catalog_and_stock(

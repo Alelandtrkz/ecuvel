@@ -21,6 +21,7 @@ from app.models import (
 )
 from app.models.enums import OfferStatus, PaymentStatus
 from app.services.cart_storage import load_cart_state_for_user
+from tests.assertions import checkout_form_token
 from tests.factories import BaseData, create_catalog_and_stock
 
 
@@ -118,8 +119,7 @@ def _cart_items(session, user_id) -> dict:
 def _checkout_token(client) -> str:
     response = client.get("/checkout")
     assert response.status_code == 200
-    with client.session_transaction() as browser_session:
-        return browser_session["checkout_draft"]["token"]
+    return checkout_form_token(response)
 
 
 def _submit(client, token: str, **extra):

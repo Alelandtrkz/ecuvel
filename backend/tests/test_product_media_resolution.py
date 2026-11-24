@@ -31,7 +31,7 @@ from app.services.product_media import (
     variant_media_binding,
 )
 from app.services.checkout import build_checkout_preview, create_checkout_order
-from tests.factories import BaseData, create_catalog_and_stock
+from tests.factories import BaseData, create_catalog_and_stock, prepare_cart_confirmation
 
 
 pytestmark = pytest.mark.integration
@@ -536,14 +536,13 @@ def test_processed_media_uses_thumbnail_on_lists_and_master_on_detail_checkout(
     checkout = create_checkout_order(
         session=session,
         buyer_id=primary_base.buyer_id,
-        cart_state={
+        confirmation=prepare_cart_confirmation(session, primary_base.buyer_id, {
             "version": 1,
             "items": {
                 str(offer.id): {"quantity": 1, "selected": True},
             },
-        },
+        }),
         payment_method=PaymentMethod.BANK_TRANSFER,
-        idempotency_key="h2-master-snapshot",
         reservation_expires_at=datetime.now(timezone.utc) + timedelta(minutes=20),
     )
     session.commit()

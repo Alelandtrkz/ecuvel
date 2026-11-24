@@ -6,6 +6,7 @@ import json
 import secrets
 import uuid
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
 from flask import current_app, request, session as flask_session
@@ -24,6 +25,7 @@ from app.models import (
     ProductVariant,
     SellerOffer,
     Store,
+    User,
 )
 from app.models.enums import OfferStatus, StoreStatus
 from app.services.cart import (
@@ -105,6 +107,8 @@ def _save_guest_cart_state(state: object) -> dict[str, Any]:
 def _user_cart_state(
     database_session: Session,
     user_id: uuid.UUID,
+    *,
+    user: User | None = None,
 ) -> dict[str, Any]:
     rows = database_session.execute(
         select(
@@ -118,7 +122,7 @@ def _user_cart_state(
         .join(Product, Product.id == ProductVariant.product_id)
         .join(Category, Category.id == Product.category_id)
         .where(Cart.user_id == user_id)
-        .where(adult_public_product_clause())
+        .where(adult_public_product_clause(user=user))
         .order_by(CartItem.created_at, CartItem.id)
     ).all()
     return {
@@ -134,10 +138,9 @@ def _user_cart_state(
 
 
 def load_cart_state_for_user(
-    database_session: Session,
-    user_id: uuid.UUID,
+    database_session: Session, user_id: uuid.UUID, *, user: User | None = None,
 ) -> dict[str, Any]:
-    return _user_cart_state(database_session, user_id)
+    return _user_cart_state(database_session, user_id, user=user)
 
 
 def load_cart_state_for_identity() -> dict[str, Any]:
@@ -231,10 +234,27 @@ def _persist_cart_state(
                 },
             )
         )
-    database_session.execute(
-        update(Cart).where(Cart.id == cart.id).values(updated_at=func.now())
-    )
+    _advance_cart_revision(database_session, cart.id)
     return normalized
+
+
+def _advance_cart_revision(database_session: Session, cart_id: uuid.UUID) -> None:
+    # now() indica el inicio de la transacción y puede retroceder tras esperar un lock.
+    database_session.execute(
+        update(Cart).where(Cart.id == cart_id).values(updated_at=func.greatest(
+            func.clock_timestamp(), Cart.updated_at + timedelta(microseconds=1)
+        ))
+    )
+
+
+def consume_checkout_items(
+    database_session: Session, cart_id: uuid.UUID, offer_ids: list[uuid.UUID],
+) -> None:
+    """Consume las líneas confirmadas bajo el lock del carrito, en la transacción del pedido."""
+    database_session.execute(delete(CartItem).where(
+        CartItem.cart_id == cart_id, CartItem.seller_offer_id.in_(offer_ids),
+    ))
+    _advance_cart_revision(database_session, cart_id)
 
 
 def mutate_cart_for_user(

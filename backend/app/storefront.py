@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
-import hashlib
 import hmac
 import logging
+import re
 import secrets
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -27,6 +26,7 @@ from flask import (
     url_for,
 )
 from flask_login import current_user, login_required
+from itsdangerous import BadData, URLSafeSerializer
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -54,6 +54,7 @@ from app.models.enums import (
     PaymentStatus,
     ProductReviewStatus,
     StoreStatus,
+    UserStatus,
 )
 from app.services.cart import (
     CART_LOW_STOCK_THRESHOLD,
@@ -77,9 +78,10 @@ from app.services.cart_storage import (
 )
 from app.services.age_eligibility import is_at_least_18
 from app.services.checkout import (
+    CheckoutConfirmation,
     CheckoutServiceError,
     EmptyCheckoutError,
-    build_checkout_preview,
+    prepare_checkout,
     create_checkout_order,
 )
 from app.services.customer_orders import (
@@ -229,9 +231,7 @@ MAX_CATEGORY_LENGTH = 140
 MAX_RECOMMENDATIONS = 10
 CART_INTENT_ADD = "add_to_cart"
 CART_INTENT_BUY_NOW = "buy_now"
-CHECKOUT_DRAFT_SESSION_KEY = "checkout_draft"
 CHECKOUT_ORDERS_SESSION_KEY = "checkout_order_ids"
-COMPLETED_CHECKOUTS_SESSION_KEY = "completed_checkouts"
 MAX_SESSION_CHECKOUT_ORDERS = 10
 PAYMENT_PROOF_UPLOADS_SESSION_KEY = "payment_proof_uploads"
 
@@ -1652,27 +1652,8 @@ def _product_review_image_config() -> ProductReviewImageConfig:
     )
 
 
-def _checkout_cart_signature(cart_state: object) -> str:
-    state = get_cart_state(cart_state)
-    selected = [
-        [offer_id, int(item["quantity"])]
-        for offer_id, item in sorted(state["items"].items())
-        if item["selected"]
-    ]
-    encoded = json.dumps(selected, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _checkout_buyer() -> User | None:
-    if current_user.is_authenticated:
-        return db.session.get(User, current_user.id)
-    if not current_app.config["ALLOW_DEMO_CHECKOUT"]:
-        return None
-    return db.session.scalar(
-        select(User).where(
-            User.email == current_app.config["CHECKOUT_DEMO_BUYER_EMAIL"]
-        )
-    )
+def _checkout_signer() -> URLSafeSerializer:
+    return URLSafeSerializer(current_app.secret_key, salt="ecuvel-checkout-v1")
 
 
 def _requires_verified_identity():
@@ -2234,21 +2215,11 @@ def checkout() -> str:
     age_redirect = _requires_adult_eligibility()
     if age_redirect is not None:
         return age_redirect
-    cart_state = load_cart_state_for_identity()
+    buyer = current_user
     try:
-        preview = build_checkout_preview(
-            session=db.session, cart_state=cart_state
-        )
+        preview, confirmation = prepare_checkout(db.session, buyer)
     except EmptyCheckoutError as exc:
         flash(str(exc), "error")
-        return redirect(url_for("storefront.cart"))
-
-    buyer = _checkout_buyer()
-    if buyer is None:
-        flash(
-            "No existe el comprador de demostración. Ejecuta seed-demo.",
-            "error",
-        )
         return redirect(url_for("storefront.cart"))
 
     try:
@@ -2256,20 +2227,13 @@ def checkout() -> str:
     except LegalVersioningError:
         return render_template("legal/unavailable.html"), 503
 
-    signature = _checkout_cart_signature(cart_state)
-    draft = flask_session.get(CHECKOUT_DRAFT_SESSION_KEY)
-    if not isinstance(draft, dict) or draft.get("signature") != signature:
-        draft = {
-            "token": secrets.token_urlsafe(32),
-            "signature": signature,
-        }
-        flask_session[CHECKOUT_DRAFT_SESSION_KEY] = draft
+    token = _checkout_signer().dumps(asdict(confirmation))
 
     return render_template(
         "storefront/checkout.html",
         preview=preview,
         buyer=CheckoutBuyerViewModel(buyer.full_name, buyer.phone),
-        checkout_token=draft["token"],
+        checkout_token=token,
         pickup_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
         pickup_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
         order_hold_days=current_app.config["ECUVEL_ORDER_HOLD_DAYS"],
@@ -2291,30 +2255,31 @@ def create_checkout():
     if age_redirect is not None:
         return age_redirect
     token = (request.form.get("checkout_token") or "").strip()
-    completed = flask_session.get(COMPLETED_CHECKOUTS_SESSION_KEY, {})
-    if isinstance(completed, dict) and token in completed:
-        value = completed[token]
-        if isinstance(value, dict) and value.get("order_number"):
-            return redirect(
-                url_for(
-                    "storefront.bank_transfer",
-                    order_number=value["order_number"],
+    try:
+        if len(token) > 1024:
+            raise BadData("checkout")
+        confirmation = CheckoutConfirmation(**_checkout_signer().loads(token))
+    except (BadData, TypeError):
+        # Los formularios anteriores tenían un token opaco. Un intento ya
+        # persistido permite recuperar el pedido de su comprador.
+        if (
+            re.fullmatch(r"[A-Za-z0-9_-]{43}", token)
+            and request.form.get("payment_method") == PaymentMethod.BANK_TRANSFER.value
+        ):
+            number = db.session.scalar(
+                select(Order.order_number)
+                .join(PaymentAttempt, PaymentAttempt.order_id == Order.id)
+                .join(User, User.id == Order.buyer_id)
+                .where(
+                    User.id == current_user.id, User.is_active.is_(True),
+                    User.status == UserStatus.ACTIVE,
+                    PaymentAttempt.idempotency_key == f"checkout:{token}",
+                    PaymentAttempt.method == PaymentMethod.BANK_TRANSFER,
                 )
             )
-
-    draft = flask_session.get(CHECKOUT_DRAFT_SESSION_KEY)
-    cart_state = load_cart_state_for_identity()
-    signature = _checkout_cart_signature(cart_state)
-    if (
-        not isinstance(draft, dict)
-        or not token
-        or not hmac.compare_digest(str(draft.get("token", "")), token)
-        or not hmac.compare_digest(str(draft.get("signature", "")), signature)
-    ):
-        flash(
-            "El checkout cambió o caducó. Revísalo antes de continuar.",
-            "error",
-        )
+            if number is not None:
+                return redirect(url_for("storefront.bank_transfer", order_number=number))
+        flash("El checkout cambió o caducó. Revísalo antes de continuar.", "error")
         return redirect(url_for("storefront.checkout"))
 
     try:
@@ -2326,44 +2291,24 @@ def create_checkout():
     expires_at = datetime.now(timezone.utc) + timedelta(
         minutes=current_app.config["BANK_TRANSFER_PAYMENT_TIMEOUT_MINUTES"]
     )
-    # El POST no realiza lecturas SQL antes de este punto. Removemos
-    # cualquier sesión de lectura preservada por el contexto de pruebas
-    # para garantizar una transacción de escritura nueva y única.
+    buyer_id = current_user.id
     db.session.remove()
     database_session = db.session()
+
+    def record_terms() -> None:
+        legal_context = _checkout_legal_context(database_session, buyer_id)
+        _validate_checkout_legal_form(legal_context)
+        _record_checkout_legal_evidence(database_session, buyer_id, legal_context)
+
     try:
         with database_session.begin():
-            if current_user.is_authenticated:
-                buyer = database_session.get(User, current_user.id)
-            elif current_app.config["ALLOW_DEMO_CHECKOUT"]:
-                buyer = database_session.scalar(
-                    select(User).where(
-                        User.email
-                        == current_app.config["CHECKOUT_DEMO_BUYER_EMAIL"]
-                    )
-                )
-            else:
-                buyer = None
-            if buyer is None:
-                raise CheckoutServiceError(
-                    "Inicia sesión para realizar el pedido."
-                )
-            legal_context = _checkout_legal_context(
-                database_session, buyer.id
-            )
-            _validate_checkout_legal_form(legal_context)
-            _record_checkout_legal_evidence(
-                database_session,
-                buyer.id,
-                legal_context,
-            )
             result = create_checkout_order(
                 session=database_session,
-                buyer_id=buyer.id,
-                cart_state=cart_state,
+                buyer_id=buyer_id,
+                confirmation=confirmation,
                 payment_method=payment_method,
-                idempotency_key=token,
                 reservation_expires_at=expires_at,
+                before_create=record_terms,
             )
     except CheckoutLegalRequirementError as exc:
         flash(str(exc), "error")
@@ -2374,25 +2319,7 @@ def create_checkout():
         flash(str(exc), "error")
         return redirect(url_for("storefront.checkout"))
 
-    def consume_purchased(state):
-        for offer_id in result.purchased_offer_ids:
-            state = remove_cart_item(state, offer_id)
-        return state
-
-    mutate_cart_for_identity(consume_purchased)
     _remember_checkout_order(result.order_id)
-
-    completed = (
-        completed if isinstance(completed, dict) else {}
-    )
-    completed[token] = {
-        "order_id": str(result.order_id),
-        "order_number": result.order_number,
-    }
-    flask_session[COMPLETED_CHECKOUTS_SESSION_KEY] = dict(
-        list(completed.items())[-5:]
-    )
-    flask_session.pop(CHECKOUT_DRAFT_SESSION_KEY, None)
     flash("Pedido creado. Completa la transferencia antes del vencimiento.", "success")
     return redirect(
         url_for(

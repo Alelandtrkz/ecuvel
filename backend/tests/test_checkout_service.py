@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -47,7 +48,7 @@ from app.services.checkout import (
     create_checkout_order,
 )
 from app.services.financial_reconciliation import reconcile_seller_order
-from tests.factories import BaseData, create_catalog_and_stock
+from tests.factories import BaseData, create_catalog_and_stock, prepare_cart_confirmation
 
 
 pytestmark = pytest.mark.integration
@@ -143,12 +144,12 @@ def _checkout(
     cart: dict,
     key: str,
 ):
+    confirmation = prepare_cart_confirmation(session, base.buyer_id, cart)
     return create_checkout_order(
         session=session,
         buyer_id=base.buyer_id,
-        cart_state=cart,
+        confirmation=replace(confirmation, key=key),
         payment_method=PaymentMethod.BANK_TRANSFER,
-        idempotency_key=key,
         reservation_expires_at=_expires(),
     )
 
@@ -407,14 +408,22 @@ def test_repeated_checkout_returns_same_order(session: Session):
     cart = _cart((base.offer_id, 2, True))
     session.commit()
 
+    confirmation = prepare_cart_confirmation(session, base.buyer_id, cart)
+    session.commit()
+
+    def submit():
+        with session.begin():
+            return create_checkout_order(
+                session=session, buyer_id=base.buyer_id, confirmation=confirmation,
+                payment_method=PaymentMethod.BANK_TRANSFER, reservation_expires_at=_expires(),
+            )
+
+    first = submit()
+    replay = submit()
     with session.begin():
-        first = _checkout(session, base, cart, "same-checkout")
-    with session.begin():
-        buyer = session.get(User, base.buyer_id)
-        assert buyer is not None
-        buyer.status = UserStatus.BLOCKED
-    with session.begin():
-        replay = _checkout(session, base, cart, "same-checkout")
+        session.get(User, base.buyer_id).status = UserStatus.BLOCKED
+    with pytest.raises(CheckoutBuyerError):
+        submit()
 
     assert replay.replayed is True
     assert replay.order_id == first.order_id

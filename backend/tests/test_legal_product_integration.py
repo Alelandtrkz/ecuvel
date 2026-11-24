@@ -27,6 +27,7 @@ from app.services.checkout import CheckoutServiceError
 from app.services.legal_documents import DocumentStatus
 from app.services.legal_product import PRIVACY_KEY, TERMS_KEY
 from app.services.legal_versioning import record_user_legal_evidence
+from tests.assertions import checkout_form_token
 from tests.factories import create_catalog_and_stock
 from tests.legal_product_helpers import (
     PAST_PUBLICATION,
@@ -96,8 +97,7 @@ def _set_cart(client, offer_id):
 def _checkout_token(client):
     response = client.get("/checkout")
     assert response.status_code == 200
-    with client.session_transaction() as browser_session:
-        return browser_session["checkout_draft"]["token"], response
+    return checkout_form_token(response), response
 
 
 def _checkout_post_data(token, **overrides):
@@ -550,7 +550,7 @@ def test_checkout_rolls_back_flushed_legal_evidence_when_order_creation_fails(
         raise CheckoutServiceError("forced checkout failure")
 
     monkeypatch.setattr(
-        "app.storefront.create_checkout_order",
+        "app.services.checkout.reserve_inventory",
         fail_after_legal_evidence_flush,
     )
 

@@ -3,15 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from dataclasses import dataclass
-from datetime import datetime
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import (
+    Cart,
     Category,
     Order,
     OrderItem,
@@ -35,6 +36,7 @@ from app.models.enums import (
 from app.services.age_eligibility import is_at_least_18
 from app.services.adult_access_policy import adult_public_product_clause
 from app.services.cart import get_cart_state
+from app.services.cart_storage import consume_checkout_items, load_cart_state_for_user
 from app.services.inventory import (
     InventoryServiceError,
     get_sellable_quantities_by_warehouse_for_offers,
@@ -92,6 +94,9 @@ class CheckoutIssue:
 @dataclass(frozen=True, slots=True)
 class CheckoutLine:
     offer_id: uuid.UUID
+    offer_updated_at: datetime
+    product_id: uuid.UUID
+    variant_id: uuid.UUID
     store_id: uuid.UUID
     store_name: str
     product_name: str
@@ -234,14 +239,50 @@ def _warehouse_availability(
     }
 
 
+def _lock_checkout_catalog(session: Session, offer_ids: set[uuid.UUID]) -> None:
+    # Seguir las FK bajo locks compartidos estabiliza también cambios de
+    # variante, producto o tienda. Otros compradores pueden leer las mismas filas.
+    offers = session.execute(
+        select(SellerOffer.variant_id, SellerOffer.store_id)
+        .where(SellerOffer.id.in_(offer_ids)).order_by(SellerOffer.id).with_for_update(read=True)
+    ).all()
+    variants = {row.variant_id for row in offers}
+    products = session.scalars(
+        select(ProductVariant.product_id).where(ProductVariant.id.in_(variants))
+        .order_by(ProductVariant.id).with_for_update(read=True)
+    ).all()
+    categories = session.scalars(
+        select(Product.category_id).where(Product.id.in_(products))
+        .order_by(Product.id).with_for_update(read=True)
+    ).all()
+    parents = session.scalars(
+        select(Category.parent_id).where(Category.id.in_(categories))
+        .order_by(Category.id).with_for_update(read=True)
+    ).all()
+    # La política Adult también consulta la categoría padre.
+    parent_ids = {key for key in parents if key is not None}
+    if parent_ids:
+        session.execute(
+            select(Category.id).where(Category.id.in_(parent_ids))
+            .order_by(Category.id).with_for_update(read=True)
+        ).all()
+    stores = {row.store_id for row in offers}
+    session.execute(
+        select(Store.id).where(Store.id.in_(stores))
+        .order_by(Store.id).with_for_update(read=True)
+    ).all()
+
+
 def _load_rows(
     session: Session,
     selected: dict[uuid.UUID, int],
     *,
-    lock_offers: bool,
+    lock_catalog: bool,
     user=None,
 ) -> list[_CheckoutRow]:
     offer_ids = set(selected)
+    if lock_catalog:
+        _lock_checkout_catalog(session, offer_ids)
     statement = (
         select(SellerOffer, ProductVariant, Product, Category, Store)
         .join(ProductVariant, ProductVariant.id == SellerOffer.variant_id)
@@ -252,8 +293,7 @@ def _load_rows(
         .where(adult_public_product_clause(user=user))
         .order_by(SellerOffer.id)
     )
-    if lock_offers:
-        statement = statement.with_for_update(of=SellerOffer)
+    statement = statement.execution_options(populate_existing=True)
 
     entities = {
         offer.id: (offer, variant, product, category, store)
@@ -297,6 +337,7 @@ def _load_rows(
                 product.is_active,
                 category.is_active,
                 store.status == StoreStatus.ACTIVE,
+                store.is_verified,
             )
         )
         if not visible:
@@ -346,6 +387,9 @@ def _line_from_row(row: _CheckoutRow) -> CheckoutLine:
     )
     return CheckoutLine(
         offer_id=row.offer.id,
+        offer_updated_at=row.offer.updated_at,
+        product_id=row.product.id,
+        variant_id=row.variant.id,
         store_id=row.store.id,
         store_name=row.store.name,
         product_name=row.product.title,
@@ -409,27 +453,66 @@ def build_checkout_preview(
             "Selecciona al menos un producto antes de continuar."
         )
     return _preview_from_rows(
-        selected, _load_rows(session, selected, lock_offers=False)
+        selected, _load_rows(session, selected, lock_catalog=False)
     )
 
 
-def _request_fingerprint(
-    buyer_id: uuid.UUID,
-    payment_method: PaymentMethod,
-    selected: dict[uuid.UUID, int],
-) -> str:
-    payload = {
-        "buyer_id": str(buyer_id),
-        "payment_method": payment_method.value,
-        "items": [
-            [str(offer_id), quantity]
-            for offer_id, quantity in sorted(selected.items(), key=lambda item: item[0])
-        ],
-    }
-    encoded = json.dumps(
-        payload, sort_keys=True, separators=(",", ":")
-    ).encode("utf-8")
+@dataclass(frozen=True, slots=True)
+class CheckoutConfirmation:
+    key: str
+    buyer_id: str
+    cart_id: str
+    revision: str
+    selection: str
+    prices: str
+
+
+def _digest(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _selection_digest(selected: dict[uuid.UUID, int], preview: CheckoutPreview) -> str:
+    quantities = [(str(key), qty) for key, qty in sorted(selected.items())]
+    identities = [
+        (str(line.offer_id), str(line.product_id), str(line.variant_id), str(line.store_id),
+         line.offer_updated_at.astimezone(timezone.utc).isoformat())
+        for line in preview.lines
+    ]
+    return _digest([quantities, identities])
+
+
+def _price_digest(preview: CheckoutPreview) -> str:
+    lines = [(str(line.offer_id), str(line.unit_price)) for line in preview.lines]
+    return _digest(["USD", str(preview.total), lines])
+
+
+def _cart_revision(cart: Cart) -> str:
+    return cart.updated_at.astimezone(timezone.utc).isoformat()
+
+
+def prepare_checkout(
+    session: Session, buyer: User,
+) -> tuple[CheckoutPreview, CheckoutConfirmation]:
+    # Leer primero la revisión hace que una mutación concurrente invalide el
+    # formulario. El GET no crea ni bloquea el carrito.
+    cart = session.scalar(
+        select(Cart).where(Cart.user_id == buyer.id).execution_options(populate_existing=True)
+    )
+    selected = _selected_items(load_cart_state_for_user(session, buyer.id, user=buyer))
+    if cart is None or not selected:
+        raise EmptyCheckoutError("Selecciona al menos un producto antes de continuar.")
+    rows = _load_rows(session, selected, lock_catalog=False, user=buyer)
+    preview = _preview_from_rows(selected, rows)
+    confirmation = CheckoutConfirmation(
+        key=uuid.uuid4().hex,
+        buyer_id=str(buyer.id),
+        cart_id=str(cart.id),
+        revision=_cart_revision(cart),
+        selection=_selection_digest(selected, preview),
+        prices=_price_digest(preview),
+    )
+    return preview, confirmation
 
 
 def _advisory_lock_id(key: str) -> int:
@@ -444,6 +527,7 @@ def _replay_result(
     session: Session,
     attempt: PaymentAttempt,
     fingerprint: str,
+    buyer_id: uuid.UUID,
 ) -> CheckoutCreationResult:
     if attempt.request_fingerprint != fingerprint:
         raise CheckoutIdempotencyConflictError(
@@ -458,7 +542,7 @@ def _replay_result(
         ).all()
     )
     order = session.get(Order, attempt.order_id)
-    if order is None or not offer_ids:
+    if order is None or order.buyer_id != buyer_id or not offer_ids:
         raise CheckoutIdempotencyConflictError(
             "El checkout existente está incompleto."
         )
@@ -478,12 +562,14 @@ def create_checkout_order(
     *,
     session: Session,
     buyer_id: uuid.UUID,
-    cart_state: object,
+    confirmation: CheckoutConfirmation,
     payment_method: PaymentMethod,
-    idempotency_key: str,
     reservation_expires_at: datetime,
+    before_create: Callable[[], None] | None = None,
 ) -> CheckoutCreationResult:
-    normalized_key = idempotency_key.strip()
+    if confirmation.buyer_id != str(buyer_id):
+        raise CheckoutIdempotencyConflictError("El checkout cambió. Revisa tu carrito.")
+    normalized_key = confirmation.key.strip()
     if not normalized_key or len(normalized_key) > 120:
         raise ValueError("La clave de checkout no es válida.")
     if payment_method != PaymentMethod.BANK_TRANSFER:
@@ -499,12 +585,7 @@ def create_checkout_order(
     if reservation_expires_at <= datetime.now(reservation_expires_at.tzinfo):
         raise ValueError("La expiración debe estar en el futuro.")
 
-    selected = _selected_items(cart_state)
-    if not selected:
-        raise EmptyCheckoutError(
-            "Selecciona al menos un producto antes de continuar."
-        )
-    fingerprint = _request_fingerprint(buyer_id, payment_method, selected)
+    fingerprint = _digest([asdict(confirmation), payment_method.value])
     payment_key = f"checkout:{normalized_key}"
     session.execute(
         select(func.pg_advisory_xact_lock(_advisory_lock_id(payment_key)))
@@ -514,15 +595,13 @@ def create_checkout_order(
             PaymentAttempt.idempotency_key == payment_key
         )
     )
-    if existing is not None:
-        return _replay_result(session, existing, fingerprint)
-
     buyer = session.scalar(
         select(User)
         .where(User.id == buyer_id)
-        .with_for_update()
+        .with_for_update(read=True)
+        .execution_options(populate_existing=True)
     )
-    if buyer is None or buyer.status != UserStatus.ACTIVE:
+    if buyer is None or not buyer.is_active or buyer.status != UserStatus.ACTIVE:
         raise CheckoutBuyerError("El comprador no está disponible.")
     if not is_at_least_18(buyer.birth_date):
         if buyer.birth_date is None:
@@ -534,7 +613,27 @@ def create_checkout_order(
             "Para comprar en ECUVEL debes tener al menos 18 años."
         )
 
-    rows = _load_rows(session, selected, lock_offers=True, user=buyer)
+    if existing is not None:
+        return _replay_result(session, existing, fingerprint, buyer_id)
+
+    cart = session.scalar(
+        select(Cart)
+        .where(Cart.user_id == buyer_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    changed = "Tu carrito cambió o la selección ya fue procesada. Revisa el carrito antes de confirmar."
+    if (
+        cart is None
+        or str(cart.id) != confirmation.cart_id
+        or _cart_revision(cart) != confirmation.revision
+    ):
+        raise CheckoutIdempotencyConflictError(changed)
+    selected = _selected_items(load_cart_state_for_user(session, buyer_id, user=buyer))
+    if not selected:
+        raise CheckoutIdempotencyConflictError(changed)
+
+    rows = _load_rows(session, selected, lock_catalog=True, user=buyer)
     preview = _preview_from_rows(selected, rows)
     if preview.issues:
         message = " ".join(issue.message for issue in preview.issues)
@@ -545,6 +644,18 @@ def create_checkout_order(
         raise CheckoutItemUnavailableError(message)
     if preview.total <= ZERO:
         raise CheckoutPriceError("El total del pedido debe ser mayor que cero.")
+
+    if _price_digest(preview) != confirmation.prices:
+        raise CheckoutPriceError(
+            "El precio de uno o más productos cambió. "
+            "Revisa los importes actualizados antes de confirmar nuevamente tu pedido."
+        )
+
+    if _selection_digest(selected, preview) != confirmation.selection:
+        raise CheckoutIdempotencyConflictError(changed)
+
+    if before_create is not None:
+        before_create()
 
     digest = hashlib.sha256(normalized_key.encode("utf-8")).hexdigest()
     order_number = f"ECV-{digest[:16].upper()}"
@@ -663,6 +774,7 @@ def create_checkout_order(
     )
     session.add(attempt)
     session.flush()
+    consume_checkout_items(session, cart.id, purchased_offer_ids)
 
     return CheckoutCreationResult(
         order_id=order.id,

@@ -74,7 +74,7 @@ from app.services.seller_inbound_packages import (
     receive_seller_inbound_package,
 )
 from app.services.seller_order_logistics import build_seller_order_delivery_window
-from tests.factories import create_catalog_and_stock, create_order_items, reserve_item
+from tests.factories import create_catalog_and_stock, create_order_items, prepare_cart_confirmation, reserve_item
 
 
 pytestmark = pytest.mark.integration
@@ -466,9 +466,10 @@ def test_checkout_snapshots_commission_category_and_image(session: Session):
     result = create_checkout_order(
         session=session,
         buyer_id=base.buyer_id,
-        cart_state={"version": 1, "items": {str(base.offer_id): {"quantity": 3, "selected": True}}},
+        confirmation=prepare_cart_confirmation(session, base.buyer_id, {
+            "version": 1, "items": {str(base.offer_id): {"quantity": 3, "selected": True}}
+        }),
         payment_method=PaymentMethod.BANK_TRANSFER,
-        idempotency_key=f"commission-{uuid.uuid4().hex}",
         reservation_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
     )
     item = session.scalar(
@@ -672,12 +673,11 @@ def test_commission_snapshots_support_multiple_rates_in_one_seller_order(session
     result = create_checkout_order(
         session=session,
         buyer_id=base.buyer_id,
-        cart_state={"version": 1, "items": {
+        confirmation=prepare_cart_confirmation(session, base.buyer_id, {"version": 1, "items": {
             str(first_offer.id): {"quantity": 2, "selected": True},
             str(second_offer.id): {"quantity": 3, "selected": True},
-        }},
+        }}),
         payment_method=PaymentMethod.BANK_TRANSFER,
-        idempotency_key=f"rates-{uuid.uuid4().hex}",
         reservation_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
     )
     seller_order = session.scalar(

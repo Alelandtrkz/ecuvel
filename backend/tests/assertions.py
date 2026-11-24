@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 
 from sqlalchemy import select
@@ -17,6 +18,12 @@ from app.models.inventory import (
     InventoryReservation,
 )
 from app.models.order import OrderItem, SellerOrder
+
+
+def checkout_form_token(response) -> str:
+    match = re.search(r'name="checkout_token" value="([^"]+)"', response.get_data(as_text=True))
+    assert response.status_code == 200 and match, "La página no presentó una confirmación de checkout."
+    return match.group(1)
 
 
 def assert_inventory_invariants(session: Session) -> None:
