@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import and_, case, exists, func, literal, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.services.admin_operating_context import OperationalScope
 from app.models import (
     LogisticsPackageState,
     Order,
@@ -644,7 +645,7 @@ def _fulfillment_view(
 
 
 def get_admin_orders_page(
-    session: Session, *, tab: str | None = None, query: str | None = None,
+    session: Session, *, scope: OperationalScope, tab: str | None = None, query: str | None = None,
     payment: str | None = None, fulfillment: str | None = None,
     attention: str | None = None, date: str | None = None,
     page: str | int | None = None, page_size: str | int | None = None,
@@ -664,6 +665,7 @@ def get_admin_orders_page(
         attention_filter=attention_filter, date_filter=date_filter,
         query=normalized_query, now=effective_now,
     )
+    common += (scope.order_clause(Order.id),)
     labels = {
         "all": "Todos", "pending-payment": "Pendientes de pago",
         "confirmed": "Confirmados", "preparing": "En preparación",
@@ -837,9 +839,11 @@ def _inbound_package_status(
     return AdminStatusView(code, label, tone)
 
 
-def get_admin_order_detail(session: Session, *, order_number: str) -> AdminOrderDetail | None:
+def get_admin_order_detail(session: Session, *, scope: OperationalScope, order_number: str) -> AdminOrderDetail | None:
     record = session.execute(
-        select(Order, User).join(User, User.id == Order.buyer_id).where(Order.order_number == order_number.strip())
+        select(Order, User).join(User, User.id == Order.buyer_id).where(Order.order_number == order_number.strip(),
+            scope.order_clause(Order.id),
+        )
     ).one_or_none()
     if record is None:
         return None

@@ -65,6 +65,7 @@ def test_incomplete_scan_rolls_back_entire_handover(session_factory):
         with session_factory.begin() as session:
             handover_order_packages(
                 session=session,
+                actor_user_id=base.operator_id,
                 order_number=ready.order_number,
                 scanned_codes=(ready.package_codes[0],),
             )
@@ -87,6 +88,7 @@ def test_foreign_package_scan_changes_no_order(session_factory):
         with session_factory.begin() as session:
             handover_order_packages(
                 session=session,
+                actor_user_id=base.operator_id,
                 order_number=first.order_number,
                 scanned_codes=(second.package_codes[0],),
             )
@@ -106,6 +108,7 @@ def test_duplicate_package_scan_changes_nothing(session_factory):
         with session_factory.begin() as session:
             handover_order_packages(
                 session=session,
+                actor_user_id=base.operator_id,
                 order_number=ready.order_number,
                 scanned_codes=(ready.package_codes[0], ready.barcodes[0]),
             )

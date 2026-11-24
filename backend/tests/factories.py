@@ -346,6 +346,7 @@ def create_ready_for_pickup_order(
     base: BaseData,
     quantities: list[int],
 ) -> ReadyOrderData:
+    session.get(User, base.operator_id).is_ecuvel_staff = True
     order_id, order_number, item_ids = create_picked_order(
         session, base, quantities
     )

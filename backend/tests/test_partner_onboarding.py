@@ -207,10 +207,12 @@ def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client
     assert bank_version.encrypted_account_number
     assert bank_version.account_last4 == "6789"
 
+    from tests.test_admin_stores import _user as create_reviewer
+    reviewer = create_reviewer(session, staff=True, sensitive_bank_access=True)
     review_onboarding(
         session=session,
         onboarding_id=onboarding.id,
-        reviewer_user_id=None,
+        reviewer_user_id=reviewer.id,
         decision="approve",
         comments="Datos verificados.",
     )

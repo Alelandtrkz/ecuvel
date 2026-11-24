@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.orm import Session, aliased, joinedload
 
+from app.services.admin_operating_context import OperationalScope
 from app.models import (
     LogisticsPackageState,
     LogisticsTrackingEvent,
@@ -242,13 +243,13 @@ def _transfer_status(value: LogisticsTransferStatus) -> AdminFulfillmentStatusVi
     return AdminFulfillmentStatusView(code, label, tone)
 
 
-def _metrics(session: Session) -> AdminFulfillmentMetrics:
+def _metrics(session: Session, scope: OperationalScope) -> AdminFulfillmentMetrics:
     rows = session.execute(
         select(
             LogisticsPackageState.status,
             LogisticsPackageState.is_deviated,
             func.count(LogisticsPackageState.id),
-        ).group_by(LogisticsPackageState.status, LogisticsPackageState.is_deviated)
+        ).where(scope.state_clause()).group_by(LogisticsPackageState.status, LogisticsPackageState.is_deviated)
     ).all()
     total = awaiting = transit = point = deviated = 0
     for status, is_deviated, count in rows:
@@ -264,7 +265,8 @@ def _metrics(session: Session) -> AdminFulfillmentMetrics:
             point += count
     incidents = int(
         session.scalar(
-            select(func.count(LogisticsTrackingEvent.id)).where(
+            select(func.count(LogisticsTrackingEvent.id)).join(LogisticsPackageState).where(
+                scope.state_clause(),
                 LogisticsTrackingEvent.event_type
                 == LogisticsTrackingEventType.INCIDENT_REPORTED
             )
@@ -274,13 +276,14 @@ def _metrics(session: Session) -> AdminFulfillmentMetrics:
     return AdminFulfillmentMetrics(total, awaiting, transit, point, deviated, incidents)
 
 
-def _warehouse_options(session: Session) -> tuple[AdminFulfillmentOption, ...]:
+def _warehouse_options(session: Session, scope: OperationalScope) -> tuple[AdminFulfillmentOption, ...]:
     return tuple(
         AdminFulfillmentOption(str(identifier), f"{code} · {name}")
         for identifier, code, name in session.execute(
             select(Warehouse.id, Warehouse.code, Warehouse.name)
             .where(
                 Warehouse.is_active.is_(True),
+                Warehouse.id.in_(scope.warehouse_ids) if scope.warehouse_ids is not None else True,
                 Warehouse.seller_store_id.is_(None),
             )
             .order_by(Warehouse.name, Warehouse.code)
@@ -352,6 +355,7 @@ def _latest_event_map(
 def get_admin_fulfillment_page(
     session: Session,
     *,
+    scope: OperationalScope,
     status: str | None = None,
     query: str | None = None,
     point: str | None = None,
@@ -419,7 +423,7 @@ def get_admin_fulfillment_page(
             joinedload(LogisticsPackageState.expected_destination),
         )
     )
-    criteria = []
+    criteria = [scope.state_clause()]
     if active_status == "awaiting-pickup":
         criteria.append(LogisticsPackageState.status == LogisticsPackageStatus.ASSIGNED)
     elif active_status == "in-transit":
@@ -597,10 +601,10 @@ def get_admin_fulfillment_page(
             action_label,
             action_tone,
         ))
-    options = _warehouse_options(session)
+    options = _warehouse_options(session, scope)
     return AdminFulfillmentPage(
         tuple(rows),
-        _metrics(session),
+        _metrics(session, scope),
         active_status,
         normalized_query,
         point_filter,
@@ -615,7 +619,7 @@ def get_admin_fulfillment_page(
         current_page > 1,
         current_page < total_pages,
         options,
-        _staff_options(session),
+        _staff_options(session) if scope.warehouse_ids is None else (),
     )
 
 
@@ -632,6 +636,7 @@ def _custody_name(
 def get_admin_fulfillment_detail(
     session: Session,
     *,
+    scope: OperationalScope,
     package_code: str,
     now: datetime | None = None,
 ) -> AdminPackageTrackingDetail | None:
@@ -655,7 +660,8 @@ def get_admin_fulfillment_detail(
         )
         .where(
             SellerInboundPackage.package_code
-            == (package_code or "").strip().upper()
+            == (package_code or "").strip().upper(),
+            scope.state_clause(),
         )
     )
     if state is None:
@@ -830,10 +836,10 @@ def get_admin_fulfillment_detail(
         tuple(event_views),
         tuple(
             option
-            for option in _warehouse_options(session)
+            for option in _warehouse_options(session, scope)
             if option.value != str(state.current_warehouse_id)
         ),
-        _staff_options(session),
+        _staff_options(session) if scope.warehouse_ids is None else (),
         state.status == LogisticsPackageStatus.AT_POINT and not state.is_deviated,
         state.is_deviated and state.current_warehouse_id is not None,
         bool(active and latest_transfer.status == LogisticsTransferStatus.ASSIGNED),

@@ -8,6 +8,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.services.admin_operating_context import operational_scope
+from app.services.admin_permissions import AdminAuthorizationError, require_actor_permission
 from app.models import (
     LogisticsPackageState,
     OrderPackage,
@@ -123,6 +125,8 @@ def start_physical_inventory_count(
     notes: str | None = None,
     now: datetime | None = None,
 ) -> PhysicalInventoryCount:
+    actor = require_actor_permission(session, actor_user_id, "operations.supervise")
+    operational_scope(session, actor).require_point(warehouse_id)
     normalized_notes = " ".join((notes or "").strip().split())[:500] or None
     warehouse = session.scalar(
         select(Warehouse)
@@ -245,6 +249,8 @@ def scan_physical_inventory_package(
     actor_user_id: uuid.UUID,
     now: datetime | None = None,
 ) -> PhysicalCountScanResult:
+    actor = require_actor_permission(session, actor_user_id, "operations.supervise")
+    operational_scope(session, actor).require_point(warehouse_id)
     normalized = normalize_count_code(code)
     if not normalized:
         raise PhysicalInventoryCountValidationError(
@@ -255,7 +261,9 @@ def scan_physical_inventory_package(
         .where(PhysicalInventoryCount.id == count_id)
         .with_for_update()
     )
-    if count is None or count.warehouse_id != warehouse_id:
+    if count is not None and count.warehouse_id != warehouse_id:
+        raise AdminAuthorizationError()
+    if count is None:
         raise PhysicalInventoryCountValidationError(
             "El conteo no pertenece al punto operativo seleccionado."
         )
@@ -322,12 +330,16 @@ def finalize_physical_inventory_count(
     actor_user_id: uuid.UUID,
     now: datetime | None = None,
 ) -> PhysicalInventoryCount:
+    actor = require_actor_permission(session, actor_user_id, "operations.supervise")
+    operational_scope(session, actor).require_point(warehouse_id)
     count = session.scalar(
         select(PhysicalInventoryCount)
         .where(PhysicalInventoryCount.id == count_id)
         .with_for_update()
     )
-    if count is None or count.warehouse_id != warehouse_id:
+    if count is not None and count.warehouse_id != warehouse_id:
+        raise AdminAuthorizationError()
+    if count is None:
         raise PhysicalInventoryCountValidationError(
             "El conteo no pertenece al punto operativo seleccionado."
         )

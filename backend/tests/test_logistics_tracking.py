@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import func, select
 
+from app.services.admin_operating_context import OperationalScope
 from app.extensions import db
 from app.models import (
     LogisticsPackageState,
@@ -176,7 +177,7 @@ def test_package_moves_between_points_with_explicit_chain_of_custody(session):
     }.issubset(event_types)
 
 
-def test_wrong_arrival_requires_correction_to_original_destination(session):
+def test_historical_physical_deviation_can_return_to_original_destination(session):
     package, _order, staff, _point_a, point_b, point_f = _received_package(session)
     assign_package_transfer(
         session,
@@ -186,24 +187,30 @@ def test_wrong_arrival_requires_correction_to_original_destination(session):
         actor_user_id=staff.id,
         idempotency_key="assign-before-deviation",
     )
-    confirm_package_pickup(
+    pickup = confirm_package_pickup(
         session,
         package_code=package.package_code,
         actor_user_id=staff.id,
         idempotency_key="pickup-before-deviation",
     )
-    deviated = receive_transfer_at_destination(
-        session,
-        package_code=package.package_code,
-        warehouse_id=point_f[0].id,
-        location_id=point_f[1].id,
-        actor_user_id=staff.id,
-        idempotency_key="wrong-arrival-f",
+    # Persist a pre-corrective physical receipt as it existed under the old contract.
+    occurred_at = datetime.now(timezone.utc)
+    state, original = pickup.package_state, pickup.transfer
+    original.status = LogisticsTransferStatus.DEVIATED
+    original.received_at = occurred_at
+    state.status = LogisticsPackageStatus.DEVIATED
+    state.is_deviated = True
+    state.current_warehouse_id = state.custodian_warehouse_id = point_f[0].id
+    state.current_location_id = point_f[1].id
+    state.custodian_user_id = None
+    state.last_event_at = occurred_at
+    historic = LogisticsTrackingEvent(
+        package_state_id=state.id, transfer_id=original.id, event_type=LogisticsTrackingEventType.DEVIATION_DETECTED,
+        occurred_at=occurred_at, actor_user_id=staff.id, warehouse_id=point_f[0].id, location_id=point_f[1].id,
+        previous_custodian_user_id=staff.id, new_custodian_warehouse_id=point_f[0].id,
     )
-    assert deviated.package_state.status == LogisticsPackageStatus.DEVIATED
-    assert deviated.package_state.is_deviated
-    assert deviated.package_state.current_warehouse_id == point_f[0].id
-    assert deviated.package_state.expected_destination_warehouse_id == point_b[0].id
+    session.add(historic)
+    session.commit()
 
     with pytest.raises(LogisticsValidationError):
         assign_package_transfer(
@@ -225,7 +232,7 @@ def test_wrong_arrival_requires_correction_to_original_destination(session):
         idempotency_key="correction-f-b",
     )
     assert correction.transfer.is_corrective
-    assert correction.transfer.previous_transfer_id == deviated.transfer.id
+    assert correction.transfer.previous_transfer_id == original.id
     confirm_package_pickup(
         session,
         package_code=package.package_code,
@@ -242,6 +249,7 @@ def test_wrong_arrival_requires_correction_to_original_destination(session):
     )
     assert resolved.package_state.status == LogisticsPackageStatus.AT_POINT
     assert not resolved.package_state.is_deviated
+    assert session.get(LogisticsTrackingEvent, historic.id).transfer_id == original.id
 
 
 def test_events_are_idempotent_and_append_only(session):
@@ -315,16 +323,16 @@ def test_admin_fulfillment_query_and_private_routes(session, app):
         actor_user_id=staff.id,
     )
     session.commit()
-    page = get_admin_fulfillment_page(session, status="awaiting-pickup", query=package.package_code)
+    page = get_admin_fulfillment_page(session, scope=OperationalScope(warehouse_ids=None), status="awaiting-pickup", query=package.package_code)
     assert page.total_items == 1
     assert page.rows[0].order_number == order_number
     assert get_admin_fulfillment_page(
-        session, point=point_a[0].code
+        session, scope=OperationalScope(warehouse_ids=None), point=point_a[0].code
     ).total_items == 1
     assert get_admin_fulfillment_page(
-        session, destination=point_b[0].code
+        session, scope=OperationalScope(warehouse_ids=None), destination=point_b[0].code
     ).total_items == 1
-    detail = get_admin_fulfillment_detail(session, package_code=package.package_code)
+    detail = get_admin_fulfillment_detail(session, scope=OperationalScope(warehouse_ids=None), package_code=package.package_code)
     assert detail is not None
     assert detail.can_pickup
 
@@ -339,7 +347,7 @@ def test_admin_fulfillment_query_and_private_routes(session, app):
     detail_response = client.get(f"/admin/fulfillment/{package.package_code}")
     assert detail_response.status_code == 200
     assert b"Historial de trazabilidad" in detail_response.data
-    order_detail = get_admin_order_detail(session, order_number=order_number)
+    order_detail = get_admin_order_detail(session, scope=OperationalScope(warehouse_ids=None), order_number=order_number)
     assert order_detail.inbound_packages[0].tracking_available
     assert order_detail.inbound_packages[0].package_code == package.package_code
     pickup_response = client.post(

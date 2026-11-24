@@ -21,7 +21,8 @@ from app.catalog.product_templates import (
 from app.commands.marketplace_policy import INITIAL_CATEGORY_RATES, PROPOSED_ADULT_CATEGORY_RATES
 from app.commands.seed import _PRODUCT_CATEGORY_TREE
 from app.models import Category, Product, ProductVariant, SellerOffer, Store
-from app.models.enums import SellerCommissionType
+from app.models.enums import ProductDraftStatus, SellerCommissionType, StaffRole
+from app.services.admin_permissions import AdminAuthorizationError
 from app.services.catalog_listings import load_public_listings
 from app.services.catalog_feed import CatalogFeedCursor, catalog_feed_context_hash, sign_catalog_feed_cursor
 from app.services.catalog_ranking import SURFACE_SEARCH, ranking_day
@@ -38,9 +39,11 @@ from app.services.product_variant_builder import build_variant_state
 from tests.factories import create_catalog_and_stock
 from tests.product_moderation_helpers import (
     create_complete_simple_draft,
+    create_phone_categories,
     create_store,
     create_user,
 )
+from tests.test_admin_rbac import staff_identity
 
 
 CANONICAL_ADULT = {
@@ -328,6 +331,7 @@ def test_existing_publication_guard_blocks_adult_drafts(app, session, tmp_path, 
     parent = session.scalar(select(Category).where(Category.code == "ADULT"))
     child = session.scalar(select(Category).where(Category.code == code))
     seller = create_user(session)
+    moderator = staff_identity(session, StaffRole.SUPER_ADMIN)
     store = create_store(session)
     draft = create_complete_simple_draft(session, seller=seller, store=store, category=parent, subcategory=child, media_root=tmp_path / "drafts")
     draft.template_key = CANONICAL_ADULT[code][0]
@@ -337,10 +341,31 @@ def test_existing_publication_guard_blocks_adult_drafts(app, session, tmp_path, 
     session.flush()
     with pytest.raises(ProductModerationValidationError, match="categoría seleccionada no está activa"):
         publish_product_draft(
+            session, draft_id=draft.id, actor_user_id=moderator.id,
+            checklist={key: True for key in MODERATION_CHECKS},
+            source_media_root=tmp_path / "drafts", catalog_media_root=tmp_path / "catalog",
+        )
+    assert session.scalar(select(func.count()).select_from(Product)) == 0
+
+
+@pytest.mark.integration
+def test_seller_cannot_publish_own_submitted_draft(session, tmp_path):
+    seller = create_user(session)
+    category, subcategory = create_phone_categories(session)
+    draft = create_complete_simple_draft(
+        session, seller=seller, store=create_store(session), category=category,
+        subcategory=subcategory, media_root=tmp_path / "drafts",
+    )
+    with pytest.raises(AdminAuthorizationError):
+        publish_product_draft(
             session, draft_id=draft.id, actor_user_id=seller.id,
             checklist={key: True for key in MODERATION_CHECKS},
             source_media_root=tmp_path / "drafts", catalog_media_root=tmp_path / "catalog",
         )
+    session.flush()
+    session.refresh(draft)
+    assert draft.status == ProductDraftStatus.SUBMITTED
+    assert draft.publication is None
     assert session.scalar(select(func.count()).select_from(Product)) == 0
 
 

@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from werkzeug.datastructures import FileStorage
 
+from app.services.admin_permissions import require_actor_permission
 from app.models import (
     Store,
     StoreContractAcceptance,
@@ -427,6 +428,9 @@ def review_onboarding(
     expected_updated_at: str | None = None,
     require_checklist: bool = False,
 ) -> StoreOnboarding:
+    require_actor_permission(session, reviewer_user_id, "stores.moderate")
+    if decision.strip().lower() == "approve":
+        require_actor_permission(session, reviewer_user_id, "bank_accounts.sensitive.view")
     onboarding = session.get(StoreOnboarding, _uuid(onboarding_id), with_for_update=True)
     if onboarding is None:
         raise PartnerOnboardingStateError("No se encontró la solicitud.")

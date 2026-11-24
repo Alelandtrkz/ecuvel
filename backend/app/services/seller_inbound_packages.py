@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, selectinload
 
+from app.services.admin_operating_context import operational_scope
+from app.services.admin_permissions import require_actor_permission
 from app.models import (
     Order,
     OrderItem,
@@ -382,6 +384,7 @@ def receive_seller_inbound_package(
         raise SellerInboundPackageReceptionAccessError(
             "Solo un operador interno de Ecuvel puede confirmar la recepción."
         )
+    actor = require_actor_permission(session, actor_user_id, "scanner.receive_package")
     location = session.scalar(
         select(WarehouseLocation)
         .where(WarehouseLocation.id == received_location_id)
@@ -402,6 +405,8 @@ def receive_seller_inbound_package(
         raise PartnerOrderValidationError(
             "La ubicación de recepción no pertenece al punto operativo actual."
         )
+    scope = operational_scope(session, actor)
+    scope.require_point(location.warehouse_id)
     normalized_code = (package_code or "").strip().upper()
     package = session.scalar(
         select(SellerInboundPackage)
@@ -411,6 +416,9 @@ def receive_seller_inbound_package(
     )
     if package is None:
         raise PartnerOrderNotFoundError("No existe el paquete escaneado.")
+    if package.received_location_id and scope.warehouse_ids is not None:
+        recorded = session.get(WarehouseLocation, package.received_location_id)
+        scope.require_point(recorded.warehouse_id if recorded else None)
     order_items = _package_order_items(session, package)
     expected_codes: Counter[str] = Counter()
     for link in package.items:

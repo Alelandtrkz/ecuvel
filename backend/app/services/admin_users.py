@@ -49,7 +49,9 @@ from app.services.authentication import (
     public_user_code,
     validate_password,
 )
-from app.services.admin_permissions import ROLE_PERMISSIONS
+from app.services.admin_permissions import (
+    AdminAuthorizationError, ROLE_PERMISSIONS, delegable_staff_roles, require_actor_permission,
+)
 
 
 PAGE_SIZE = 25
@@ -557,6 +559,7 @@ def create_staff_member(
     employment_started_at: date | None, warehouse_id: uuid.UUID | None,
     invitation_ttl_minutes: int, link_existing_user: bool = False,
 ) -> CreatedStaff:
+    actor = require_actor_permission(session, actor_user_id, "admin.staff.manage")
     names = normalize_full_name(first_names); surnames = normalize_full_name(last_names)
     if len(names) < 2 or len(surnames) < 2:
         raise AdminUserError("Ingresa nombres y apellidos válidos.")
@@ -569,6 +572,8 @@ def create_staff_member(
         employment = StaffEmploymentStatus(employment_status)
     except ValueError as exc:
         raise AdminUserError("La identificación, rol o estado no es válido.") from exc
+    if staff_role not in delegable_staff_roles(actor):
+        raise AdminAuthorizationError()
     normalized_id = normalize_identification(id_type, identification_number)
     nationality = (nationality_code or "ECU").strip().upper()
     if not re.fullmatch(r"[A-Z]{3}", nationality):
@@ -625,7 +630,19 @@ def create_staff_member(
     return CreatedStaff(profile=profile, invitation_token=invitation_token)
 
 
+def _require_manageable_profile(
+    session: Session, actor_user_id, profile: StaffProfile,
+) -> frozenset[StaffRole]:
+    actor = require_actor_permission(session, actor_user_id, "admin.staff.manage")
+    target = session.get(StaffProfile, profile.id, populate_existing=True, with_for_update=True)
+    roles = delegable_staff_roles(actor)
+    if target is None or target.role not in roles:
+        raise AdminAuthorizationError()
+    return roles
+
+
 def create_staff_invitation(session: Session, *, profile: StaffProfile, actor_user_id, ttl_minutes: int) -> str:
+    _require_manageable_profile(session, actor_user_id, profile)
     if profile.user.password_hash:
         raise AdminUserError(
             "La cuenta ya tiene credenciales. Usa el flujo de restablecimiento de contraseña."
@@ -655,6 +672,7 @@ def create_staff_invitation(session: Session, *, profile: StaffProfile, actor_us
 def revoke_staff_invitations(
     session: Session, *, profile: StaffProfile, actor_user_id, reason: str,
 ) -> int:
+    _require_manageable_profile(session, actor_user_id, profile)
     reason = " ".join((reason or "").strip().split())[:500]
     if not reason:
         raise AdminUserError("El motivo es obligatorio.")
@@ -715,7 +733,15 @@ def accept_staff_invitation(
     return user
 
 
+def require_user_management(session: Session, actor_user_id, target: User) -> None:
+    actor = require_actor_permission(session, actor_user_id, "admin.users.manage")
+    target = session.get(User, target.id, with_for_update=True, populate_existing=True)
+    if target.staff_profile:
+        _require_manageable_profile(session, actor.id, target.staff_profile)
+
+
 def set_user_suspension(session: Session, *, user: User, actor_user_id, suspend: bool, reason: str) -> None:
+    require_user_management(session, actor_user_id, user)
     reason = " ".join((reason or "").strip().split())[:500]
     if not reason:
         raise AdminUserError("El motivo es obligatorio.")
@@ -732,6 +758,7 @@ def set_user_suspension(session: Session, *, user: User, actor_user_id, suspend:
 
 
 def set_staff_access(session: Session, *, profile: StaffProfile, actor_user_id, enable: bool, reason: str) -> None:
+    _require_manageable_profile(session, actor_user_id, profile)
     reason = " ".join((reason or "").strip().split())[:500]
     if not reason:
         raise AdminUserError("El motivo es obligatorio.")
@@ -756,6 +783,9 @@ def update_staff_profile(
         new_role = StaffRole(role); new_status = StaffEmploymentStatus(employment_status)
     except ValueError as exc:
         raise AdminUserError("El rol o estado laboral no es válido.") from exc
+    if new_role not in _require_manageable_profile(session, actor_user_id, profile):
+        raise AdminAuthorizationError()
+    previous_role = profile.role
     reason = " ".join((reason or "").strip().split())[:500]
     old_status = profile.employment_status
     if new_status != old_status and not reason:
@@ -793,5 +823,5 @@ def update_staff_profile(
             raise AdminUserError("Un operador de punto requiere asignación.")
     record_admin_audit(session, actor_user_id=actor_user_id, target_user_id=profile.user_id,
                        action="STAFF_UPDATED", reason=reason,
-                       metadata={"role": new_role.value, "employment_status": new_status.value})
+                       metadata={"previous_role": previous_role.value, "role": new_role.value, "employment_status": new_status.value})
     session.flush()

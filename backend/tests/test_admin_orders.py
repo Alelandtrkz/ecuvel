@@ -8,6 +8,7 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import func, select
 
+from app.services.admin_operating_context import OperationalScope
 from app.extensions import db
 from app.models import (
     InventoryReservation,
@@ -349,7 +350,7 @@ def test_orders_list_is_one_row_per_order_and_supports_filters(session, client, 
     assert client.get(f"/admin/orders?q={order.order_number}").status_code == 200
     assert client.get(f"/admin/orders?q={buyer.public_account_code}").status_code == 200
     assert client.get("/admin/orders?status=invalid&page=nope&page_size=999").status_code == 200
-    page = get_admin_orders_page(session, payment="review")
+    page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), payment="review")
     assert len(page.rows) == 1
     assert page.rows[0].expected_package_count == 2
     assert page.rows[0].package_count == 0
@@ -362,7 +363,7 @@ def test_list_distinguishes_units_from_expected_packages(session, app, tmp_path)
         tmp_path,
         quantities=(2, 3),
     )
-    page = get_admin_orders_page(session)
+    page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None))
     row = next(item for item in page.rows if item.order_number == order.order_number)
     assert row.item_count == 5
     assert row.expected_package_count == 2
@@ -384,8 +385,8 @@ def test_payment_filter_uses_only_the_canonical_attempt(session, app, tmp_path):
     session.add(old_attempt)
     session.flush()
 
-    review_page = get_admin_orders_page(session, payment="review")
-    approved_page = get_admin_orders_page(session, payment="approved")
+    review_page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), payment="review")
+    approved_page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), payment="approved")
     assert [row.order_number for row in review_page.rows] == [order.order_number]
     assert review_page.rows[0].payment.attempt_id == current_attempt.id
     assert approved_page.total_items == 0
@@ -442,11 +443,11 @@ def test_tabs_and_fulfillment_filters_use_domain_state(session):
     )
 
     for tab, order in expected.items():
-        page = get_admin_orders_page(session, tab=tab)
+        page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), tab=tab)
         assert order.order_number in {row.order_number for row in page.rows}
-    picking_page = get_admin_orders_page(session, fulfillment="picking")
+    picking_page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), fulfillment="picking")
     assert [row.fulfillment.label for row in picking_page.rows] == ["Picking"]
-    packed_page = get_admin_orders_page(session, fulfillment="packed")
+    packed_page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), fulfillment="packed")
     assert [row.order_number for row in packed_page.rows] == [packed.order_number]
     assert packed_page.rows[0].fulfillment.label == "Empacado"
 
@@ -477,16 +478,16 @@ def test_date_search_package_pagination_and_ecuador_label(session, app, tmp_path
         ))
     session.flush()
 
-    search_page = get_admin_orders_page(session, query="PKG-ADMIN-SEARCH")
+    search_page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), query="PKG-ADMIN-SEARCH")
     assert [row.order_number for row in search_page.rows] == [order.order_number]
     today_page = get_admin_orders_page(
-        session,
+        session, scope=OperationalScope(warehouse_ids=None),
         date="today",
         now=datetime(2026, 8, 8, 15, 0, tzinfo=timezone.utc),
     )
     assert [row.order_number for row in today_page.rows] == [order.order_number]
     assert today_page.rows[0].created_at_label == "08 Ago 2026 · 01:00"
-    second_page = get_admin_orders_page(session, page=2, page_size=25)
+    second_page = get_admin_orders_page(session, scope=OperationalScope(warehouse_ids=None), page=2, page_size=25)
     assert second_page.page == 2
     assert second_page.total_items == 27
     assert len(second_page.rows) == 2

@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.services.admin_operating_context import operational_scope
+from app.services.admin_permissions import permissions_for_user
 from app.models import (
     InventoryBalance,
     InventoryMovement,
@@ -659,18 +661,25 @@ def _escaped_prefix(query: str) -> str:
 def search_admin_records(
     session: Session,
     *,
+    actor: User,
     query: str,
     limit_per_group: int = 5,
 ) -> AdminSearchPage:
     normalized = " ".join((query or "").strip().split())[:SEARCH_QUERY_MAX_LENGTH]
     if not normalized:
         return AdminSearchPage(query="", groups=())
+    permissions = permissions_for_user(actor)
+    if not permissions:
+        return AdminSearchPage(query=normalized, groups=())
+    scope = operational_scope(session, actor)
+    can_search_orders = "orders.view_related" in permissions
+    can_search_packages = "fulfillment.view_assigned" in permissions
     prefix = _escaped_prefix(normalized)
 
     order_results: list[AdminSearchResult] = []
     orders = session.execute(
         select(Order.order_number, Order.status)
-        .where(Order.order_number.ilike(prefix, escape="\\"))
+        .where(can_search_orders, scope.order_clause(Order.id), Order.order_number.ilike(prefix, escape="\\"))
         .order_by(
             case(
                 (func.lower(Order.order_number) == normalized.casefold(), 0),
@@ -691,7 +700,7 @@ def search_admin_records(
     if remaining:
         seller_orders = session.execute(
             select(SellerOrder.seller_order_number, SellerOrder.status)
-            .where(SellerOrder.seller_order_number.ilike(prefix, escape="\\"))
+            .where(can_search_orders, scope.order_clause(SellerOrder.order_id), SellerOrder.seller_order_number.ilike(prefix, escape="\\"))
             .order_by(
                 case(
                     (
@@ -729,7 +738,7 @@ def search_admin_records(
         )
     users = session.execute(
         select(User.registration_number, User.full_name, User.email)
-        .where(or_(*user_conditions))
+        .where("admin.users.view" in permissions, or_(*user_conditions))
         .order_by(
             case(
                 (
@@ -765,7 +774,7 @@ def search_admin_records(
             LogisticsPackageState.seller_inbound_package_id
             == SellerInboundPackage.id,
         )
-        .where(SellerInboundPackage.package_code.ilike(prefix, escape="\\"))
+        .where(can_search_packages, scope.state_clause(), SellerInboundPackage.package_code.ilike(prefix, escape="\\"))
         .order_by(
             case(
                 (
@@ -791,7 +800,9 @@ def search_admin_records(
     if remaining:
         outbound_packages = session.execute(
             select(OrderPackage.package_code, OrderPackage.status)
-            .where(OrderPackage.package_code.ilike(prefix, escape="\\"))
+            .where(can_search_packages,
+                   scope.pickup_location_clause(),
+                   OrderPackage.package_code.ilike(prefix, escape="\\"))
             .order_by(
                 case(
                     (
@@ -836,7 +847,7 @@ def search_admin_records(
             Store.name,
             Store.status,
         )
-        .where(or_(*store_conditions))
+        .where("stores.moderate" in permissions, or_(*store_conditions))
         .order_by(
             case(
                 (

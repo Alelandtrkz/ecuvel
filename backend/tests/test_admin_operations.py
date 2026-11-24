@@ -725,19 +725,21 @@ def test_admin_search_uses_public_references_and_group_limits(session):
     session.add_all([inbound, outbound])
     session.flush()
 
-    by_order = search_admin_records(session, query=order_number[:8])
+    actor = session.get(User, base.operator_id)
+    actor.is_ecuvel_staff = True
+    by_order = search_admin_records(session, actor=actor, query=order_number[:8])
     assert any(
         result.reference == order_number
         for group in by_order.groups
         for result in group.results
     )
-    exact_order = search_admin_records(session, query=order_number)
+    exact_order = search_admin_records(session, actor=actor, query=order_number)
     assert exact_order.groups[0].results[0].reference == order_number
-    by_user = search_admin_records(session, query=buyer.public_account_code)
+    by_user = search_admin_records(session, actor=actor, query=buyer.public_account_code)
     assert by_user.groups[0].results[0].reference == buyer.public_account_code
-    by_package = search_admin_records(session, query="PKG-000000010")
+    by_package = search_admin_records(session, actor=actor, query="PKG-000000010")
     assert by_package.groups[0].results[0].reference == inbound.package_code
-    by_store = search_admin_records(session, query=store.public_store_code)
+    by_store = search_admin_records(session, actor=actor, query=store.public_store_code)
     assert by_store.groups[0].results[0].reference == store.public_store_code
     assert all(
         len(group.results) <= 5
@@ -746,7 +748,7 @@ def test_admin_search_uses_public_references_and_group_limits(session):
     )
     assert str(order.id) not in repr((by_order, by_user, by_package, by_store))
 
-    empty = search_admin_records(session, query="   ")
+    empty = search_admin_records(session, actor=actor, query="   ")
     assert empty.query == ""
     assert empty.groups == ()
     assert empty.total_results == 0

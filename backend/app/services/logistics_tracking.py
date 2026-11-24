@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.admin_operating_context import operational_scope
+from app.services.admin_permissions import AdminAuthorizationError, require_actor_permission
 from app.models import (
     LogisticsPackageState,
     LogisticsTrackingEvent,
@@ -44,6 +46,10 @@ class LogisticsValidationError(LogisticsTrackingError):
 
 
 class LogisticsConflictError(LogisticsTrackingError):
+    pass
+
+
+class LogisticsWrongDestinationError(LogisticsConflictError):
     pass
 
 
@@ -109,11 +115,11 @@ def _require_warehouse(
 ) -> Warehouse:
     statement = select(Warehouse).where(Warehouse.id == warehouse_id)
     if lock:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     warehouse = session.scalar(statement)
     if warehouse is None:
         raise LogisticsNotFoundError("No existe el punto ECUVEL seleccionado.")
-    if not warehouse.is_active:
+    if not warehouse.is_active or warehouse.seller_store_id is not None:
         raise LogisticsValidationError("El punto ECUVEL seleccionado está inactivo.")
     return warehouse
 
@@ -129,6 +135,7 @@ def _locked_state(session: Session, package_code: str) -> LogisticsPackageState:
         )
         .where(SellerInboundPackage.package_code == normalized)
         .with_for_update(of=LogisticsPackageState)
+        .execution_options(populate_existing=True)
     )
     if state is None:
         raise LogisticsNotFoundError(
@@ -149,7 +156,7 @@ def _active_transfer(
         .order_by(LogisticsTransfer.assigned_at.desc(), LogisticsTransfer.id.desc())
     )
     if lock:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return session.scalar(statement)
 
 
@@ -163,20 +170,23 @@ def _latest_transfer(
         .limit(1)
     )
     if lock:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update().execution_options(populate_existing=True)
     return session.scalar(statement)
 
 
 def _event_for_key(
-    session: Session, idempotency_key: str | None
+    session: Session, idempotency_key: str | None, *, state_id: uuid.UUID, actor_id: uuid.UUID,
 ) -> LogisticsTrackingEvent | None:
     if not idempotency_key:
         return None
-    return session.scalar(
+    event = session.scalar(
         select(LogisticsTrackingEvent).where(
             LogisticsTrackingEvent.idempotency_key == idempotency_key
         )
     )
+    if event is not None and (event.package_state_id != state_id or event.actor_user_id != actor_id):
+        raise AdminAuthorizationError()
+    return event
 
 
 def _append_event(
@@ -227,6 +237,7 @@ def register_received_inbound_package(
     idempotency_key: str | None = None,
 ) -> LogisticsMutationResult:
     actor = _require_staff(session, actor_user_id)
+    require_actor_permission(session, actor.id, "scanner.receive_package")
     package = session.scalar(
         select(SellerInboundPackage)
         .where(SellerInboundPackage.id == package_id)
@@ -248,6 +259,9 @@ def register_received_inbound_package(
             "La ubicación de recepción no es una ubicación ECUVEL activa."
         )
     warehouse = _require_warehouse(session, location.warehouse_id)
+    operational_scope(session, actor).require_point(warehouse.id)
+    if package.received_location_id != location.id:
+        raise LogisticsValidationError("El punto no coincide con la recepción registrada.")
     state = session.scalar(
         select(LogisticsPackageState)
         .where(LogisticsPackageState.seller_inbound_package_id == package.id)
@@ -298,7 +312,10 @@ def assign_package_transfer(
     now: datetime | None = None,
     idempotency_key: str | None = None,
 ) -> LogisticsMutationResult:
-    previous = _event_for_key(session, idempotency_key)
+    actor = _require_staff(session, actor_user_id)
+    require_actor_permission(session, actor.id, "operations.supervise")
+    state = _locked_state(session, package_code)
+    previous = _event_for_key(session, idempotency_key, state_id=state.id, actor_id=actor.id)
     if previous is not None:
         return LogisticsMutationResult(
             previous.package_state,
@@ -306,10 +323,8 @@ def assign_package_transfer(
             previous,
             True,
         )
-    actor = _require_staff(session, actor_user_id)
     responsible = _require_staff(session, responsible_user_id)
     destination = _require_warehouse(session, destination_warehouse_id)
-    state = _locked_state(session, package_code)
     if state.status not in {
         LogisticsPackageStatus.AT_POINT,
         LogisticsPackageStatus.DEVIATED,
@@ -392,12 +407,13 @@ def reassign_package_transfer(
     now: datetime | None = None,
     idempotency_key: str | None = None,
 ) -> LogisticsMutationResult:
-    previous = _event_for_key(session, idempotency_key)
+    actor = _require_staff(session, actor_user_id)
+    require_actor_permission(session, actor.id, "operations.supervise")
+    state = _locked_state(session, package_code)
+    previous = _event_for_key(session, idempotency_key, state_id=state.id, actor_id=actor.id)
     if previous is not None:
         return LogisticsMutationResult(previous.package_state, previous.transfer, previous, True)
-    actor = _require_staff(session, actor_user_id)
     responsible = _require_staff(session, responsible_user_id)
-    state = _locked_state(session, package_code)
     transfer = _active_transfer(session, state.id, lock=True)
     if transfer is None or transfer.status != LogisticsTransferStatus.ASSIGNED:
         raise LogisticsConflictError(
@@ -432,12 +448,20 @@ def confirm_package_pickup(
     now: datetime | None = None,
     idempotency_key: str | None = None,
 ) -> LogisticsMutationResult:
-    previous = _event_for_key(session, idempotency_key)
+    actor = _require_staff(session, actor_user_id)
+    require_actor_permission(session, actor.id, "fulfillment.operate_assigned")
+    state = _locked_state(session, package_code)
+    scope = operational_scope(session, actor)
+    transfer = _active_transfer(session, state.id, lock=True)
+    if scope.warehouse_ids is not None:
+        if scope.carrier_id:
+            if transfer is None or transfer.assigned_user_id != actor.id:
+                raise AdminAuthorizationError()
+        else:
+            scope.require_point(transfer.origin_warehouse_id if transfer else None)
+    previous = _event_for_key(session, idempotency_key, state_id=state.id, actor_id=actor.id)
     if previous is not None:
         return LogisticsMutationResult(previous.package_state, previous.transfer, previous, True)
-    actor = _require_staff(session, actor_user_id)
-    state = _locked_state(session, package_code)
-    transfer = _active_transfer(session, state.id, lock=True)
     if (
         transfer is not None
         and transfer.status == LogisticsTransferStatus.IN_TRANSIT
@@ -496,11 +520,15 @@ def receive_transfer_at_destination(
     now: datetime | None = None,
     idempotency_key: str | None = None,
 ) -> LogisticsMutationResult:
-    previous = _event_for_key(session, idempotency_key)
-    if previous is not None:
-        return LogisticsMutationResult(previous.package_state, previous.transfer, previous, True)
-    actor = _require_staff(session, actor_user_id)
+    actor = require_actor_permission(session, actor_user_id, "scanner.receive_package")
+    scope = operational_scope(session, actor)
+    scope.require_point(warehouse_id)
     warehouse = _require_warehouse(session, warehouse_id, lock=True)
+    state = _locked_state(session, package_code)
+    if state.expected_destination_warehouse_id != warehouse.id:
+        if scope.warehouse_ids is not None and state.status != LogisticsPackageStatus.IN_TRANSIT:
+            raise AdminAuthorizationError()
+        raise LogisticsWrongDestinationError("Solo el destino asignado puede recibir el paquete.")
     location = None
     if location_id is not None:
         location = session.scalar(
@@ -516,25 +544,34 @@ def receive_transfer_at_destination(
             raise LogisticsValidationError(
                 "La ubicación interna no pertenece al punto ECUVEL seleccionado."
             )
-    state = _locked_state(session, package_code)
     transfer = _active_transfer(session, state.id, lock=True)
+    previous = _event_for_key(session, idempotency_key, state_id=state.id, actor_id=actor.id)
     if transfer is None:
         latest = _latest_transfer(session, state.id, lock=True)
         if (
-            latest is not None
-            and latest.received_at is not None
-            and state.current_warehouse_id == warehouse.id
+            latest is not None and latest.status == LogisticsTransferStatus.RECEIVED
+            and latest.destination_warehouse_id == warehouse.id
+            and state.status == LogisticsPackageStatus.AT_POINT
+            and state.custodian_warehouse_id == state.current_warehouse_id == warehouse.id
+            and (location_id is None or location_id == state.current_location_id)
+            and (previous is None or (
+                previous.event_type == LogisticsTrackingEventType.RECEIVED_AT_DESTINATION
+                and previous.transfer_id == latest.id and previous.warehouse_id == warehouse.id
+                and previous.location_id == location_id
+            ))
         ):
-            return LogisticsMutationResult(state, latest, None, True)
+            return LogisticsMutationResult(state, latest, previous, True)
         raise LogisticsConflictError("El paquete no tiene un traslado en tránsito.")
+    if transfer.destination_warehouse_id != warehouse.id:
+        raise LogisticsWrongDestinationError("Solo el destino asignado puede recibir el paquete.")
     if (
-        transfer.status != LogisticsTransferStatus.IN_TRANSIT
+        previous is not None
+        or transfer.status != LogisticsTransferStatus.IN_TRANSIT
         or state.status != LogisticsPackageStatus.IN_TRANSIT
         or state.custodian_user_id != transfer.assigned_user_id
     ):
-        raise LogisticsConflictError(
-            "El estado del paquete no permite confirmar esta recepción."
-        )
+        raise LogisticsConflictError("El estado del paquete no permite confirmar esta recepción.")
+    normalized_notes = _normalized_notes(notes)
     occurred_at = _now(now)
     previous_user_id = state.custodian_user_id
     transfer.received_at = occurred_at
@@ -543,16 +580,10 @@ def receive_transfer_at_destination(
     state.custodian_warehouse_id = warehouse.id
     state.custodian_user_id = None
     state.last_event_at = occurred_at
-    arrived_as_expected = warehouse.id == transfer.destination_warehouse_id
-    if arrived_as_expected:
-        transfer.status = LogisticsTransferStatus.RECEIVED
-        state.status = LogisticsPackageStatus.AT_POINT
-        state.is_deviated = False
-    else:
-        transfer.status = LogisticsTransferStatus.DEVIATED
-        state.status = LogisticsPackageStatus.DEVIATED
-        state.is_deviated = True
-    arrival = _append_event(
+    transfer.status = LogisticsTransferStatus.RECEIVED
+    state.status = LogisticsPackageStatus.AT_POINT
+    state.is_deviated = False
+    _append_event(
         session,
         state=state,
         transfer=transfer,
@@ -564,42 +595,24 @@ def receive_transfer_at_destination(
         previous_custodian_user_id=previous_user_id,
         new_custodian_warehouse_id=warehouse.id,
         idempotency_key=(f"{idempotency_key}:arrival" if idempotency_key else None),
-        notes=_normalized_notes(notes),
+        notes=normalized_notes,
     )
-    if arrived_as_expected:
-        event_record = _append_event(
-            session,
-            state=state,
-            transfer=transfer,
-            event_type=LogisticsTrackingEventType.RECEIVED_AT_DESTINATION,
-            occurred_at=occurred_at,
-            actor_user_id=actor.id,
-            warehouse_id=warehouse.id,
-            location_id=location.id if location else None,
-            previous_custodian_user_id=previous_user_id,
-            new_custodian_warehouse_id=warehouse.id,
-            idempotency_key=idempotency_key,
-            notes="Recepción confirmada en el destino esperado.",
-        )
-    else:
-        event_record = _append_event(
-            session,
-            state=state,
-            transfer=transfer,
-            event_type=LogisticsTrackingEventType.DEVIATION_DETECTED,
-            occurred_at=occurred_at,
-            actor_user_id=actor.id,
-            warehouse_id=warehouse.id,
-            location_id=location.id if location else None,
-            previous_custodian_user_id=previous_user_id,
-            new_custodian_warehouse_id=warehouse.id,
-            idempotency_key=idempotency_key,
-            notes=(
-                "El paquete fue recibido en un punto distinto de su destino esperado."
-            ),
-        )
+    event_record = _append_event(
+        session,
+        state=state,
+        transfer=transfer,
+        event_type=LogisticsTrackingEventType.RECEIVED_AT_DESTINATION,
+        occurred_at=occurred_at,
+        actor_user_id=actor.id,
+        warehouse_id=warehouse.id,
+        location_id=location.id if location else None,
+        previous_custodian_user_id=previous_user_id,
+        new_custodian_warehouse_id=warehouse.id,
+        idempotency_key=idempotency_key,
+        notes="Recepción confirmada en el destino esperado.",
+    )
     session.flush()
-    return LogisticsMutationResult(state, transfer, event_record or arrival, False)
+    return LogisticsMutationResult(state, transfer, event_record, False)
 
 
 def report_logistics_incident(
@@ -614,12 +627,9 @@ def report_logistics_incident(
 ) -> LogisticsMutationResult:
     """Record a rejected/incorrect delivery attempt without transferring custody."""
 
-    previous = _event_for_key(session, idempotency_key)
-    if previous is not None:
-        return LogisticsMutationResult(
-            previous.package_state, previous.transfer, previous, True
-        )
-    actor = _require_staff(session, actor_user_id)
+    actor = require_actor_permission(session, actor_user_id, "scanner.receive_package")
+    scope = operational_scope(session, actor)
+    scope.require_point(warehouse_id)
     warehouse = _require_warehouse(session, warehouse_id, lock=True)
     state = _locked_state(session, package_code)
     transfer = _active_transfer(session, state.id, lock=True)
@@ -627,11 +637,12 @@ def report_logistics_incident(
         transfer is None
         or transfer.status != LogisticsTransferStatus.IN_TRANSIT
         or state.status != LogisticsPackageStatus.IN_TRANSIT
+        or state.expected_destination_warehouse_id != transfer.destination_warehouse_id
         or state.custodian_user_id != transfer.assigned_user_id
     ):
-        raise LogisticsConflictError(
-            "El paquete no tiene un traslado en tránsito que pueda reportarse."
-        )
+        if scope.warehouse_ids is not None:
+            raise LogisticsNotFoundError("No hay una llegada en tránsito con ese código.")
+        raise LogisticsConflictError("El paquete no tiene un traslado en tránsito que pueda reportarse.")
     if transfer.destination_warehouse_id == warehouse.id:
         raise LogisticsValidationError(
             "Este punto es el destino esperado; confirma la recepción normal."
@@ -641,6 +652,14 @@ def report_logistics_incident(
         raise LogisticsValidationError(
             "Describe por qué se rechazó la entrega en este punto."
         )
+    previous = _event_for_key(session, idempotency_key, state_id=state.id, actor_id=actor.id)
+    if previous is not None:
+        if (
+            previous.transfer_id != transfer.id or previous.warehouse_id != warehouse.id
+            or previous.event_type != LogisticsTrackingEventType.INCIDENT_REPORTED
+        ):
+            raise LogisticsConflictError("La solicitud ya corresponde a otra operación.")
+        return LogisticsMutationResult(state, transfer, previous, True)
     occurred_at = _now(now)
     event_record = _append_event(
         session,
@@ -653,10 +672,7 @@ def report_logistics_incident(
         previous_custodian_user_id=state.custodian_user_id,
         new_custodian_user_id=state.custodian_user_id,
         idempotency_key=idempotency_key,
-        notes=(
-            f"Entrega rechazada en {warehouse.name}; el paquete continúa "
-            f"bajo custodia del transportista. Motivo: {normalized_reason}"
-        ),
+        notes=normalized_reason,
     )
     session.flush()
     return LogisticsMutationResult(state, transfer, event_record, False)

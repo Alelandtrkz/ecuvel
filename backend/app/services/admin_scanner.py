@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import (
@@ -35,10 +35,13 @@ from app.services.admin_operating_context import (
     AdminOperatingContextError,
     AdminOperatingOption as AdminScannerOption,
     AdminOperatingPoint,
+    OperationalScope,
     get_operating_point,
+    operational_scope,
     require_active_operating_point as shared_require_active_operating_point,
     warehouse_options,
 )
+from app.services.admin_permissions import AdminAuthorizationError, user_has_permission
 
 
 _PUBLIC_USER_RE = re.compile(r"^U-(\d{1,8})$", re.IGNORECASE)
@@ -107,6 +110,12 @@ class AdminTransportPickupView:
 
 
 @dataclass(frozen=True, slots=True)
+class UnexpectedTransferArrival:
+    package_code: str
+    destination_name: str
+
+
+@dataclass(frozen=True, slots=True)
 class AdminTransferReceptionView:
     package_code: str
     order_number: str
@@ -117,7 +126,6 @@ class AdminTransferReceptionView:
     origin_name: str
     destination_name: str
     operating_point_name: str
-    is_deviation: bool
     receiving_locations: tuple[AdminScannerOption, ...]
     selected_location_id: str
     can_confirm: bool
@@ -186,6 +194,7 @@ def require_receiving_location(
     *,
     warehouse_id: uuid.UUID,
     location_id: str | uuid.UUID | None,
+    scope: OperationalScope,
     lock: bool = False,
 ) -> WarehouseLocation:
     try:
@@ -198,6 +207,7 @@ def require_receiving_location(
     if lock:
         statement = statement.with_for_update()
     location = session.scalar(statement)
+    scope.require_point(location.warehouse_id if location else None)
     if (
         location is None
         or not location.is_active
@@ -211,19 +221,19 @@ def require_receiving_location(
 
 
 def get_admin_scanner_home(
-    session: Session, *, warehouse_id: str | uuid.UUID | None
+    session: Session, *, warehouse_id: str | uuid.UUID | None, scope: OperationalScope
 ) -> AdminScannerHome:
     return AdminScannerHome(
-        get_operating_point(session, warehouse_id),
-        warehouse_options(session),
+        get_operating_point(session, warehouse_id, scope=scope),
+        warehouse_options(session, scope),
     )
 
 
-def _inbound_record(session: Session, code: str):
+def _inbound_record(session: Session, code: str, scope: OperationalScope, *, first_reception=False):
     normalized = normalize_scanned_code(code)
     if not normalized:
         return None
-    return session.execute(
+    statement = (
         select(SellerInboundPackage, SellerOrder, Order, Store, LogisticsPackageState)
         .join(SellerOrder, SellerOrder.id == SellerInboundPackage.seller_order_id)
         .join(Order, Order.id == SellerOrder.order_id)
@@ -246,7 +256,18 @@ def _inbound_record(session: Session, code: str):
                 SellerInboundPackage.barcode == normalized,
             )
         )
-    ).one_or_none()
+    )
+    visible = scope.state_clause()
+    if first_reception:
+        # The seller hands this parcel in physically. Its first point is
+        # recorded only after the operator verifies all units at reception.
+        visible = or_(visible, and_(
+            LogisticsPackageState.id.is_(None),
+            SellerInboundPackage.received_location_id.is_(None),
+            SellerInboundPackage.status == SellerInboundPackageStatus.READY_FOR_DROPOFF,
+        ))
+    statement = statement.where(visible)
+    return session.execute(statement).one_or_none()
 
 
 def _active_transfer(session: Session, state_id: uuid.UUID) -> LogisticsTransfer | None:
@@ -334,10 +355,12 @@ def _selected_receiving_location(point: AdminOperatingPoint | None) -> str:
 def get_admin_inbound_reception(
     session: Session,
     *,
-    code: str,
+    scope: OperationalScope, code: str,
     operating_point: AdminOperatingPoint | None,
 ) -> AdminInboundReceptionView | None:
-    record = _inbound_record(session, code)
+    if operating_point is not None:
+        scope.require_point(operating_point.id)
+    record = _inbound_record(session, code, scope, first_reception=operating_point is not None)
     if record is None:
         return None
     package, seller_order, order, store, state = record
@@ -381,10 +404,10 @@ def get_admin_inbound_reception(
 def get_admin_transport_pickup(
     session: Session,
     *,
-    code: str,
+    scope: OperationalScope, code: str,
     operating_point: AdminOperatingPoint | None,
 ) -> AdminTransportPickupView | None:
-    record = _inbound_record(session, code)
+    record = _inbound_record(session, code, scope)
     if record is None:
         return None
     package, _seller_order, order, _store, state = record
@@ -438,10 +461,33 @@ def get_admin_transport_pickup(
 def get_admin_transfer_reception(
     session: Session,
     *,
-    code: str,
+    actor: User, code: str,
     operating_point: AdminOperatingPoint | None,
-) -> AdminTransferReceptionView | None:
-    record = _inbound_record(session, code)
+) -> AdminTransferReceptionView | UnexpectedTransferArrival | None:
+    if not user_has_permission(actor, "scanner.receive_package"):
+        raise AdminAuthorizationError()
+    scope = operational_scope(session, actor)
+    if operating_point:
+        scope.require_point(operating_point.id)
+        # Only an exact arrival scan may disclose the destination outside the point's scope.
+        match = session.execute(
+            select(SellerInboundPackage.package_code, Warehouse.name)
+            .select_from(SellerInboundPackage)
+            .join(LogisticsPackageState, LogisticsPackageState.seller_inbound_package_id == SellerInboundPackage.id)
+            .join(LogisticsTransfer, LogisticsTransfer.package_state_id == LogisticsPackageState.id)
+            .join(Warehouse, Warehouse.id == LogisticsTransfer.destination_warehouse_id)
+            .where(
+                SellerInboundPackage.package_code == normalize_scanned_code(code),
+                LogisticsPackageState.status == LogisticsPackageStatus.IN_TRANSIT,
+                LogisticsTransfer.status == LogisticsTransferStatus.IN_TRANSIT,
+                LogisticsPackageState.custodian_user_id == LogisticsTransfer.assigned_user_id,
+                LogisticsPackageState.expected_destination_warehouse_id == Warehouse.id,
+                Warehouse.id != operating_point.id,
+            )
+        ).one_or_none()
+        if match is not None:
+            return UnexpectedTransferArrival(*match)
+    record = _inbound_record(session, code, scope)
     if record is None:
         return None
     package, _seller_order, order, _store, state = record
@@ -451,7 +497,7 @@ def get_admin_transfer_reception(
             package.package_code, order.order_number, "Sin traslado activo", "muted",
             None, "Sin responsable", "Sin origen", "Sin destino",
             operating_point.label if operating_point else "Sin punto operativo",
-            False, operating_point.receiving_locations if operating_point else (),
+            operating_point.receiving_locations if operating_point else (),
             _selected_receiving_location(operating_point), False,
             "El paquete no tiene un traslado activo.",
         )
@@ -459,6 +505,8 @@ def get_admin_transfer_reception(
     locations = operating_point.receiving_locations if operating_point else ()
     can_confirm = bool(
         operating_point
+        and operating_point.id == transfer.destination_warehouse_id == state.expected_destination_warehouse_id
+        and state.custodian_user_id == transfer.assigned_user_id
         and locations
         and transfer.status == LogisticsTransferStatus.IN_TRANSIT
         and state.status == LogisticsPackageStatus.IN_TRANSIT
@@ -484,7 +532,6 @@ def get_admin_transfer_reception(
         transfer.origin_warehouse.name,
         transfer.destination_warehouse.name,
         operating_point.label if operating_point else "Sin punto operativo",
-        bool(operating_point and operating_point.id != transfer.destination_warehouse_id),
         locations,
         _selected_receiving_location(operating_point),
         can_confirm,
@@ -557,10 +604,12 @@ def _ready_orders_for_buyer(
 def get_admin_customer_handover(
     session: Session,
     *,
-    buyer_code: str,
+    buyer_code: str, scope: OperationalScope,
     operating_point: AdminOperatingPoint | None,
     order_number: str | None = None,
 ) -> AdminCustomerHandoverView | None:
+    if operating_point is not None:
+        scope.require_point(operating_point.id)
     buyer = find_buyer_by_public_code(session, buyer_code)
     if buyer is None:
         return None
@@ -573,6 +622,8 @@ def get_admin_customer_handover(
         if operating_point
         else ()
     )
+    if scope.warehouse_ids is not None and not orders:
+        return None
     selected = None
     normalized_order = (order_number or "").strip().upper()
     if normalized_order:
@@ -595,13 +646,13 @@ def get_admin_customer_handover(
 
 
 def get_admin_package_lookup(
-    session: Session, *, code: str
+    session: Session, *, scope: OperationalScope, code: str
 ) -> AdminPackageLookupView | None:
     normalized = normalize_scanned_code(code)
     if not normalized:
         return None
-    inbound = _inbound_record(session, normalized)
-    outbound_records = session.execute(
+    inbound = _inbound_record(session, normalized, scope)
+    outbound_query = (
         select(OrderPackage, OrderItem, SellerOrder, Order, Store)
         .join(OrderItem, OrderItem.id == OrderPackage.order_item_id)
         .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
@@ -614,7 +665,9 @@ def get_admin_package_lookup(
                 OrderPackage.barcode == normalized,
             )
         )
-    ).all()
+    )
+    outbound_query = outbound_query.where(scope.pickup_location_clause())
+    outbound_records = session.execute(outbound_query).all()
     outbound = outbound_records[0] if len(outbound_records) == 1 else None
     if len(outbound_records) > 1 or (inbound and outbound):
         return AdminPackageLookupView(

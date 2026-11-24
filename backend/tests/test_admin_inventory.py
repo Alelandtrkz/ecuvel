@@ -45,8 +45,8 @@ def _set_point(client, warehouse_id) -> None:
         browser["admin_operating_warehouse_id"] = str(warehouse_id)
 
 
-def _received_inbound(session, base, staff, *, suffix: str | None = None):
-    _order_id, order_number, item_ids = create_order_items(session, base, [1])
+def _received_inbound(session, base, staff, *, suffix: str | None = None, order_data=None):
+    _order_id, order_number, item_ids = order_data or create_order_items(session, base, [1])
     seller_order = session.scalar(
         select(SellerOrder).where(SellerOrder.order_id == _order_id)
     )

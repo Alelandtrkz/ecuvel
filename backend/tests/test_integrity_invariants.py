@@ -155,6 +155,7 @@ def test_order_cannot_remain_partially_handed_over(session_factory):
         with session_factory.begin() as session:
             handover_order_packages(
                 session=session,
+                actor_user_id=base.operator_id,
                 order_number=ready.order_number,
                 scanned_codes=(ready.package_codes[0],),
             )

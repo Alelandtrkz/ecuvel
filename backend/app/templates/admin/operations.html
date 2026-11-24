@@ -13,6 +13,12 @@
 {% endmacro %}
 
 {% block admin_content %}
+{% if page is none %}
+<section class="admin-page-heading">
+  <h1>Centro de Operaciones</h1>
+  {% if 'scanner.use' in admin_permissions %}<a href="{{ url_for('admin.scanner') }}">Escanear paquete</a>{% endif %}
+</section>
+{% else %}
 <div class="admin-page">
   <section class="admin-page-heading">
     <div>
@@ -131,4 +137,5 @@
     {% endif %}
   </section>
 </div>
+{% endif %}
 {% endblock %}

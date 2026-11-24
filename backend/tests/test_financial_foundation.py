@@ -28,6 +28,7 @@ from app.models.enums import (
     StaffEmploymentStatus,
     StaffRole,
     StoreOnboardingStatus,
+    UserStatus,
 )
 from app.services.admin_permissions import permissions_for_user
 from app.services.bank_account_crypto import (
@@ -677,6 +678,22 @@ def test_payout_remains_bound_to_exact_immutable_bank_version(session: Session):
     assert session.get(SellerPayout, payout.id).bank_account_version_id == version.id
 
 
+def _staff_account(role: StaffRole | None, *, is_active: bool = True, status: UserStatus = UserStatus.ACTIVE):
+    profile = None
+    if role is not None:
+        profile = SimpleNamespace(role=role, employment_status=StaffEmploymentStatus.ACTIVE)
+    return SimpleNamespace(is_ecuvel_staff=True, is_active=is_active, status=status, staff_profile=profile)
+
+
+@pytest.mark.parametrize(("is_active", "status"), [
+    (False, UserStatus.ACTIVE),
+    (True, UserStatus.SUSPENDED),
+])
+def test_disabled_or_suspended_super_admin_has_no_permissions(is_active, status):
+    account = _staff_account(StaffRole.SUPER_ADMIN, is_active=is_active, status=status)
+    assert permissions_for_user(account) == frozenset()
+
+
 def test_sensitive_bank_access_and_financial_audit_are_conservative(session: Session):
     base = create_catalog_and_stock(session)
     version, _ = create_store_bank_account_version(
@@ -687,21 +704,9 @@ def test_sensitive_bank_access_and_financial_audit_are_conservative(session: Ses
         bank_name="Sensitive Bank",
         account_number="001-0000-4444",
     )
-    support = SimpleNamespace(
-        is_ecuvel_staff=True,
-        staff_profile=SimpleNamespace(
-            role=StaffRole.SUPPORT,
-            employment_status=StaffEmploymentStatus.ACTIVE,
-        ),
-    )
-    super_admin = SimpleNamespace(
-        is_ecuvel_staff=True,
-        staff_profile=SimpleNamespace(
-            role=StaffRole.SUPER_ADMIN,
-            employment_status=StaffEmploymentStatus.ACTIVE,
-        ),
-    )
-    legacy = SimpleNamespace(is_ecuvel_staff=True, staff_profile=None)
+    support = _staff_account(StaffRole.SUPPORT)
+    super_admin = _staff_account(StaffRole.SUPER_ADMIN)
+    legacy = _staff_account(None)
     assert "payments.review" not in permissions_for_user(support)
     assert "payouts.pay" not in permissions_for_user(support)
     assert "payments.review" in permissions_for_user(legacy)

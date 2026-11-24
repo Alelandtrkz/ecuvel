@@ -9,6 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.services.admin_permissions import require_actor_permission
 from app.models import (
     Category,
     Product,
@@ -129,6 +130,7 @@ def record_moderation_decision(
     reason_code: str | None = None,
     note: str | None = None,
 ) -> ProductDraft:
+    require_actor_permission(session, actor_user_id, "products.moderate")
     draft = get_locked_submitted_draft(session, draft_id)
     if draft.status != ProductDraftStatus.SUBMITTED:
         raise ProductModerationStateError("La publicación ya no está en revisión.")
@@ -310,6 +312,7 @@ def publish_product_draft(
     catalog_media_root: str | Path,
     image_processing_config: ProductImageProcessingConfig | None = None,
 ) -> PublicationResult:
+    require_actor_permission(session, actor_user_id, "products.moderate")
     draft = get_locked_submitted_draft(session, draft_id)
     if draft.publication is not None:
         return PublicationResult(

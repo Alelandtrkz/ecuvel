@@ -38,6 +38,7 @@ from app.services.admin_fulfillment import (
 )
 from app.services.admin_scanner import (
     AdminScannerError,
+    UnexpectedTransferArrival,
     get_admin_customer_handover,
     get_admin_inbound_reception,
     get_admin_package_lookup,
@@ -49,6 +50,7 @@ from app.services.admin_scanner import (
     require_receiving_location,
 )
 from app.services.admin_operating_context import (
+    operational_scope,
     ADMIN_OPERATING_WAREHOUSE_SESSION_KEY,
     AdminOperatingContextError,
     require_active_operating_point as require_shared_operating_point,
@@ -134,6 +136,10 @@ from app.services.payment_proofs import (
 from app.services.barcodes import BarcodeRenderError, render_package_code128_svg
 from app.services.logistics_tracking import (
     LogisticsTrackingError,
+    LogisticsConflictError,
+    LogisticsNotFoundError,
+    LogisticsWrongDestinationError,
+    LogisticsValidationError,
     assign_package_transfer,
     confirm_package_pickup,
     reassign_package_transfer,
@@ -174,6 +180,7 @@ from app.services.product_publication import (
 )
 from app.services.product_image_processing import product_image_processing_config
 from app.services.admin_permissions import (
+    AdminAuthorizationError, delegable_staff_roles,
     ROLE_PERMISSIONS,
     admin_permission_required,
     permissions_for_user,
@@ -219,6 +226,7 @@ from app.services.admin_users import (
     record_admin_audit,
     revoke_staff_invitations,
     set_staff_access,
+    require_user_management,
     set_user_suspension,
     update_staff_profile,
 )
@@ -313,10 +321,25 @@ def _shell_context(section: str) -> dict:
     }
 
 
+def _scope():
+    return operational_scope(db.session, current_user)
+
+
+def _checked_point_id(value):
+    scope = _scope()
+    if value and scope.warehouse_ids is not None:
+        try:
+            identifier = uuid.UUID(str(value))
+        except ValueError:
+            raise AdminAuthorizationError()
+        scope.require_point(identifier)
+    return value
+
+
 def _scanner_operating_point():
     return get_admin_scanner_home(
         db.session,
-        warehouse_id=browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+        warehouse_id=_inventory_warehouse_id(), scope=_scope(),
     )
 
 
@@ -354,6 +377,12 @@ def _scanner_mutation_error(endpoint: str, exc: Exception, **values):
 @admin.get("")
 @ecuvel_staff_required
 def operations():
+    if not permissions_for_user(current_user):
+        raise AdminAuthorizationError()
+    if not (user_has_permission(current_user, "operations.supervise")
+            and user_has_permission(current_user, "stores.moderate")
+            and user_has_permission(current_user, "admin.users.view")):
+        return render_template("admin/operations.html", page=None, **_shell_context("operations"))
     page = get_admin_operations_page(
         db.session,
         critical_stock_threshold=current_app.config[
@@ -372,9 +401,11 @@ def operations():
 @limiter.limit("30 per minute")
 @ecuvel_staff_required
 def search():
+    if not permissions_for_user(current_user):
+        raise AdminAuthorizationError()
     page = search_admin_records(
         db.session,
-        query=request.args.get("q", ""),
+        actor=current_user, query=request.args.get("q", ""),
         limit_per_group=current_app.config["ADMIN_SEARCH_GROUP_LIMIT"],
     )
     return render_template(
@@ -385,7 +416,7 @@ def search():
 
 
 @admin.get("/scanner")
-@ecuvel_staff_required
+@admin_permission_required("scanner.use")
 def scanner():
     home = _scanner_operating_point()
     return render_template(
@@ -397,12 +428,12 @@ def scanner():
 
 @admin.post("/scanner/context")
 @limiter.limit("30 per hour")
-@ecuvel_staff_required
+@admin_permission_required("scanner.use")
 def scanner_context():
     try:
         warehouse = require_active_operating_point(
             db.session,
-            request.form.get("warehouse_id"),
+            _checked_point_id(request.form.get("warehouse_id")),
         )
     except AdminScannerError as exc:
         flash(str(exc), "error")
@@ -431,15 +462,17 @@ def scanner_context():
 
 
 @admin.get("/scanner/receive")
-@ecuvel_staff_required
+@admin_permission_required("scanner.receive_package")
 def scanner_receive():
     home = _scanner_operating_point()
     code = normalize_scanned_code(request.args.get("code"))
     view = get_admin_inbound_reception(
         db.session,
-        code=code,
+        code=code, scope=_scope(),
         operating_point=home.operating_point,
     ) if code else None
+    if code and view is None and _scope().warehouse_ids is not None:
+        abort(404)
     return render_template(
         "admin/scanner_receive.html",
         home=home,
@@ -454,19 +487,19 @@ def scanner_receive():
 
 @admin.post("/scanner/receive")
 @limiter.limit("120 per hour")
-@ecuvel_staff_required
+@admin_permission_required("scanner.receive_package")
 def scanner_receive_confirm():
     code = normalize_scanned_code(request.form.get("package_code"))
     try:
         warehouse = require_active_operating_point(
             db.session,
-            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            _inventory_warehouse_id(),
             lock=True,
         )
         location = require_receiving_location(
             db.session,
             warehouse_id=warehouse.id,
-            location_id=request.form.get("received_location_id"),
+            location_id=request.form.get("received_location_id"), scope=_scope(),
             lock=True,
         )
         _scanner_action_token()
@@ -491,6 +524,9 @@ def scanner_receive_confirm():
         LogisticsTrackingError,
     ) as exc:
         return _scanner_mutation_error("admin.scanner_receive", exc, code=code)
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló recepción Scanner package=%s", code)
@@ -501,15 +537,17 @@ def scanner_receive_confirm():
 
 
 @admin.get("/scanner/transport")
-@ecuvel_staff_required
+@admin_permission_required("fulfillment.operate_assigned")
 def scanner_transport():
     home = _scanner_operating_point()
     code = normalize_scanned_code(request.args.get("code"))
     view = get_admin_transport_pickup(
         db.session,
-        code=code,
+        code=code, scope=_scope(),
         operating_point=home.operating_point,
     ) if code else None
+    if code and view is None and _scope().warehouse_ids is not None:
+        abort(404)
     return render_template(
         "admin/scanner_transport.html",
         home=home,
@@ -524,13 +562,13 @@ def scanner_transport():
 
 @admin.post("/scanner/transport")
 @limiter.limit("120 per hour")
-@ecuvel_staff_required
+@admin_permission_required("fulfillment.operate_assigned")
 def scanner_transport_confirm():
     code = normalize_scanned_code(request.form.get("package_code"))
     try:
         warehouse = require_active_operating_point(
             db.session,
-            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            _inventory_warehouse_id(),
             lock=True,
         )
         token = _scanner_action_token()
@@ -545,6 +583,9 @@ def scanner_transport_confirm():
         db.session.commit()
     except (AdminScannerError, LogisticsTrackingError) as exc:
         return _scanner_mutation_error("admin.scanner_transport", exc, code=code)
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló salida Scanner package=%s", code)
@@ -555,22 +596,25 @@ def scanner_transport_confirm():
 
 
 @admin.get("/scanner/arrival")
-@ecuvel_staff_required
+@limiter.limit("120 per hour")
+@admin_permission_required("scanner.receive_package")
 def scanner_arrival():
     home = _scanner_operating_point()
     code = normalize_scanned_code(request.args.get("code"))
     view = get_admin_transfer_reception(
         db.session,
-        code=code,
+        code=code, actor=current_user,
         operating_point=home.operating_point,
     ) if code else None
+    if code and view is None and _scope().warehouse_ids is not None:
+        abort(404)
     return render_template(
         "admin/scanner_arrival.html",
         home=home,
         code=code,
         view=view,
+        unexpected=isinstance(view, UnexpectedTransferArrival),
         lookup_error=("No encontramos un paquete en traslado con ese código." if code and view is None else None),
-        result=request.args.get("result"),
         action_token=uuid.uuid4().hex,
         **_shell_context("scanner"),
     )
@@ -578,36 +622,36 @@ def scanner_arrival():
 
 @admin.post("/scanner/arrival")
 @limiter.limit("120 per hour")
-@ecuvel_staff_required
+@admin_permission_required("scanner.receive_package")
 def scanner_arrival_confirm():
     code = normalize_scanned_code(request.form.get("package_code"))
+    operation = request.form.get("operation", "accept")
+    if operation not in {"accept", "reject"}:
+        abort(400)
     try:
         warehouse = require_active_operating_point(
             db.session,
-            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            _inventory_warehouse_id(),
             lock=True,
         )
         token = _scanner_action_token()
-        operation = request.form.get("operation", "accept")
         if operation == "reject":
             report_logistics_incident(
                 db.session,
                 package_code=code,
                 warehouse_id=warehouse.id,
                 actor_user_id=current_user.id,
-                reason=request.form.get("notes") or "Destino operativo incorrecto",
+                reason=request.form.get("notes", ""),
                 idempotency_key=f"scanner:arrival-rejected:{token}",
             )
-            was_deviated = False
-            was_rejected = True
         else:
             location = require_receiving_location(
                 db.session,
                 warehouse_id=warehouse.id,
-                location_id=request.form.get("received_location_id"),
+                location_id=request.form.get("received_location_id"), scope=_scope(),
                 lock=True,
             )
-            result = receive_transfer_at_destination(
+            receive_transfer_at_destination(
                 db.session,
                 package_code=code,
                 warehouse_id=warehouse.id,
@@ -616,47 +660,47 @@ def scanner_arrival_confirm():
                 notes=request.form.get("notes"),
                 idempotency_key=f"scanner:arrival:{token}",
             )
-            was_deviated = result.package_state.is_deviated
-            was_rejected = False
         db.session.commit()
+    except LogisticsValidationError as exc:
+        db.session.rollback()
+        abort(400, description=str(exc))
+    except LogisticsNotFoundError:
+        db.session.rollback()
+        abort(404)
+    except LogisticsConflictError as exc:
+        db.session.rollback()
+        abort(409, description=str(exc))
     except (AdminScannerError, LogisticsTrackingError) as exc:
         return _scanner_mutation_error("admin.scanner_arrival", exc, code=code)
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló llegada Scanner package=%s", code)
         flash("No pudimos registrar la llegada del paquete.", "error")
         return _scanner_redirect("admin.scanner_arrival", code=code)
-    if was_rejected:
-        flash(
-            "Intento registrado. La custodia continúa con el transportista.",
-            "warning",
-        )
+    if operation == "reject":
+        flash("Incidencia registrada. El transportista conserva la custodia.", "warning")
     else:
-        flash(
-            "Paquete recibido y marcado como desviado."
-            if was_deviated
-            else "Paquete recibido en el destino correcto.",
-            "warning" if was_deviated else "success",
-        )
-    return _scanner_redirect(
-        "admin.scanner_arrival",
-        code=code,
-        result=("rejected" if was_rejected else ("deviated" if was_deviated else "arrived")),
-    )
+        flash("Recepción confirmada en el destino asignado.", "success")
+    return _scanner_redirect("admin.scanner_arrival", code=code)
 
 
 @admin.get("/scanner/handover")
-@ecuvel_staff_required
+@admin_permission_required("scanner.dispatch_package")
 def scanner_handover():
     home = _scanner_operating_point()
     buyer_code = normalize_scanned_code(request.args.get("buyer"))
     order_number = " ".join((request.args.get("order_number") or "").strip().split())[:120]
     view = get_admin_customer_handover(
         db.session,
-        buyer_code=buyer_code,
+        buyer_code=buyer_code, scope=_scope(),
         operating_point=home.operating_point,
         order_number=order_number,
     ) if buyer_code else None
+    if buyer_code and view is None and _scope().warehouse_ids is not None:
+        abort(404)
     return render_template(
         "admin/scanner_handover.html",
         home=home,
@@ -673,14 +717,14 @@ def scanner_handover():
 
 @admin.post("/scanner/handover")
 @limiter.limit("60 per hour")
-@ecuvel_staff_required
+@admin_permission_required("scanner.dispatch_package")
 def scanner_handover_confirm():
     buyer_code = normalize_scanned_code(request.form.get("buyer_code"))
     order_number = " ".join((request.form.get("order_number") or "").strip().split())[:120]
     try:
         warehouse = require_active_operating_point(
             db.session,
-            browser_session.get(_SCANNER_WAREHOUSE_SESSION_KEY),
+            _inventory_warehouse_id(),
             lock=True,
         )
         _scanner_action_token()
@@ -690,13 +734,15 @@ def scanner_handover_confirm():
             )
         view = get_admin_customer_handover(
             db.session,
-            buyer_code=buyer_code,
+            buyer_code=buyer_code, scope=_scope(),
             operating_point=get_admin_scanner_home(
-                db.session, warehouse_id=warehouse.id
+                db.session, warehouse_id=warehouse.id, scope=_scope()
             ).operating_point,
             order_number=order_number,
         )
         if view is None or view.selected_order is None:
+            if _scope().warehouse_ids is not None:
+                raise AdminAuthorizationError()
             raise AdminScannerError(
                 "El pedido no está listo para retirarse en este punto."
             )
@@ -717,6 +763,9 @@ def scanner_handover_confirm():
             buyer=buyer_code,
             order_number=order_number,
         )
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló handover Scanner order=%s", order_number)
@@ -734,11 +783,13 @@ def scanner_handover_confirm():
 
 
 @admin.get("/scanner/package")
-@ecuvel_staff_required
+@admin_permission_required("scanner.use")
 def scanner_package():
     home = _scanner_operating_point()
     code = normalize_scanned_code(request.args.get("code"))
-    view = get_admin_package_lookup(db.session, code=code) if code else None
+    view = get_admin_package_lookup(db.session, scope=_scope(), code=code) if code else None
+    if code and view is None and _scope().warehouse_ids is not None:
+        abort(404)
     return render_template(
         "admin/scanner_package_lookup.html",
         home=home,
@@ -750,16 +801,16 @@ def scanner_package():
 
 
 def _inventory_warehouse_id():
-    return browser_session.get(ADMIN_OPERATING_WAREHOUSE_SESSION_KEY)
+    return _checked_point_id(browser_session.get(ADMIN_OPERATING_WAREHOUSE_SESSION_KEY))
 
 
 @admin.post("/inventory/context")
 @limiter.limit("30 per hour")
-@ecuvel_staff_required
+@admin_permission_required("inventory.view_assigned_point")
 def inventory_context():
     try:
         warehouse = require_shared_operating_point(
-            db.session, request.form.get("warehouse_id")
+            db.session, _checked_point_id(request.form.get("warehouse_id"))
         )
     except AdminOperatingContextError as exc:
         flash(str(exc), "error")
@@ -777,10 +828,10 @@ def inventory_context():
 
 
 @admin.get("/inventory")
-@ecuvel_staff_required
+@admin_permission_required("inventory.view_assigned_point")
 def inventory():
     page = get_admin_inventory_page(
-        db.session,
+        db.session, scope=_scope(),
         warehouse_id=_inventory_warehouse_id(),
         query=request.args.get("q"),
         active_filter=request.args.get("status"),
@@ -792,10 +843,10 @@ def inventory():
 
 
 @admin.get("/inventory/expected")
-@ecuvel_staff_required
+@admin_permission_required("inventory.view_assigned_point")
 def inventory_expected():
     page = get_admin_expected_page(
-        db.session,
+        db.session, scope=_scope(),
         warehouse_id=_inventory_warehouse_id(),
         page=request.args.get("page"),
     )
@@ -807,10 +858,10 @@ def inventory_expected():
 
 
 @admin.get("/inventory/stock")
-@ecuvel_staff_required
+@admin_permission_required("inventory.view_assigned_point")
 def inventory_stock():
     page = get_admin_stock_page(
-        db.session,
+        db.session, scope=_scope(),
         warehouse_id=_inventory_warehouse_id(),
         query=request.args.get("q"),
         page=request.args.get("page"),
@@ -821,10 +872,10 @@ def inventory_stock():
 
 
 @admin.get("/inventory/movements")
-@ecuvel_staff_required
+@admin_permission_required("inventory.view_assigned_point")
 def inventory_movements():
     page = get_admin_movements_page(
-        db.session,
+        db.session, scope=_scope(),
         warehouse_id=_inventory_warehouse_id(),
         active_filter=request.args.get("type"),
         page=request.args.get("page"),
@@ -837,10 +888,10 @@ def inventory_movements():
 
 
 @admin.get("/inventory/counts")
-@ecuvel_staff_required
+@admin_permission_required("inventory.view_assigned_point")
 def inventory_counts():
     page = get_admin_count_list_page(
-        db.session, warehouse_id=_inventory_warehouse_id()
+        db.session, scope=_scope(), warehouse_id=_inventory_warehouse_id()
     )
     return render_template(
         "admin/inventory_counts.html", page=page, **_shell_context("inventory")
@@ -849,7 +900,7 @@ def inventory_counts():
 
 @admin.post("/inventory/counts/start")
 @limiter.limit("20 per hour")
-@ecuvel_staff_required
+@admin_permission_required("operations.supervise")
 def inventory_count_start():
     try:
         warehouse = require_shared_operating_point(
@@ -867,6 +918,9 @@ def inventory_count_start():
         db.session.rollback()
         flash(str(exc), "error")
         return redirect(url_for("admin.inventory_counts"))
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló el inicio del conteo físico")
@@ -877,11 +931,11 @@ def inventory_count_start():
 
 
 @admin.get("/inventory/counts/<uuid:count_id>")
-@ecuvel_staff_required
+@admin_permission_required("inventory.view_assigned_point")
 def inventory_count_detail(count_id: uuid.UUID):
     page = get_admin_count_detail_page(
         db.session,
-        count_id=count_id,
+        count_id=count_id, scope=_scope(),
         warehouse_id=_inventory_warehouse_id(),
     )
     if page is None:
@@ -895,7 +949,7 @@ def inventory_count_detail(count_id: uuid.UUID):
 
 @admin.post("/inventory/counts/<uuid:count_id>/scan")
 @limiter.limit("600 per hour")
-@ecuvel_staff_required
+@admin_permission_required("operations.supervise")
 def inventory_count_scan(count_id: uuid.UUID):
     try:
         warehouse = require_shared_operating_point(
@@ -912,6 +966,9 @@ def inventory_count_scan(count_id: uuid.UUID):
     except (AdminOperatingContextError, PhysicalInventoryCountError) as exc:
         db.session.rollback()
         flash(str(exc), "error")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló escaneo de conteo count=%s", count_id)
@@ -928,7 +985,7 @@ def inventory_count_scan(count_id: uuid.UUID):
 
 @admin.post("/inventory/counts/<uuid:count_id>/finalize")
 @limiter.limit("20 per hour")
-@ecuvel_staff_required
+@admin_permission_required("operations.supervise")
 def inventory_count_finalize(count_id: uuid.UUID):
     try:
         if request.form.get("confirmed") != "1":
@@ -948,6 +1005,9 @@ def inventory_count_finalize(count_id: uuid.UUID):
     except (AdminOperatingContextError, PhysicalInventoryCountError) as exc:
         db.session.rollback()
         flash(str(exc), "error")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló cierre de conteo count=%s", count_id)
@@ -958,10 +1018,10 @@ def inventory_count_finalize(count_id: uuid.UUID):
 
 
 @admin.get("/orders")
-@ecuvel_staff_required
+@admin_permission_required("orders.view_related")
 def orders():
     page = get_admin_orders_page(
-        db.session,
+        db.session, scope=_scope(),
         tab=request.args.get("status"),
         query=request.args.get("q"),
         payment=request.args.get("payment"),
@@ -979,10 +1039,10 @@ def orders():
 
 
 @admin.get("/fulfillment")
-@ecuvel_staff_required
+@admin_permission_required("fulfillment.view_assigned")
 def fulfillment():
     page = get_admin_fulfillment_page(
-        db.session,
+        db.session, scope=_scope(),
         status=request.args.get("status"),
         query=request.args.get("q"),
         point=request.args.get("point"),
@@ -1001,10 +1061,10 @@ def fulfillment():
 
 
 @admin.get("/fulfillment/<string:package_code>")
-@ecuvel_staff_required
+@admin_permission_required("fulfillment.view_assigned")
 def fulfillment_detail(package_code: str):
     detail = get_admin_fulfillment_detail(
-        db.session,
+        db.session, scope=_scope(),
         package_code=package_code,
     )
     if detail is None:
@@ -1072,10 +1132,14 @@ def _fulfillment_action(package_code: str, operation: str):
                 idempotency_key=f"admin:{operation}:{key}",
             )
         elif operation == "receive":
+            warehouse_id = _uuid_field("warehouse_id")
+            selected = _inventory_warehouse_id()
+            if selected and uuid.UUID(str(selected)) != warehouse_id:
+                raise AdminAuthorizationError()
             receive_transfer_at_destination(
                 db.session,
                 package_code=package_code,
-                warehouse_id=_uuid_field("warehouse_id"),
+                warehouse_id=warehouse_id,
                 actor_user_id=current_user.id,
                 notes=request.form.get("notes"),
                 idempotency_key=f"admin:{operation}:{key}",
@@ -1083,9 +1147,15 @@ def _fulfillment_action(package_code: str, operation: str):
         else:
             abort(404)
         db.session.commit()
+    except LogisticsWrongDestinationError as exc:
+        db.session.rollback()
+        abort(409, description=str(exc))
     except LogisticsTrackingError as exc:
         db.session.rollback()
         flash(str(exc), "error")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception(
@@ -1103,43 +1173,43 @@ def _fulfillment_action(package_code: str, operation: str):
 
 @admin.post("/fulfillment/<string:package_code>/assign")
 @limiter.limit("60 per hour")
-@ecuvel_staff_required
+@admin_permission_required("operations.supervise")
 def fulfillment_assign(package_code: str):
     return _fulfillment_action(package_code, "assign")
 
 
 @admin.post("/fulfillment/<string:package_code>/correct")
 @limiter.limit("60 per hour")
-@ecuvel_staff_required
+@admin_permission_required("operations.supervise")
 def fulfillment_correct(package_code: str):
     return _fulfillment_action(package_code, "correct")
 
 
 @admin.post("/fulfillment/<string:package_code>/reassign")
 @limiter.limit("60 per hour")
-@ecuvel_staff_required
+@admin_permission_required("operations.supervise")
 def fulfillment_reassign(package_code: str):
     return _fulfillment_action(package_code, "reassign")
 
 
 @admin.post("/fulfillment/<string:package_code>/pickup")
 @limiter.limit("60 per hour")
-@ecuvel_staff_required
+@admin_permission_required("fulfillment.operate_assigned")
 def fulfillment_pickup(package_code: str):
     return _fulfillment_action(package_code, "pickup")
 
 
 @admin.post("/fulfillment/<string:package_code>/receive")
 @limiter.limit("60 per hour")
-@ecuvel_staff_required
+@admin_permission_required("scanner.receive_package")
 def fulfillment_receive(package_code: str):
     return _fulfillment_action(package_code, "receive")
 
 
 @admin.get("/fulfillment/<string:package_code>/label")
-@ecuvel_staff_required
+@admin_permission_required("fulfillment.view_assigned")
 def fulfillment_label(package_code: str):
-    detail = get_admin_fulfillment_detail(db.session, package_code=package_code)
+    detail = get_admin_fulfillment_detail(db.session, scope=_scope(), package_code=package_code)
     if detail is None:
         abort(404)
     try:
@@ -1154,9 +1224,9 @@ def fulfillment_label(package_code: str):
 
 
 @admin.get("/orders/<string:order_number>")
-@ecuvel_staff_required
+@admin_permission_required("orders.view_related")
 def order_detail(order_number: str):
-    detail = get_admin_order_detail(db.session, order_number=order_number)
+    detail = get_admin_order_detail(db.session, scope=_scope(), order_number=order_number)
     if detail is None:
         abort(404)
     return render_template(
@@ -1660,7 +1730,7 @@ def _draft_uuid(value: str | None) -> uuid.UUID | None:
 
 
 @admin.get("/stores")
-@ecuvel_staff_required
+@admin_permission_required("stores.moderate")
 def stores():
     page = get_admin_stores_page(
         db.session,
@@ -1681,7 +1751,7 @@ def stores():
 
 
 @admin.get("/stores/<uuid:onboarding_id>")
-@ecuvel_staff_required
+@admin_permission_required("stores.moderate")
 def store_review(onboarding_id: uuid.UUID):
     onboarding = get_admin_store_review(db.session, onboarding_id)
     if onboarding is None:
@@ -1749,7 +1819,7 @@ def reveal_store_bank_account(onboarding_id: uuid.UUID):
 
 
 @admin.get("/stores/<uuid:onboarding_id>/documents/<uuid:document_id>")
-@ecuvel_staff_required
+@admin_permission_required("stores.moderate")
 def store_document(onboarding_id: uuid.UUID, document_id: uuid.UUID):
     onboarding = get_admin_store_review(db.session, onboarding_id)
     if onboarding is None:
@@ -1783,7 +1853,7 @@ def store_document(onboarding_id: uuid.UUID, document_id: uuid.UUID):
 
 
 @admin.get("/stores/<uuid:onboarding_id>/contract")
-@ecuvel_staff_required
+@admin_permission_required("stores.moderate")
 def store_contract(onboarding_id: uuid.UUID):
     onboarding = get_admin_store_review(db.session, onboarding_id)
     acceptance = onboarding.contract_acceptance if onboarding is not None else None
@@ -1841,6 +1911,9 @@ def _store_review_decision(onboarding_id: uuid.UUID, action: str):
     except PartnerOnboardingError:
         db.session.rollback()
         flash("No pudimos guardar la revisión.", "error")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló la revisión de onboarding %s", onboarding_id)
@@ -1858,6 +1931,7 @@ def _store_review_decision(onboarding_id: uuid.UUID, action: str):
 
 @admin.post("/stores/<uuid:onboarding_id>/approve")
 @limiter.limit("30 per hour")
+@admin_permission_required("stores.moderate")
 @admin_permission_required("bank_accounts.sensitive.view")
 def approve_store(onboarding_id: uuid.UUID):
     return _store_review_decision(onboarding_id, "approve")
@@ -1865,13 +1939,13 @@ def approve_store(onboarding_id: uuid.UUID):
 
 @admin.post("/stores/<uuid:onboarding_id>/request-corrections")
 @limiter.limit("30 per hour")
-@ecuvel_staff_required
+@admin_permission_required("stores.moderate")
 def request_store_changes(onboarding_id: uuid.UUID):
     return _store_review_decision(onboarding_id, "corrections")
 
 
 @admin.get("/products")
-@ecuvel_staff_required
+@admin_permission_required("products.moderate")
 def products():
     page = get_admin_products_page(
         db.session,
@@ -1888,7 +1962,7 @@ def products():
 
 
 @admin.get("/products/<uuid:draft_id>/preview")
-@ecuvel_staff_required
+@admin_permission_required("products.moderate")
 def product_preview(draft_id: uuid.UUID):
     draft = get_admin_product_draft(db.session, draft_id)
     if draft is None:
@@ -1916,7 +1990,7 @@ def product_preview(draft_id: uuid.UUID):
 
 
 @admin.get("/products/<uuid:draft_id>/files/<uuid:file_id>")
-@ecuvel_staff_required
+@admin_permission_required("products.moderate")
 def product_file(draft_id: uuid.UUID, file_id: uuid.UUID):
     draft = get_admin_product_draft(db.session, draft_id)
     if draft is None:
@@ -2013,6 +2087,9 @@ def _record_product_decision(draft_id: uuid.UUID, decision: str):
     except ProductModerationError as exc:
         db.session.rollback()
         flash(str(exc), "error")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         current_app.logger.exception("Falló la moderación del producto %s", draft_id)
@@ -2029,21 +2106,21 @@ def _record_product_decision(draft_id: uuid.UUID, decision: str):
 
 @admin.post("/products/<uuid:draft_id>/request-changes")
 @limiter.limit("30 per hour")
-@ecuvel_staff_required
+@admin_permission_required("products.moderate")
 def request_product_changes(draft_id: uuid.UUID):
     return _record_product_decision(draft_id, "CHANGES_REQUESTED")
 
 
 @admin.post("/products/<uuid:draft_id>/reject")
 @limiter.limit("30 per hour")
-@ecuvel_staff_required
+@admin_permission_required("products.moderate")
 def reject_product(draft_id: uuid.UUID):
     return _record_product_decision(draft_id, "REJECTED")
 
 
 @admin.post("/products/<uuid:draft_id>/approve")
 @limiter.limit("30 per hour")
-@ecuvel_staff_required
+@admin_permission_required("products.moderate")
 def approve_product(draft_id: uuid.UUID):
     checklist = normalize_moderation_checklist(request.form.getlist("checklist"))
     copied_files = ()
@@ -2076,6 +2153,9 @@ def approve_product(draft_id: uuid.UUID):
             "No se pudo publicar porque un SKU, código de barras u otro "
             "identificador ya existe en el catálogo.",
         )
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception:
         db.session.rollback()
         remove_copied_publication_files(copied_files)
@@ -2157,7 +2237,7 @@ def staff_new():
     if request.method == "GET":
         return render_template(
             "admin/staff_form.html", profile=None, warehouses=warehouses,
-            role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+            role_labels={r: STAFF_ROLE_LABELS[r] for r in delegable_staff_roles(current_user)}, employment_labels=EMPLOYMENT_LABELS,
             identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
             role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
             form={}, **_shell_context("users"),
@@ -2171,7 +2251,7 @@ def staff_new():
             flash("El Punto ECUVEL seleccionado no es válido.", "error")
             return render_template(
                 "admin/staff_form.html", profile=None, warehouses=warehouses,
-                role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+                role_labels={r: STAFF_ROLE_LABELS[r] for r in delegable_staff_roles(current_user)}, employment_labels=EMPLOYMENT_LABELS,
                 identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
                 role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
                 form=form, **_shell_context("users"),
@@ -2184,7 +2264,7 @@ def staff_new():
             flash("La fecha de ingreso no es válida.", "error")
             return render_template(
                 "admin/staff_form.html", profile=None, warehouses=warehouses,
-                role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+                role_labels={r: STAFF_ROLE_LABELS[r] for r in delegable_staff_roles(current_user)}, employment_labels=EMPLOYMENT_LABELS,
                 identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
                 role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
                 form=form, **_shell_context("users"),
@@ -2250,11 +2330,14 @@ def staff_new():
         )
         flash(message, category)
         return redirect(url_for("admin.staff_detail", employee_code=employee_code))
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el registro de personal ECUVEL")
         return render_template(
             "admin/staff_form.html", profile=None, warehouses=warehouses,
-            role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+            role_labels={r: STAFF_ROLE_LABELS[r] for r in delegable_staff_roles(current_user)}, employment_labels=EMPLOYMENT_LABELS,
             identification_types=tuple(StaffIdentificationType), permissions=PERMISSION_LABELS,
             role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
             form=form, **_shell_context("users"),
@@ -2287,7 +2370,7 @@ def staff_edit(employee_code: str):
     if request.method == "GET":
         return render_template(
             "admin/staff_edit.html", profile=profile, warehouses=warehouses,
-            role_labels=STAFF_ROLE_LABELS, employment_labels=EMPLOYMENT_LABELS,
+            role_labels={r: STAFF_ROLE_LABELS[r] for r in delegable_staff_roles(current_user)}, employment_labels=EMPLOYMENT_LABELS,
             permissions=PERMISSION_LABELS,
             role_permissions={role.value: tuple(sorted(values)) for role, values in ROLE_PERMISSIONS.items()},
             **_shell_context("users"),
@@ -2319,6 +2402,9 @@ def staff_edit(employee_code: str):
                 reason=request.form.get("reason", ""),
             )
         flash("Perfil laboral actualizado.", "success")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception as exc:
         _admin_transaction_error(exc, "Falló la actualización de personal ECUVEL")
     return redirect(url_for("admin.staff_detail", employee_code=employee_code))
@@ -2345,6 +2431,9 @@ def staff_access(employee_code: str):
                 reason=request.form.get("reason", ""),
             )
         flash("Estado de acceso actualizado.", "success")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el cambio de acceso del personal")
     return redirect(url_for("admin.staff_detail", employee_code=employee_code))
@@ -2389,6 +2478,9 @@ def staff_invite(employee_code: str):
             )
         else:
             flash("Invitación enviada. La anterior quedó revocada.", "success")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el envío de invitación de personal")
     return redirect(url_for("admin.staff_detail", employee_code=employee_code))
@@ -2412,6 +2504,9 @@ def staff_invite_revoke(employee_code: str):
                 reason=request.form.get("reason", ""),
             )
         flash(f"{revoked} invitación(es) pendiente(s) revocada(s).", "success")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception as exc:
         _admin_transaction_error(exc, "Falló la revocación de invitaciones de personal")
     return redirect(url_for("admin.staff_detail", employee_code=employee_code))
@@ -2442,6 +2537,7 @@ def user_password_reset(identifier: str):
             user = find_user_by_public_code(database_session, identifier)
             if user is None:
                 abort(404)
+            require_user_management(database_session, actor_id, user)
             result = request_password_reset(
                 session=database_session, email=user.email or "",
                 ttl_minutes=current_app.config["PASSWORD_RESET_TOKEN_TTL_MINUTES"],
@@ -2462,6 +2558,9 @@ def user_password_reset(identifier: str):
                 ],
             ))
         flash("Si la cuenta permite recuperación, el enlace fue enviado.", "success")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el reset administrativo de contraseña")
     return redirect(url_for("admin.user_detail", identifier=identifier))
@@ -2488,6 +2587,9 @@ def user_status(identifier: str):
                 reason=request.form.get("reason", ""),
             )
         flash("Estado de la cuenta actualizado.", "success")
+    except AdminAuthorizationError:
+        db.session.rollback()
+        raise
     except Exception as exc:
         _admin_transaction_error(exc, "Falló el cambio de estado del usuario")
     return redirect(url_for("admin.user_detail", identifier=identifier))
@@ -2927,6 +3029,8 @@ def payout_receipt(payout_number: str):
 @admin.get("/modules/<string:module_key>")
 @ecuvel_staff_required
 def module_placeholder(module_key: str):
+    if not permissions_for_user(current_user):
+        raise AdminAuthorizationError()
     item = find_admin_navigation_item(module_key)
     if item is None or item.implemented:
         abort(404)

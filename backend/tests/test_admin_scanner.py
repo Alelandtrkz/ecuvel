@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import select
 from werkzeug.datastructures import MultiDict
 
+from app.services.admin_operating_context import OperationalScope
 from app.models import (
     LogisticsPackageState,
     LogisticsTrackingEvent,
@@ -295,7 +296,7 @@ def test_transport_pickup_revalidates_point_before_transferring_custody(session,
     assert state.custodian_user_id == staff.id
 
 
-def test_wrong_transfer_destination_creates_real_deviation(session, client):
+def test_wrong_transfer_destination_refuses_physical_reception(session, client):
     base, staff, package, item, _order_number = _ready_inbound(session, quantity=1)
     # Establish the canonical inbound state first.
     from app.services.seller_inbound_packages import receive_seller_inbound_package
@@ -336,16 +337,17 @@ def test_wrong_transfer_destination_creates_real_deviation(session, client):
             "received_location_id": str(wrong_location.id),
         },
     )
-    assert response.status_code == 302
+    assert response.status_code == 409
     session.expire_all()
     state = session.scalar(
         select(LogisticsPackageState).where(
             LogisticsPackageState.seller_inbound_package_id == package.id
         )
     )
-    assert state.status == LogisticsPackageStatus.DEVIATED
-    assert state.is_deviated
-    assert state.current_warehouse_id == wrong_point.id
+    assert state.status == LogisticsPackageStatus.IN_TRANSIT
+    assert not state.is_deviated
+    assert state.current_warehouse_id is None
+    assert state.custodian_user_id == staff.id
     assert state.expected_destination_warehouse_id == destination.id
 
 
@@ -492,8 +494,8 @@ def test_quick_lookup_recognizes_inbound_and_outbound_without_mutation(session):
     base, _staff, inbound, _item, _order_number = _ready_inbound(session, quantity=1)
     ready = create_ready_for_pickup_order(session, base, [1])
     before_inbound = inbound.status
-    inbound_view = get_admin_package_lookup(session, code=inbound.package_code)
-    outbound_view = get_admin_package_lookup(session, code=ready.package_codes[0])
+    inbound_view = get_admin_package_lookup(session, scope=OperationalScope(warehouse_ids=None), code=inbound.package_code)
+    outbound_view = get_admin_package_lookup(session, scope=OperationalScope(warehouse_ids=None), code=ready.package_codes[0])
     assert inbound_view.kind == "inbound"
     assert outbound_view.kind == "outbound"
     assert inbound.status == before_inbound

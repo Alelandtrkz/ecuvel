@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
+from app.services.admin_operating_context import operational_scope
+from app.services.admin_permissions import require_actor_permission
 from app.models.enums import (
     InventoryMovementType,
     LocationType,
@@ -766,6 +768,9 @@ def handover_order_packages(
     expected_warehouse_id: uuid.UUID | None = None,
     notes: str | None = None,
 ) -> HandoverOrderResult:
+    actor = require_actor_permission(session, actor_user_id, "scanner.dispatch_package")
+    scope = operational_scope(session, actor)
+    scope.require_point(expected_warehouse_id)
     normalized_order_number = order_number.strip()
     normalized_scans = tuple(
         code.strip()

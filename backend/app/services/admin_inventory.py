@@ -41,6 +41,7 @@ from app.models.enums import (
 )
 from app.services.admin_operating_context import (
     AdminOperatingPoint,
+    OperationalScope,
     get_operating_point,
     warehouse_options,
 )
@@ -403,14 +404,14 @@ def _package_union(session: Session, warehouse_id: uuid.UUID, query: str, active
 def get_admin_inventory_page(
     session: Session,
     *,
-    warehouse_id,
+    warehouse_id, scope: OperationalScope,
     query=None,
     active_filter=None,
     page=None,
     now: datetime | None = None,
 ) -> AdminInventoryPage:
-    point = get_operating_point(session, warehouse_id)
-    options = warehouse_options(session)
+    point = get_operating_point(session, warehouse_id, scope=scope)
+    options = warehouse_options(session, scope)
     normalized_query = _query(query)
     normalized_filter = active_filter if active_filter in VALID_PACKAGE_FILTERS else "all"
     current_page = _page(page)
@@ -442,9 +443,9 @@ def get_admin_inventory_page(
     return AdminInventoryPage(point, options, _inventory_metrics(session, point.id), tuple(rows), normalized_query, normalized_filter, current_page, DEFAULT_PAGE_SIZE, total, total_pages, current_page > 1, current_page < total_pages)
 
 
-def get_admin_expected_page(session: Session, *, warehouse_id, page=None, now=None) -> AdminExpectedPage:
-    point = get_operating_point(session, warehouse_id)
-    options = warehouse_options(session)
+def get_admin_expected_page(session: Session, *, warehouse_id, scope: OperationalScope, page=None, now=None) -> AdminExpectedPage:
+    point = get_operating_point(session, warehouse_id, scope=scope)
+    options = warehouse_options(session, scope)
     current_page = _page(page)
     if point is None:
         return AdminExpectedPage(None, options, AdminExpectedMetrics(0, 0, 0, 0), (), 1, 0, 1, False, False)
@@ -473,8 +474,9 @@ def get_admin_expected_page(session: Session, *, warehouse_id, page=None, now=No
     return AdminExpectedPage(point, options, AdminExpectedMetrics(total, in_transit, awaiting, overdue), tuple(rows), current_page, total, total_pages, current_page > 1, current_page < total_pages)
 
 
-def get_admin_stock_page(session: Session, *, warehouse_id, query=None, page=None) -> AdminStockPage:
-    point = get_operating_point(session, warehouse_id); options = warehouse_options(session)
+def get_admin_stock_page(session: Session, *, warehouse_id, scope: OperationalScope, query=None, page=None) -> AdminStockPage:
+    point = get_operating_point(session, warehouse_id, scope=scope)
+    options = warehouse_options(session, scope)
     normalized_query = _query(query); current_page = _page(page)
     if point is None:
         return AdminStockPage(None, options, (), normalized_query, 1, 0, 1, False, False)
@@ -521,8 +523,9 @@ def _movement_category(raw_type: str, source: str) -> tuple[str, str]:
     return "Movimiento", "info"
 
 
-def get_admin_movements_page(session: Session, *, warehouse_id, active_filter=None, page=None) -> AdminMovementsPage:
-    point = get_operating_point(session, warehouse_id); options = warehouse_options(session)
+def get_admin_movements_page(session: Session, *, warehouse_id, scope: OperationalScope, active_filter=None, page=None) -> AdminMovementsPage:
+    point = get_operating_point(session, warehouse_id, scope=scope)
+    options = warehouse_options(session, scope)
     normalized_filter = active_filter if active_filter in VALID_MOVEMENT_FILTERS else "all"; current_page = _page(page)
     if point is None:
         return AdminMovementsPage(None, options, (), normalized_filter, 1, 0, 1, False, False)
@@ -611,8 +614,9 @@ def get_admin_movements_page(session: Session, *, warehouse_id, active_filter=No
     return AdminMovementsPage(point, options, tuple(rows), normalized_filter, current_page, total, total_pages, current_page > 1, current_page < total_pages)
 
 
-def get_admin_count_list_page(session: Session, *, warehouse_id) -> AdminCountListPage:
-    point = get_operating_point(session, warehouse_id); options = warehouse_options(session)
+def get_admin_count_list_page(session: Session, *, warehouse_id, scope: OperationalScope) -> AdminCountListPage:
+    point = get_operating_point(session, warehouse_id, scope=scope)
+    options = warehouse_options(session, scope)
     if point is None:
         return AdminCountListPage(None, options, None, (), ())
     counts = tuple(session.scalars(select(PhysicalInventoryCount).where(PhysicalInventoryCount.warehouse_id == point.id).order_by(PhysicalInventoryCount.started_at.desc()).limit(30)).all())
@@ -621,8 +625,8 @@ def get_admin_count_list_page(session: Session, *, warehouse_id) -> AdminCountLi
     return AdminCountListPage(point, options, open_count, counts, locations)
 
 
-def get_admin_count_detail_page(session: Session, *, count_id, warehouse_id) -> AdminCountDetailPage | None:
-    point = get_operating_point(session, warehouse_id)
+def get_admin_count_detail_page(session: Session, *, count_id, warehouse_id, scope: OperationalScope) -> AdminCountDetailPage | None:
+    point = get_operating_point(session, warehouse_id, scope=scope)
     if point is None:
         return None
     try:
