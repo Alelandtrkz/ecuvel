@@ -27,6 +27,7 @@ from app.models.enums import (
 )
 from app.services.partner_product_categories import (
     PARTNER_PRODUCT_DRAFT_SESSION_KEY,
+    PartnerProductAccessError,
     PartnerProductCategoryValidationError,
     get_saved_category_selection,
     require_partner_catalog_store,
@@ -170,7 +171,10 @@ def get_product_draft_for_user(
     draft_id: uuid.UUID,
     lock: bool = False,
 ) -> ProductDraft:
-    store = require_partner_catalog_store(session, user_id)
+    try:
+        store = require_partner_catalog_store(session, user_id)
+    except PartnerProductAccessError as exc:
+        raise ProductDraftAccessError("No encontramos ese borrador.") from exc
     query = (
         select(ProductDraft)
         .options(
@@ -181,12 +185,12 @@ def get_product_draft_for_user(
             selectinload(ProductDraft.moderation_events),
             selectinload(ProductDraft.publication),
         )
-        .where(ProductDraft.id == draft_id)
+        .where(ProductDraft.id == draft_id, ProductDraft.store_id == store.store_id)
     )
     if lock:
         query = query.with_for_update()
     draft = session.scalar(query)
-    if draft is None or draft.store_id != store.store_id:
+    if draft is None:
         raise ProductDraftAccessError("No encontramos ese borrador.")
     from app.services.adult_access_policy import adult_partner_enabled, is_adult_category
     if is_adult_category(draft.subcategory) and (

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.catalog.product_templates import template_key_for_category_code
 from app.services.adult_access_policy import adult_partner_category_clause, adult_partner_enabled, is_adult_category
+from app.services.authentication import authenticatable_user_id
 from app.models import Category, Store, StoreContractAcceptance, StoreMember, StoreOnboarding
 from app.models.enums import (
     StoreContractAcceptanceStatus,
@@ -122,7 +123,7 @@ def require_partner_catalog_store(session: Session, user_id: uuid.UUID) -> Partn
         .join(StoreOnboarding, StoreOnboarding.store_id == Store.id)
         .join(StoreContractAcceptance, StoreContractAcceptance.onboarding_id == StoreOnboarding.id)
         .where(
-            StoreMember.user_id == user_id,
+            StoreMember.user_id == authenticatable_user_id(user_id),
             StoreMember.is_active.is_(True),
             StoreMember.role.in_(_CATALOG_ROLES),
             Store.status == StoreStatus.ACTIVE,

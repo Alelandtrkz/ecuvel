@@ -36,6 +36,7 @@ from app.models.enums import (
     StoreOnboardingStatus,
     StoreStatus,
 )
+from app.services.authentication import authenticatable_user_id
 from app.services.inventory import (
     InventoryServiceError,
     release_consumed_reservation_for_seller_rejection,
@@ -291,7 +292,7 @@ def require_partner_order_store(
             StoreContractAcceptance.onboarding_id == StoreOnboarding.id,
         )
         .where(
-            StoreMember.user_id == user_id,
+            StoreMember.user_id == authenticatable_user_id(user_id),
             StoreMember.is_active.is_(True),
             StoreMember.role.in_(roles),
             Store.status == StoreStatus.ACTIVE,

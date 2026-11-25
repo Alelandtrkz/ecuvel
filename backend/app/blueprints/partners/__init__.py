@@ -422,10 +422,17 @@ def my_products():
         category=request.args.get("category"),
         page=request.args.get("page"),
     )
+    batch_result = browser_session.pop("partner_catalog_batch_result", None)
+    if not (
+        isinstance(batch_result, dict)
+        and batch_result.get("store_id") == str(store.store_id)
+        and batch_result.get("user_id") == str(current_user.id)
+    ):
+        batch_result = None
     return render_template(
         "partners/my_products.html",
         catalog=catalog,
-        batch_result=browser_session.pop("partner_catalog_batch_result", None),
+        batch_result=batch_result,
         current_partner_tab="my_products",
     )
 
@@ -934,6 +941,8 @@ def bulk_submit_product_drafts_route():
                 draft_ids=request.form.getlist("draft_ids"),
             )
         browser_session["partner_catalog_batch_result"] = {
+            "store_id": str(result.store_id),
+            "user_id": str(current_user.id),
             "kind": "submit",
             "submitted_count": len(result.submitted_ids),
             "failures": [
@@ -1250,6 +1259,7 @@ def upload_product_draft_file(draft_id):
     storage_root = current_app.config["PARTNER_PRODUCT_DRAFT_UPLOAD_DIR"]
     staged = []
     try:
+        get_product_draft_for_user(db.session, user_id=current_user.id, draft_id=draft_id)
         for uploaded in uploaded_files:
             staged.append(
                 stage_product_draft_upload(

@@ -26,6 +26,7 @@ DUMMY_PASSWORD_HASH = generate_password_hash(
 )
 AUTH_IDENTITY_PREFIX = "v1"
 AUTH_IDENTITY_MAX_LENGTH = 64
+_AUTHENTICATABLE_STATUSES = (UserStatus.ACTIVE, UserStatus.PENDING_VERIFICATION)
 _EMAIL_LOCAL_PATTERN = re.compile(
     r"[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+",
     re.IGNORECASE | re.ASCII,
@@ -132,9 +133,17 @@ def is_user_authentication_allowed(user: User | None) -> bool:
     return bool(
         user is not None
         and user.is_active
-        and user.status
-        in {UserStatus.ACTIVE, UserStatus.PENDING_VERIFICATION}
+        and user.status in _AUTHENTICATABLE_STATUSES
     )
+
+
+def authenticatable_user_id(user_id: uuid.UUID):
+    """Obtiene la identidad habilitada dentro de la consulta que autoriza el recurso."""
+    return select(User.id).where(
+        User.id == user_id,
+        User.is_active.is_(True),
+        User.status.in_(_AUTHENTICATABLE_STATUSES),
+    ).scalar_subquery()
 
 
 def parse_authentication_identity(

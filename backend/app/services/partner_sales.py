@@ -33,6 +33,7 @@ from app.models.enums import (
     StoreOnboardingStatus,
     StoreStatus,
 )
+from app.services.authentication import authenticatable_user_id
 from app.services.partner_order_workflow import resolve_partner_order_workflow
 from app.services.payment_reporting import approved_payment_dates_subquery
 
@@ -223,7 +224,7 @@ def require_partner_sales_store(
             StoreContractAcceptance.onboarding_id == StoreOnboarding.id,
         )
         .where(
-            StoreMember.user_id == user_id,
+            StoreMember.user_id == authenticatable_user_id(user_id),
             StoreMember.is_active.is_(True),
             StoreMember.role.in_(SALES_ROLES),
             Store.status == StoreStatus.ACTIVE,

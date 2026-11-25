@@ -22,6 +22,7 @@ from app.models.enums import (
     ReservationStatus,
     SellerOrderStatus,
 )
+from app.services.authentication import authenticatable_user_id
 from app.services.inventory import (
     InventoryServiceError,
     release_inventory_reservation,
@@ -208,9 +209,34 @@ def cancel_pending_bank_transfer_order(
     *,
     session: Session,
     payment_attempt_id: uuid.UUID,
-    actor_user_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID,
     reason: str | None = None,
     now: datetime | None = None,
+) -> PendingPaymentTransitionResult:
+    owned = session.scalar(
+        select(PaymentAttempt.id)
+        .join(Order, Order.id == PaymentAttempt.order_id)
+        .where(
+            PaymentAttempt.id == payment_attempt_id,
+            Order.buyer_id == authenticatable_user_id(actor_user_id),
+        )
+        .with_for_update(of=(PaymentAttempt, Order))
+    )
+    if owned is None:
+        raise PendingPaymentNotFoundError("No existe el pago por transferencia indicado.")
+    return _cancel_pending_order(session, owned, actor_user_id, reason, now)
+
+
+def cancel_pending_order_from_cli(
+    *, session: Session, payment_attempt_id: uuid.UUID, reason: str,
+) -> PendingPaymentTransitionResult:
+    """Cancelación de mantenimiento. Conserva la atribución de sistema en inventario."""
+    return _cancel_pending_order(session, payment_attempt_id, None, reason, None)
+
+
+def _cancel_pending_order(
+    session: Session, payment_attempt_id: uuid.UUID, actor_user_id: uuid.UUID | None,
+    reason: str | None, now: datetime | None,
 ) -> PendingPaymentTransitionResult:
     normalized_reason = " ".join((reason or "").split()) or "Cancelado por el comprador."
     if len(normalized_reason) > 500:

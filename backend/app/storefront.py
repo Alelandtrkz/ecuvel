@@ -231,7 +231,6 @@ MAX_CATEGORY_LENGTH = 140
 MAX_RECOMMENDATIONS = 10
 CART_INTENT_ADD = "add_to_cart"
 CART_INTENT_BUY_NOW = "buy_now"
-CHECKOUT_ORDERS_SESSION_KEY = "checkout_order_ids"
 MAX_SESSION_CHECKOUT_ORDERS = 10
 PAYMENT_PROOF_UPLOADS_SESSION_KEY = "payment_proof_uploads"
 
@@ -1699,34 +1698,10 @@ def _requires_adult_eligibility():
     return None
 
 
-def _remember_checkout_order(order_id: uuid.UUID) -> None:
-    values = [
-        value
-        for value in flask_session.get(CHECKOUT_ORDERS_SESSION_KEY, [])
-        if value != str(order_id)
-    ]
-    values.append(str(order_id))
-    flask_session[CHECKOUT_ORDERS_SESSION_KEY] = values[
-        -MAX_SESSION_CHECKOUT_ORDERS:
-    ]
-
-
 def _allowed_checkout_order_ids() -> set[uuid.UUID]:
-    allowed_ids: set[uuid.UUID] = set()
-    if current_user.is_authenticated:
-        return set(
-            db.session.scalars(
-                select(Order.id).where(Order.buyer_id == current_user.id)
-            ).all()
-        )
-    if not current_app.config["ALLOW_DEMO_CHECKOUT"]:
-        return allowed_ids
-    for value in flask_session.get(CHECKOUT_ORDERS_SESSION_KEY, []):
-        try:
-            allowed_ids.add(uuid.UUID(str(value)))
-        except (TypeError, ValueError, AttributeError):
-            continue
-    return allowed_ids
+    if not current_user.is_authenticated:
+        return set()
+    return set(db.session.scalars(select(Order.id).where(Order.buyer_id == current_user.id)))
 
 
 def _aware_utc(value: datetime) -> datetime:
@@ -2319,7 +2294,6 @@ def create_checkout():
         flash(str(exc), "error")
         return redirect(url_for("storefront.checkout"))
 
-    _remember_checkout_order(result.order_id)
     flash("Pedido creado. Completa la transferencia antes del vencimiento.", "success")
     return redirect(
         url_for(
@@ -2438,7 +2412,7 @@ def upload_payment_proof(order_number: str):
                 staged_file=staged,
                 upload_idempotency_key=provided_token,
                 storage_root=current_app.config["PAYMENT_PROOF_UPLOAD_DIR"],
-                uploaded_by_user_id=order.buyer_id,
+                uploaded_by_user_id=current_user.id,
             )
             if not result.replayed:
                 promoted_path = result.storage_path
@@ -2861,7 +2835,7 @@ def cancel_order(order_number: str):
             cancel_pending_bank_transfer_order(
                 session=database_session,
                 payment_attempt_id=order.payment_attempt_id,
-                actor_user_id=order.buyer_id,
+                actor_user_id=current_user.id,
                 reason="Pedido cancelado por el comprador antes del comprobante.",
             )
     except InvalidPendingPaymentTransitionError as exc:

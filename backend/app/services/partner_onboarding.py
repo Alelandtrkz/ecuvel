@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from werkzeug.datastructures import FileStorage
 
 from app.services.admin_permissions import require_actor_permission
+from app.services.authentication import authenticatable_user_id, is_user_authentication_allowed
 from app.models import (
     Store,
     StoreContractAcceptance,
@@ -128,6 +129,9 @@ CORRECTION_REASON_LABELS = {
 
 
 def get_or_create_onboarding(session: Session, user_id) -> StoreOnboarding:
+    user = session.get(User, user_id, populate_existing=True, with_for_update={"read": True})
+    if not is_user_authentication_allowed(user):
+        raise PartnerOnboardingStateError("La cuenta no está disponible.")
     onboarding = session.scalar(
         select(StoreOnboarding).where(StoreOnboarding.user_id == user_id).with_for_update()
     )
@@ -139,8 +143,12 @@ def get_or_create_onboarding(session: Session, user_id) -> StoreOnboarding:
     return onboarding
 
 
+def _owned_onboarding(user_id):
+    return select(StoreOnboarding).where(StoreOnboarding.user_id == authenticatable_user_id(user_id))
+
+
 def get_onboarding(session: Session, user_id) -> StoreOnboarding | None:
-    return session.scalar(select(StoreOnboarding).where(StoreOnboarding.user_id == user_id))
+    return session.scalar(_owned_onboarding(user_id))
 
 
 def can_edit(onboarding: StoreOnboarding) -> bool:
@@ -606,7 +614,7 @@ def accept_contract(
     storage_root: str | Path,
 ) -> StoreContractAcceptance:
     onboarding = session.scalar(
-        select(StoreOnboarding).where(StoreOnboarding.user_id == user_id).with_for_update()
+        _owned_onboarding(user_id).with_for_update()
     )
     if (
         onboarding is not None
@@ -709,7 +717,7 @@ def _draw_contract_pdf(handle, onboarding: StoreOnboarding) -> None:
 
 
 def _approved_onboarding(session: Session, user_id, *, lock: bool) -> StoreOnboarding:
-    statement = select(StoreOnboarding).where(StoreOnboarding.user_id == user_id)
+    statement = _owned_onboarding(user_id)
     if lock:
         statement = statement.with_for_update()
     onboarding = session.scalar(statement)

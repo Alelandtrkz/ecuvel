@@ -40,6 +40,7 @@ class DraftActionFailure:
 
 @dataclass(frozen=True, slots=True)
 class DraftSubmitBatchResult:
+    store_id: uuid.UUID
     submitted_ids: tuple[uuid.UUID, ...]
     failures: tuple[DraftActionFailure, ...]
 
@@ -181,7 +182,7 @@ def submit_product_draft_batch(
             failures.append(DraftActionFailure(draft_id, titles[draft_id], message))
         except ProductDraftStateError as exc:
             failures.append(DraftActionFailure(draft_id, titles[draft_id], str(exc)))
-    return DraftSubmitBatchResult(tuple(submitted), tuple(failures))
+    return DraftSubmitBatchResult(store.store_id, tuple(submitted), tuple(failures))
 
 
 def _normalize_draft_ids(values: Iterable[uuid.UUID | str]) -> tuple[uuid.UUID, ...]:

@@ -24,7 +24,7 @@ from app.models.enums import (
 from app.services.pending_payments import (
     InvalidPendingPaymentTransitionError,
     PendingPaymentServiceError,
-    cancel_pending_bank_transfer_order,
+    cancel_pending_order_from_cli,
     expirable_bank_transfer_payment_ids,
     expire_pending_bank_transfer_payments,
 )
@@ -238,7 +238,7 @@ def cancel_pending_order_command(order_number: str, reason: str) -> None:
     db.session.remove()
     try:
         with db.session.begin():
-            result = cancel_pending_bank_transfer_order(
+            result = cancel_pending_order_from_cli(
                 session=db.session,
                 payment_attempt_id=attempt.id,
                 reason=reason,

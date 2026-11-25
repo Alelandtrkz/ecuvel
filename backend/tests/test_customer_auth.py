@@ -376,14 +376,14 @@ def test_verified_checkout_uses_current_user_as_buyer(client, session):
     assert session.scalar(select(Order)).buyer_id == user.id
 
 
-def test_login_claims_only_current_session_demo_orders(client, app, session):
+def test_login_preserves_order_owners_with_legacy_session_data(client, app, session):
     base = create_catalog_and_stock(session, stock=5)
     demo = session.get(User, base.buyer_id)
     demo.email = app.config["CHECKOUT_DEMO_BUYER_EMAIL"]
     owned_id, _owned_number, _ = create_order_items(session, base, [1])
     other_base = create_catalog_and_stock(session, stock=5)
     other_id, _other_number, _ = create_order_items(session, other_base, [1])
-    target = _user(session)
+    _user(session)
     session.commit()
     before_status = session.get(Order, owned_id).status
     with client.session_transaction() as browser_session:
@@ -392,7 +392,7 @@ def test_login_claims_only_current_session_demo_orders(client, app, session):
     _login(client)
     session.expire_all()
 
-    assert session.get(Order, owned_id).buyer_id == target.id
+    assert session.get(Order, owned_id).buyer_id == demo.id
     assert session.get(Order, other_id).buyer_id == other_base.buyer_id
     assert session.get(Order, owned_id).status == before_status
 

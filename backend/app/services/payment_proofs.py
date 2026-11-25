@@ -29,6 +29,7 @@ from app.models.enums import (
     SellerOrderStatus,
     UserStatus,
 )
+from app.services.authentication import authenticatable_user_id
 from app.services.inventory import (
     InventoryServiceError,
     consume_inventory_reservation,
@@ -189,7 +190,7 @@ def submit_bank_transfer_proof(
     staged_file: StagedPrivateFile,
     upload_idempotency_key: str,
     storage_root: str | Path,
-    uploaded_by_user_id: uuid.UUID | None,
+    uploaded_by_user_id: uuid.UUID,
     now: datetime | None = None,
 ) -> SubmitPaymentProofResult:
     key = upload_idempotency_key.strip()
@@ -197,16 +198,17 @@ def submit_bank_transfer_proof(
         raise PaymentProofServiceError("La clave de carga no es válida.")
     attempt = session.scalar(
         select(PaymentAttempt)
-        .where(PaymentAttempt.id == payment_attempt_id)
-        .with_for_update()
+        .join(Order, Order.id == PaymentAttempt.order_id)
+        .where(
+            PaymentAttempt.id == payment_attempt_id,
+            Order.buyer_id == authenticatable_user_id(uploaded_by_user_id),
+        )
+        .with_for_update(of=(PaymentAttempt, Order))
     )
-    if attempt is None or attempt.method != PaymentMethod.BANK_TRANSFER:
+    if attempt is None:
+        raise PaymentProofServiceError("El comprobante no pertenece al comprador.")
+    if attempt.method != PaymentMethod.BANK_TRANSFER:
         raise PaymentProofServiceError("El intento de pago no admite comprobantes.")
-    locked_order = session.scalar(
-        select(Order).where(Order.id == attempt.order_id).with_for_update()
-    )
-    if locked_order is None:
-        raise PaymentProofIntegrityError("El pago no tiene un pedido vÃ¡lido.")
     existing = session.scalar(
         select(PaymentProof)
         .where(PaymentProof.payment_attempt_id == attempt.id)
@@ -255,9 +257,6 @@ def submit_bank_transfer_proof(
         raise InvalidPaymentProofTransitionError(
             "Las reservas del pedido ya no están activas."
         )
-    if uploaded_by_user_id is not None and uploaded_by_user_id != order.buyer_id:
-        raise PaymentProofServiceError("El comprobante no pertenece al comprador.")
-
     proof = PaymentProof(
         payment_attempt_id=attempt.id,
         storage_key=staged_file.storage_key,

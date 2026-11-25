@@ -49,10 +49,6 @@ from app.services.phone_otp import (
     request_phone_otp,
     verify_phone_otp,
 )
-from app.services.session_order_claims import (
-    claim_session_orders,
-    normalize_session_order_ids,
-)
 from app.services.cart_storage import (
     CART_SESSION_KEY,
     adopt_guest_cart_for_authenticated_user,
@@ -204,29 +200,9 @@ def handle_auth_rate_limit(error: RateLimitExceeded):
     return response
 
 
-def _claim_orders_for_user(user_id, database_session=None) -> None:
-    order_ids = normalize_session_order_ids(
-        flask_session.get("checkout_order_ids")
-    )
-    if not order_ids:
-        return
-    claimed = claim_session_orders(
-        session=database_session or db.session,
-        order_ids=order_ids,
-        target_user_id=user_id,
-        demo_buyer_email=current_app.config["CHECKOUT_DEMO_BUYER_EMAIL"],
-    )
-    if claimed:
-        flash(
-            f"Asociamos {claimed} pedido(s) de esta sesión a tu cuenta.",
-            "success",
-        )
-
-
 def _login_user_preserving_session(user, *, remember: bool = False) -> None:
     preserved = {
         CART_SESSION_KEY: flask_session.get(CART_SESSION_KEY),
-        "checkout_order_ids": flask_session.get("checkout_order_ids"),
         PRIVACY_PREFERENCE_SESSION_KEY: flask_session.get(
             PRIVACY_PREFERENCE_SESSION_KEY
         ),
@@ -235,6 +211,10 @@ def _login_user_preserving_session(user, *, remember: bool = False) -> None:
     for key, value in preserved.items():
         if value is not None:
             flask_session[key] = value
+    remember_cookie = current_app.config.get("REMEMBER_COOKIE_NAME", "remember_token")
+    if not remember and remember_cookie in request.cookies:
+        # Flask-Login elimina la cookie persistente al enviar esta respuesta.
+        flask_session["_remember"] = "clear"
     login_user(user, remember=remember)
     try:
         reconcile_browser_preference_after_account_login(
@@ -404,7 +384,6 @@ def register():
                     ip_address=request.remote_addr,
                     user_agent=request.user_agent.string,
                 )
-            _claim_orders_for_user(result.user.id, database_session)
         _login_user_preserving_session(result.user)
         try:
             _send_verification_email(
@@ -478,7 +457,6 @@ def login():
                 email=form["email"],
                 password=request.form.get("password", ""),
             )
-            _claim_orders_for_user(user.id, database_session)
         _login_user_preserving_session(
             user,
             remember=request.form.get("remember") == "1",
@@ -760,7 +738,6 @@ def phone_verify_post():
             expected_purpose=purpose,
         )
         if purpose == PhoneOtpPurpose.LOGIN_OR_REGISTER and verified.existing_user:
-            _claim_orders_for_user(verified.existing_user.id, database_session)
             user = verified.existing_user
         elif purpose in {PhoneOtpPurpose.LINK_PHONE, PhoneOtpPurpose.CHANGE_PHONE}:
             link_verified_phone(
@@ -875,7 +852,6 @@ def complete_phone_registration_post():
                     "EMAIL_VERIFICATION_TOKEN_TTL_MINUTES"
                 ],
             )
-            _claim_orders_for_user(result.user.id, database_session)
         flask_session.pop(PHONE_REGISTRATION_CHALLENGE_SESSION_KEY, None)
         _login_user_preserving_session(result.user)
         if result.verification_token and result.user.email:

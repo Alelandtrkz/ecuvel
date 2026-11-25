@@ -71,7 +71,7 @@ def _login(client, email="partner@test.local", password="correct horse battery s
     )
 
 
-def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client, session, monkeypatch):
+def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client, session, monkeypatch, tmp_path):
     user = _user(session)
     session.commit()
 
@@ -262,3 +262,17 @@ def test_partner_onboarding_happy_path_creates_store_and_accepts_contract(client
     assert mapping is not None
     assert mapping.location.warehouse_id == seller_warehouses[0].id
     assert client.get("/partners/products").status_code == 200
+
+    pdf_path = tmp_path / "partner-contracts" / acceptance.pdf_storage_key
+    expected_pdf = pdf_path.read_bytes()
+    assert expected_pdf.startswith(b"%PDF-")
+    contract_url = "/partners/contract/accepted.pdf"
+    assert client.get(contract_url).data == expected_pdf
+    other = _user(session, email="other-contract@identity.test")
+    session.commit()
+    separate_browser = client.application.test_client()
+    assert _login(separate_browser, email=other.email).status_code == 302
+    denied = separate_browser.get(contract_url, query_string={"onboarding_id": str(onboarding.id)})
+    assert denied.status_code == 302 and expected_pdf not in denied.data
+    assert pdf_path.read_bytes() == expected_pdf
+    assert session.scalar(select(func.count(StoreContractAcceptance.id))) == 1
