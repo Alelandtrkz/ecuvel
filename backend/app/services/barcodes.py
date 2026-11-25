@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import re
 
 from app.services.public_identifiers import (
     is_product_code,
@@ -63,3 +64,9 @@ def render_package_code128_svg(package_code: str) -> bytes:
         text_distance=5,
         write_text=False,
     )
+
+
+def render_outbound_code128_svg(package_code: str) -> bytes:
+    if not re.fullmatch(r"PKG-[0-9A-F]{32}", package_code):
+        raise BarcodeRenderError("El código del paquete de salida no es válido.")
+    return _render_code128_svg(package_code, module_height=28, font_size=12, text_distance=5, write_text=False)

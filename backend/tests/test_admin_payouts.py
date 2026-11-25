@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import event, select
 
 from app.models import (
-    Order, OrderPackage, PaymentAttempt, SellerOrder, SellerPayout,
+    Order, OrderPackage, SellerOrder, SellerPayout,
     StaffProfile, Store, StoreBankAccountVersion, User,
 )
 from app.models.enums import (
@@ -17,8 +17,6 @@ from app.models.enums import (
     BankAccountVersionStatus,
     SellerPayoutStatus,
     OrderStatus,
-    PaymentMethod,
-    PaymentStatus,
     SellerOrderDecisionStatus,
     SellerOrderStatus,
     StaffEmploymentStatus,
@@ -287,19 +285,13 @@ def test_web_schedule_mark_paid_and_private_receipt(client, session, app, tmp_pa
     create_approved_bank_version(
         session, base, reviewed_at=datetime(2026, 7, 1, tzinfo=timezone.utc)
     )
-    ready = create_ready_for_pickup_order(session, base, [1])
+    ready = create_ready_for_pickup_order(
+        session, base, [1], approved_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
+    )
     order = session.get(Order, ready.order_id)
     seller_order = session.scalar(select(SellerOrder).where(SellerOrder.order_id == order.id))
     seller_order.decision_status = SellerOrderDecisionStatus.APPROVED
     order.status = OrderStatus.FULFILLING
-    session.add(PaymentAttempt(
-        order_id=order.id, method=PaymentMethod.BANK_TRANSFER,
-        status=PaymentStatus.APPROVED, amount=order.grand_total,
-        currency="USD", idempotency_key=f"web-{uuid.uuid4().hex}",
-        request_fingerprint=uuid.uuid4().hex.ljust(64, "0"),
-        expires_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
-        approved_at=datetime(2026, 7, 31, tzinfo=timezone.utc),
-    ))
     handover_ready_order(session, base, ready)
     delivered = datetime(2026, 8, 1, 12, tzinfo=timezone.utc)
     for package in session.scalars(select(OrderPackage).join(OrderPackage.order_item).where(

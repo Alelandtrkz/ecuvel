@@ -619,6 +619,7 @@ def _card_from_aggregate(
     first_item = aggregate.items[0] if aggregate.items else None
     store_ids = {seller_order.store_id for seller_order in aggregate.seller_orders}
     total_units = sum(item.quantity for item in aggregate.items)
+    point = aggregate.order.pickup_warehouse
     return CustomerOrderCardView(
         order_id=aggregate.order.id,
         order_number=aggregate.order.order_number,
@@ -629,8 +630,8 @@ def _card_from_aggregate(
         currency=aggregate.order.currency,
         created_at=aggregate.order.created_at,
         updated_at=aggregate.order.updated_at,
-        pickup_point_name=pickup_point_name,
-        pickup_point_address=pickup_point_address,
+        pickup_point_name=point.name if point else pickup_point_name,
+        pickup_point_address=point.address_line if point else pickup_point_address,
         total_units=total_units,
         item_count=len(aggregate.items),
         store_count=len(store_ids),

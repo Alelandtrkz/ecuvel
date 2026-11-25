@@ -230,6 +230,9 @@ class AdminOrderDetail:
     payment: AdminPaymentView
     timeline: tuple[AdminTimelineStep, ...]
     history: tuple[AdminHistoryItem, ...]
+    pickup_warehouse_id: uuid.UUID | None
+    pickup_point_label: str
+    ready_for_handover: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -979,6 +982,9 @@ def get_admin_order_detail(session: Session, *, scope: OperationalScope, order_n
         order.tax_total, order.grand_total, sum(item.quantity for item in items),
         lines, stores, inbound_packages, packages, payment,
         timeline, tuple(history_values),
+        order.pickup_warehouse_id,
+        f"{order.pickup_warehouse.name} · {order.pickup_warehouse.code}" if order.pickup_warehouse else "Pendiente de confirmación",
+        bool(session.scalar(select(Order.id).where(Order.id == order.id, order_ready_for_pickup_predicate()))),
     )
 
 

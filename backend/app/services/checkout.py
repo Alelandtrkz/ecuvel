@@ -4,13 +4,15 @@ import hashlib
 import json
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 
+from flask import current_app, has_app_context
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import Config
 from app.models import (
     Cart,
     Category,
@@ -24,6 +26,7 @@ from app.models import (
     SellerOrder,
     Store,
     User,
+    Warehouse,
 )
 from app.models.enums import (
     OfferStatus,
@@ -128,6 +131,9 @@ class CheckoutPreview:
     display_subtotal: Decimal
     savings: Decimal
     total: Decimal
+
+    pickup_point_name: str | None = None
+    pickup_point_address: str | None = None
 
     @property
     def can_submit(self) -> bool:
@@ -465,6 +471,7 @@ class CheckoutConfirmation:
     revision: str
     selection: str
     prices: str
+    pickup_warehouse_id: str | None = None
 
 
 def _digest(value: object) -> str:
@@ -491,6 +498,22 @@ def _cart_revision(cart: Cart) -> str:
     return cart.updated_at.astimezone(timezone.utc).isoformat()
 
 
+def resolve_checkout_pickup_point(session, *, lock=False):
+    code = (current_app.config["ECUVEL_PICKUP_WAREHOUSE_CODE"] if has_app_context()
+            else Config.ECUVEL_PICKUP_WAREHOUSE_CODE)
+    if not code:
+        raise CheckoutWarehouseError("El punto de retiro configurado no está disponible.")
+    statement = select(Warehouse).where(
+        Warehouse.code == code, Warehouse.is_active.is_(True), Warehouse.seller_store_id.is_(None),
+    )
+    if lock:
+        statement = statement.with_for_update(read=True).execution_options(populate_existing=True)
+    point = session.scalar(statement)
+    if point is None:
+        raise CheckoutWarehouseError("El punto de retiro configurado no está disponible.")
+    return point
+
+
 def prepare_checkout(
     session: Session, buyer: User,
 ) -> tuple[CheckoutPreview, CheckoutConfirmation]:
@@ -504,6 +527,8 @@ def prepare_checkout(
         raise EmptyCheckoutError("Selecciona al menos un producto antes de continuar.")
     rows = _load_rows(session, selected, lock_catalog=False, user=buyer)
     preview = _preview_from_rows(selected, rows)
+    point = resolve_checkout_pickup_point(session)
+    preview = replace(preview, pickup_point_name=point.name, pickup_point_address=point.address_line)
     confirmation = CheckoutConfirmation(
         key=uuid.uuid4().hex,
         buyer_id=str(buyer.id),
@@ -511,6 +536,7 @@ def prepare_checkout(
         revision=_cart_revision(cart),
         selection=_selection_digest(selected, preview),
         prices=_price_digest(preview),
+        pickup_warehouse_id=str(point.id),
     )
     return preview, confirmation
 
@@ -585,7 +611,11 @@ def create_checkout_order(
     if reservation_expires_at <= datetime.now(reservation_expires_at.tzinfo):
         raise ValueError("La expiración debe estar en el futuro.")
 
-    fingerprint = _digest([asdict(confirmation), payment_method.value])
+    signed_terms = asdict(confirmation)
+    if confirmation.pickup_warehouse_id is None:
+        # Keys issued before the destination migration retain their historical replay fingerprint.
+        signed_terms.pop("pickup_warehouse_id")
+    fingerprint = _digest([signed_terms, payment_method.value])
     payment_key = f"checkout:{normalized_key}"
     session.execute(
         select(func.pg_advisory_xact_lock(_advisory_lock_id(payment_key)))
@@ -654,6 +684,10 @@ def create_checkout_order(
     if _selection_digest(selected, preview) != confirmation.selection:
         raise CheckoutIdempotencyConflictError(changed)
 
+    pickup_point = resolve_checkout_pickup_point(session, lock=True)
+    if str(pickup_point.id) != confirmation.pickup_warehouse_id:
+        raise CheckoutIdempotencyConflictError("El punto de retiro cambió. Revisa tu pedido antes de confirmar.")
+
     if before_create is not None:
         before_create()
 
@@ -662,6 +696,7 @@ def create_checkout_order(
     order = Order(
         order_number=order_number,
         buyer_id=buyer.id,
+        pickup_warehouse_id=pickup_point.id,
         currency="USD",
         subtotal=preview.total,
         discount_total=ZERO,

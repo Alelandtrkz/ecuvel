@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.order_custody import outbound_started
 from app.services.admin_operating_context import operational_scope
 from app.services.admin_permissions import AdminAuthorizationError, require_actor_permission
 from app.models import (
@@ -19,6 +20,7 @@ from app.models import (
     WarehouseLocation,
 )
 from app.models.enums import (
+    LocationType,
     LogisticsPackageStatus,
     LogisticsTrackingEventType,
     LogisticsTransferStatus,
@@ -115,7 +117,7 @@ def _require_warehouse(
 ) -> Warehouse:
     statement = select(Warehouse).where(Warehouse.id == warehouse_id)
     if lock:
-        statement = statement.with_for_update().execution_options(populate_existing=True)
+        statement = statement.with_for_update(read=True).execution_options(populate_existing=True)
     warehouse = session.scalar(statement)
     if warehouse is None:
         raise LogisticsNotFoundError("No existe el punto ECUVEL seleccionado.")
@@ -252,9 +254,9 @@ def register_received_inbound_package(
     location = session.scalar(
         select(WarehouseLocation)
         .where(WarehouseLocation.id == location_id)
-        .with_for_update()
+        .with_for_update(read=True).execution_options(populate_existing=True)
     )
-    if location is None or not location.is_active:
+    if location is None or not location.is_active or location.location_type != LocationType.RECEIVING:
         raise LogisticsValidationError(
             "La ubicación de recepción no es una ubicación ECUVEL activa."
         )
@@ -323,6 +325,8 @@ def assign_package_transfer(
             previous,
             True,
         )
+    if session.scalar(select(outbound_started(state.seller_inbound_package_id))):
+        raise LogisticsConflictError("El contenido ya está empacado para el comprador.")
     responsible = _require_staff(session, responsible_user_id)
     destination = _require_warehouse(session, destination_warehouse_id)
     if state.status not in {
@@ -534,7 +538,7 @@ def receive_transfer_at_destination(
         location = session.scalar(
             select(WarehouseLocation)
             .where(WarehouseLocation.id == location_id)
-            .with_for_update()
+            .with_for_update(read=True).execution_options(populate_existing=True)
         )
         if (
             location is None

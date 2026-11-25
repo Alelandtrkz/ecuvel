@@ -540,7 +540,7 @@ def test_checkout_does_not_consume_reservations(session: Session):
 
 @pytest.mark.concurrency
 def test_concurrent_checkout_cannot_oversell_inventory(
-    session: Session, session_factory, concurrent_runner
+    app, session: Session, session_factory, concurrent_runner
 ):
     base = create_catalog_and_stock(session, stock=1)
     session.commit()
@@ -550,7 +550,7 @@ def test_concurrent_checkout_cannot_oversell_inventory(
             worker_session = session_factory()
             try:
                 barrier.wait()
-                with worker_session.begin():
+                with app.app_context(), worker_session.begin():
                     return _checkout(
                         worker_session,
                         base,

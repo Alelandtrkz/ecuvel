@@ -13,18 +13,20 @@ from app.services.admin_permissions import require_actor_permission
 from app.models.enums import (
     InventoryMovementType,
     LocationType,
+    LogisticsPackageStatus,
+    SellerOrderStatus,
     PackageStatus,
     ReservationStatus,
     SellerOrderDecisionStatus,
 )
 from app.models.fulfillment import OrderPackage
 from app.models.inventory import (
-    InventoryBalance,
     InventoryMovement,
     InventoryReservation,
 )
 from app.models.order import Order, OrderItem, SellerOrder
 from app.models.warehouse import Warehouse, WarehouseLocation
+from app.services.order_custody import active_pickup_point, paid_order_condition, received_allocations, units_in_pickup_custody
 
 
 class FulfillmentServiceError(Exception):
@@ -157,8 +159,7 @@ def order_ready_for_pickup_predicate():
     """SQL predicate for a complete customer order awaiting pickup.
 
     Every order item must have its unique outbound package staged with a
-    readiness timestamp.  At least one package must still be READY_FOR_PICKUP,
-    which excludes orders whose complete handover already finished.  Keeping
+    readiness timestamp at its authorized destination. Keeping
     this rule in fulfillment prevents dashboards from redefining readiness in
     terms of seller suborders or package row counts.
     """
@@ -174,32 +175,27 @@ def order_ready_for_pickup_predicate():
         select(func.count(OrderPackage.id))
         .join(OrderItem, OrderItem.id == OrderPackage.order_item_id)
         .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .join(WarehouseLocation, WarehouseLocation.id == OrderPackage.pickup_location_id)
+        .join(Warehouse, Warehouse.id == WarehouseLocation.warehouse_id)
         .where(
-            SellerOrder.order_id == Order.id,
-            OrderPackage.status.in_(
-                (PackageStatus.READY_FOR_PICKUP, PackageStatus.HANDED_OVER)
-            ),
-            OrderPackage.ready_at.is_not(None),
-        )
-        .correlate(Order)
-        .scalar_subquery()
-    )
-    packages_awaiting_pickup = (
-        select(func.count(OrderPackage.id))
-        .join(OrderItem, OrderItem.id == OrderPackage.order_item_id)
-        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
-        .where(
+            Warehouse.id == Order.pickup_warehouse_id, Warehouse.is_active.is_(True), Warehouse.seller_store_id.is_(None),
+            WarehouseLocation.is_active.is_(True), WarehouseLocation.location_type == LocationType.PICKUP_STAGING,
+            SellerOrder.decision_status == SellerOrderDecisionStatus.APPROVED,
+            SellerOrder.status.not_in((SellerOrderStatus.CANCELLED, SellerOrderStatus.COMPLETED)),
             SellerOrder.order_id == Order.id,
             OrderPackage.status == PackageStatus.READY_FOR_PICKUP,
+            OrderPackage.quantity == OrderItem.quantity,
+            units_in_pickup_custody(OrderItem, Order) == OrderItem.quantity,
             OrderPackage.ready_at.is_not(None),
         )
         .correlate(Order)
         .scalar_subquery()
     )
     return and_(
+        Order.pickup_warehouse_id.is_not(None),
+        paid_order_condition(),
         order_item_count > 0,
         staged_package_count == order_item_count,
-        packages_awaiting_pickup > 0,
     )
 
 
@@ -221,6 +217,7 @@ def _validate_order_item_fully_picked(
     )
     if (
         seller_order is None
+        or seller_order.status in (SellerOrderStatus.CANCELLED, SellerOrderStatus.COMPLETED)
         or seller_order.decision_status != SellerOrderDecisionStatus.APPROVED
     ):
         raise OrderNotReadyForPackagingError(
@@ -324,43 +321,44 @@ def _validate_order_item_fully_picked(
             raise _order_not_ready()
 
 
-def _get_order_item_warehouse_id(
-    *,
-    session: Session,
-    order_item: OrderItem,
-) -> uuid.UUID:
-    warehouse_ids = set(
-        session.scalars(
-            select(WarehouseLocation.warehouse_id)
-            .join(
-                InventoryBalance,
-                InventoryBalance.location_id
-                == WarehouseLocation.id,
-            )
-            .join(
-                InventoryReservation,
-                InventoryReservation.balance_id
-                == InventoryBalance.id,
-            )
-            .where(
-                InventoryReservation.order_item_id
-                == order_item.id
-            )
+def _item_custody(session, item, destination_id):
+    if destination_id is None:
+        raise InvalidPickupLocationError("El pedido no tiene un destino de retiro registrado.")
+    allocations = received_allocations(session, item, for_pickup_at=destination_id)
+    if sum(quantity for quantity, _ in allocations) != item.quantity:
+        raise OrderNotReadyForPackagingError(
+            "Falta verificar la recepción física y la custodia de todas las unidades en el punto de retiro."
         )
+    return [state for _, state in allocations]
+
+
+def _lock_paid_package_order(session, code):
+    order = session.scalar(
+        select(Order).join(SellerOrder).join(OrderItem).join(OrderPackage)
+        .where(OrderPackage.package_code == code)
+        .with_for_update(of=Order)
     )
+    if order is None:
+        raise PackageNotFoundError(f"No existe el paquete {code}.")
+    _require_paid_order(session, order)
+    return order
 
-    if not warehouse_ids:
-        raise PackageIntegrityError(
-            "No fue posible determinar el almacén del paquete."
-        )
 
-    if len(warehouse_ids) != 1:
-        raise PackageIntegrityError(
-            "Las reservas del paquete pertenecen "
-            "a varios almacenes."
-        )
+def _require_paid_order(session, order):
+    if not session.scalar(select(Order.id).where(Order.id == order.id, paid_order_condition())):
+        raise OrderNotReadyForPackagingError("El pedido debe estar vigente y tener un pago aprobado.")
 
-    return next(iter(warehouse_ids))
+
+def _locked_order_items(session, order_id):
+    seller_ids = session.scalars(
+        select(SellerOrder.id).where(SellerOrder.order_id == order_id)
+        .order_by(SellerOrder.id).with_for_update()
+    ).all()
+    return session.scalars(
+        select(OrderItem).where(OrderItem.seller_order_id.in_(seller_ids))
+        .order_by(OrderItem.seller_order_id, OrderItem.id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).all()
 
 
 def create_packages_for_order(
@@ -386,23 +384,8 @@ def create_packages_for_order(
             f"No existe el pedido {normalized_order_number}."
         )
 
-    order_items = list(
-        session.scalars(
-            select(OrderItem)
-            .join(
-                SellerOrder,
-                SellerOrder.id == OrderItem.seller_order_id,
-            )
-            .where(
-                SellerOrder.order_id == order.id
-            )
-            .order_by(
-                SellerOrder.id,
-                OrderItem.id,
-            )
-            .with_for_update(of=OrderItem)
-        )
-    )
+    _require_paid_order(session, order)
+    order_items = _locked_order_items(session, order.id)
 
     if not order_items:
         raise PackageIntegrityError(
@@ -414,6 +397,7 @@ def create_packages_for_order(
             session=session,
             order_item=order_item,
         )
+        _item_custody(session, order_item, order.pickup_warehouse_id)
 
     order_item_ids = [
         order_item.id
@@ -427,7 +411,7 @@ def create_packages_for_order(
                 OrderPackage.order_item_id.in_(order_item_ids)
             )
             .order_by(OrderPackage.order_item_id)
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
     )
 
@@ -516,13 +500,14 @@ def pack_order_package(
             "notes no puede superar 500 caracteres."
         )
 
+    order = _lock_paid_package_order(session, normalized_package_code)
     package = session.scalar(
         select(OrderPackage)
         .where(
             OrderPackage.package_code
             == normalized_package_code
         )
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
 
     if package is None:
@@ -550,6 +535,12 @@ def pack_order_package(
         session=session,
         order_item=order_item,
     )
+
+    actor = require_actor_permission(session, actor_user_id, "scanner.dispatch_package")
+    operational_scope(session, actor).require_point(order.pickup_warehouse_id)
+    if not active_pickup_point(session, order.pickup_warehouse_id):
+        raise InvalidPickupLocationError("El punto de retiro no está disponible.")
+    _item_custody(session, order_item, order.pickup_warehouse_id)
 
     if package.status == PackageStatus.PACKED:
         if package.packed_at is None:
@@ -617,13 +608,14 @@ def stage_order_package_for_pickup(
             "notes no puede superar 500 caracteres."
         )
 
+    order = _lock_paid_package_order(session, normalized_package_code)
     package = session.scalar(
         select(OrderPackage)
         .where(
             OrderPackage.package_code
             == normalized_package_code
         )
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
 
     if package is None:
@@ -646,15 +638,15 @@ def stage_order_package_for_pickup(
         order_item=order_item,
     )
 
+    states = _item_custody(session, order_item, order.pickup_warehouse_id)
+    point_id = states[0].current_warehouse_id
+    if active_pickup_point(session, order.pickup_warehouse_id) != point_id:
+        raise InvalidPickupLocationError("No se puede determinar un destino de retiro autorizado para el pedido.")
     pickup_location = session.scalar(
         select(WarehouseLocation)
-        .where(
-            WarehouseLocation.code
-            == normalized_location_code
-        )
-        .with_for_update()
+        .where(WarehouseLocation.code == normalized_location_code, WarehouseLocation.warehouse_id == point_id)
+        .with_for_update(read=True).execution_options(populate_existing=True)
     )
-
     if pickup_location is None:
         raise PickupLocationNotFoundError(
             f"No existe la ubicación {normalized_location_code}."
@@ -670,15 +662,10 @@ def stage_order_package_for_pickup(
             "La ubicación indicada no es un área de retiro."
         )
 
-    package_warehouse_id = _get_order_item_warehouse_id(
-        session=session,
-        order_item=order_item,
-    )
-
-    if pickup_location.warehouse_id != package_warehouse_id:
-        raise InvalidPickupLocationError(
-            "La ubicación de retiro pertenece a otro almacén."
-        )
+    actor = require_actor_permission(session, actor_user_id, "scanner.dispatch_package")
+    operational_scope(session, actor).require_point(point_id)
+    if package.quantity != order_item.quantity:
+        raise PackageIntegrityError("La cantidad de salida no corresponde al artículo.")
 
     if package.status == PackageStatus.READY_FOR_PICKUP:
         if (
@@ -759,6 +746,38 @@ def stage_order_package_for_pickup(
     )
 
 
+def prepare_order_for_pickup(session, *, order_number, warehouse_id, pickup_location_id, actor_user_id):
+    actor = require_actor_permission(session, actor_user_id, "scanner.dispatch_package")
+    scope = operational_scope(session, actor)
+    scope.require_point(warehouse_id)
+    location = session.scalar(
+        select(WarehouseLocation).where(
+            WarehouseLocation.id == pickup_location_id, WarehouseLocation.warehouse_id == warehouse_id,
+            WarehouseLocation.is_active.is_(True), WarehouseLocation.location_type == LocationType.PICKUP_STAGING,
+        )
+    )
+    if location is None:
+        raise InvalidPickupLocationError("La ubicación no corresponde al punto de retiro autorizado.")
+    order = session.scalar(
+        select(Order).where(Order.order_number == order_number, scope.order_clause(Order.id)).with_for_update()
+    )
+    if order is None:
+        raise FulfillmentOrderNotFoundError("No existe un pedido disponible en el punto seleccionado.")
+    if order.pickup_warehouse_id != warehouse_id or not active_pickup_point(session, warehouse_id):
+        raise InvalidPickupLocationError("Este punto no es el destino de retiro registrado en el pedido.")
+    with session.begin_nested():
+        created = create_packages_for_order(session=session, order_number=order_number)
+        staged = []
+        for package in created.packages:
+            if package.status == PackageStatus.CREATED:
+                pack_order_package(session=session, package_code=package.package_code, actor_user_id=actor.id)
+            staged.append(stage_order_package_for_pickup(
+                session=session, package_code=package.package_code, pickup_location_code=location.code,
+                actor_user_id=actor.id,
+            ))
+    return tuple(staged)
+
+
 def handover_order_packages(
     *,
     session: Session,
@@ -766,6 +785,7 @@ def handover_order_packages(
     scanned_codes: Sequence[str],
     actor_user_id: uuid.UUID | None = None,
     expected_warehouse_id: uuid.UUID | None = None,
+    expected_buyer_id: uuid.UUID,
     notes: str | None = None,
 ) -> HandoverOrderResult:
     actor = require_actor_permission(session, actor_user_id, "scanner.dispatch_package")
@@ -803,28 +823,15 @@ def handover_order_packages(
         .with_for_update()
     )
 
-    if order is None:
+    if order is None or order.buyer_id != expected_buyer_id:
         raise FulfillmentOrderNotFoundError(
             f"No existe el pedido {normalized_order_number}."
         )
 
-    order_items = list(
-        session.scalars(
-            select(OrderItem)
-            .join(
-                SellerOrder,
-                SellerOrder.id == OrderItem.seller_order_id,
-            )
-            .where(
-                SellerOrder.order_id == order.id
-            )
-            .order_by(
-                SellerOrder.id,
-                OrderItem.id,
-            )
-            .with_for_update(of=OrderItem)
-        )
-    )
+    if expected_warehouse_id is not None and order.pickup_warehouse_id != expected_warehouse_id:
+        raise InvalidPickupLocationError("El pedido no corresponde al punto operativo actual.")
+
+    order_items = _locked_order_items(session, order.id)
 
     if not order_items:
         raise PackageIntegrityError(
@@ -845,7 +852,7 @@ def handover_order_packages(
                 )
             )
             .order_by(OrderPackage.id)
-            .with_for_update()
+            .with_for_update().execution_options(populate_existing=True)
         )
     )
 
@@ -1003,25 +1010,23 @@ def handover_order_packages(
             "de retiro válida."
         )
 
-    if expected_warehouse_id is not None:
-        warehouse = session.scalar(
-            select(Warehouse)
-            .where(Warehouse.id == expected_warehouse_id)
-            .with_for_update()
-        )
-        if warehouse is None or not warehouse.is_active:
-            raise InvalidPickupLocationError(
-                "El punto operativo seleccionado no está disponible."
-            )
-        if any(
-            location.warehouse_id != warehouse.id
+    point_ids = {location.warehouse_id for location in pickup_locations}
+    if len(point_ids) != 1 or (expected_warehouse_id is not None and expected_warehouse_id not in point_ids):
+        raise InvalidPickupLocationError("Todos los paquetes deben estar preparados en el punto operativo actual.")
+    point_id = next(iter(point_ids))
+    scope.require_point(point_id)
+    if not replayed:
+        _require_paid_order(session, order)
+        if active_pickup_point(session, order.pickup_warehouse_id) != point_id or any(
+            not location.is_active or location.location_type != LocationType.PICKUP_STAGING
             for location in pickup_locations
         ):
-            raise InvalidPickupLocationError(
-                "Todos los paquetes deben estar preparados en el punto operativo actual."
-            )
-
-    if not replayed:
+            raise InvalidPickupLocationError("El punto de retiro no está autorizado.")
+        states = {}
+        for item in order_items:
+            _validate_order_item_fully_picked(session=session, order_item=item)
+            for state in _item_custody(session, item, order.pickup_warehouse_id):
+                states[state.id] = state
         handover_time = datetime.now(timezone.utc)
 
         for package in packages:
@@ -1029,6 +1034,14 @@ def handover_order_packages(
             package.handed_over_at = handover_time
             package.handed_over_by_user_id = actor_user_id
             package.handover_notes = notes
+
+        for state in states.values():
+            state.status = LogisticsPackageStatus.DELIVERED
+            state.current_warehouse_id = None
+            state.current_location_id = None
+            state.custodian_warehouse_id = None
+            state.custodian_user_id = order.buyer_id
+            state.last_event_at = handover_time
 
         session.flush()
 

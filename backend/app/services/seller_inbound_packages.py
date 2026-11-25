@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.services.admin_operating_context import operational_scope
 from app.services.admin_permissions import require_actor_permission
 from app.models import (
+    InventoryReservation,
     Order,
     OrderItem,
     SellerInboundPackage,
@@ -22,6 +23,7 @@ from app.models import (
 )
 from app.models.enums import (
     LocationType,
+    ReservationStatus,
     SellerInboundPackageStatus,
     SellerOrderDecisionStatus,
     SellerOrderStatus,
@@ -33,6 +35,9 @@ from app.services.partner_orders import (
     PartnerOrderValidationError,
     require_partner_order_store,
 )
+from app.services.inventory import InventoryServiceError, pick_inventory_reservation
+from app.services.logistics_tracking import register_received_inbound_package
+from app.services.order_custody import active_pickup_point, paid_order_condition, received_allocations
 from app.services.public_identifiers import format_seller_inbound_package_code
 
 
@@ -122,7 +127,7 @@ def _locked_partner_order(
             SellerOrder.id == seller_order_id,
             SellerOrder.store_id == store_id,
         )
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
     if seller_order is None:
         raise PartnerOrderNotFoundError("No existe el pedido solicitado.")
@@ -146,7 +151,7 @@ def _locked_partner_package(
             SellerInboundPackage.id == package_id,
             SellerInboundPackage.seller_order_id == seller_order.id,
         )
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
     if package is None:
         raise PartnerOrderNotFoundError("No existe el paquete solicitado.")
@@ -165,12 +170,23 @@ def _package_order_items(
     }
 
 
+def _require_fulfillable(session, seller_order):
+    if (
+        seller_order.status not in (SellerOrderStatus.CONFIRMED, SellerOrderStatus.PICKING,
+                                    SellerOrderStatus.PACKED, SellerOrderStatus.READY_FOR_PICKUP)
+        or seller_order.decision_status != SellerOrderDecisionStatus.APPROVED
+        or not session.scalar(select(Order.id).where(Order.id == seller_order.order_id, paid_order_condition()))
+    ):
+        raise PartnerOrderConflictError("El pedido requiere pago confirmado y aprobación de la tienda.")
+
+
 def create_partner_inbound_package(
     session: Session,
     *,
     user_id: uuid.UUID,
     seller_order_id: uuid.UUID,
     allocations: Sequence[tuple[uuid.UUID, int]] | None = None,
+    request_id: uuid.UUID | None = None,
 ) -> PartnerInboundPackageResult:
     access = require_partner_order_store(session, user_id, require_manage=True)
     seller_order = _locked_partner_order(
@@ -178,17 +194,7 @@ def create_partner_inbound_package(
         seller_order_id=seller_order_id,
         store_id=access.store_id,
     )
-    if seller_order.decision_status != SellerOrderDecisionStatus.APPROVED:
-        raise PartnerOrderConflictError(
-            "El pedido debe estar aprobado antes de crear un paquete."
-        )
-    if seller_order.status in {
-        SellerOrderStatus.CANCELLED,
-        SellerOrderStatus.COMPLETED,
-    }:
-        raise PartnerOrderConflictError(
-            "El pedido ya no admite nuevos paquetes de entrada."
-        )
+    _require_fulfillable(session, seller_order)
 
     order_items = list(
         session.scalars(
@@ -227,7 +233,14 @@ def create_partner_inbound_package(
             "Las cantidades ya asignadas a paquetes son inconsistentes."
         )
 
+    # Two identical partial allocations can be two real boxes. The request ID identifies the box on retry.
+    if allocations is not None and not isinstance(request_id, uuid.UUID):
+        raise PartnerOrderValidationError("La preparación parcial requiere un identificador de solicitud.")
+    package_id = uuid.uuid5(seller_order.id, str(request_id)) if request_id else uuid.uuid4()
+    existing = session.get(SellerInboundPackage, package_id) if request_id else None
     if allocations is None:
+        if existing is not None:
+            return _result(existing, order_items=items_by_id, replayed=True)
         normalized = tuple(
             (item.id, remaining[item.id])
             for item in order_items
@@ -239,6 +252,8 @@ def create_partner_inbound_package(
         for raw_item_id, raw_quantity in allocations:
             try:
                 item_id = uuid.UUID(str(raw_item_id))
+                if isinstance(raw_quantity, bool) or not str(raw_quantity).strip().isdigit():
+                    raise ValueError
                 quantity = int(raw_quantity)
             except (TypeError, ValueError) as exc:
                 raise PartnerOrderValidationError(
@@ -257,12 +272,16 @@ def create_partner_inbound_package(
                 raise PartnerOrderValidationError(
                     "Cada cantidad del paquete debe ser mayor que cero."
                 )
-            if quantity > remaining[item_id]:
+            if existing is None and quantity > remaining[item_id]:
                 raise PartnerOrderValidationError(
                     "La cantidad asignada supera las unidades pendientes del pedido."
                 )
             normalized_values.append((item_id, quantity))
         normalized = tuple(normalized_values)
+        if existing is not None:
+            if dict(normalized) != {link.order_item_id: link.quantity for link in existing.items}:
+                raise PartnerOrderConflictError("La solicitud ya fue usada con otras cantidades.")
+            return _result(existing, order_items=items_by_id, replayed=True)
 
     if not normalized:
         raise PartnerOrderConflictError(
@@ -274,6 +293,7 @@ def create_partner_inbound_package(
     )
     package_code = format_seller_inbound_package_code(int(sequence_value))
     package = SellerInboundPackage(
+        id=package_id,
         seller_order_id=seller_order.id,
         package_code=package_code,
         barcode=package_code,
@@ -310,8 +330,7 @@ def mark_partner_inbound_package_ready(
         seller_order_id=seller_order_id,
         store_id=access.store_id,
     )
-    if seller_order.decision_status != SellerOrderDecisionStatus.APPROVED:
-        raise PartnerOrderConflictError("El pedido no está aprobado.")
+    _require_fulfillable(session, seller_order)
     if package.status == SellerInboundPackageStatus.READY_FOR_DROPOFF:
         return _result(
             package,
@@ -373,7 +392,7 @@ def receive_seller_inbound_package(
     """Internal ECUVEL operation. It is deliberately not exposed to Partners."""
 
     actor = session.scalar(
-        select(User).where(User.id == actor_user_id).with_for_update()
+        select(User).where(User.id == actor_user_id).with_for_update(read=True)
     )
     if (
         actor is None
@@ -388,12 +407,13 @@ def receive_seller_inbound_package(
     location = session.scalar(
         select(WarehouseLocation)
         .where(WarehouseLocation.id == received_location_id)
-        .with_for_update()
+        .with_for_update(read=True).execution_options(populate_existing=True)
     )
     if (
         location is None
         or not location.is_active
         or location.location_type != LocationType.RECEIVING
+        or not active_pickup_point(session, location.warehouse_id)
     ):
         raise PartnerOrderValidationError(
             "La ubicación de recepción de Ecuvel no es válida."
@@ -408,11 +428,23 @@ def receive_seller_inbound_package(
     scope = operational_scope(session, actor)
     scope.require_point(location.warehouse_id)
     normalized_code = (package_code or "").strip().upper()
+    order = session.scalar(
+        select(Order).join(SellerOrder).join(SellerInboundPackage)
+        .where(SellerInboundPackage.package_code == normalized_code)
+        .with_for_update(of=Order)
+    )
+    if order is None:
+        raise PartnerOrderNotFoundError("No existe el paquete escaneado.")
+    seller_order = session.scalar(
+        select(SellerOrder).join(SellerInboundPackage)
+        .where(SellerInboundPackage.package_code == normalized_code)
+        .with_for_update(of=SellerOrder).execution_options(populate_existing=True)
+    )
     package = session.scalar(
         select(SellerInboundPackage)
         .options(selectinload(SellerInboundPackage.items))
         .where(SellerInboundPackage.package_code == normalized_code)
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
     if package is None:
         raise PartnerOrderNotFoundError("No existe el paquete escaneado.")
@@ -420,6 +452,11 @@ def receive_seller_inbound_package(
         recorded = session.get(WarehouseLocation, package.received_location_id)
         scope.require_point(recorded.warehouse_id if recorded else None)
     order_items = _package_order_items(session, package)
+    if not order_items or any(
+        item.seller_order_id != seller_order.id or item.store_id_snapshot != seller_order.store_id
+        for item in order_items.values()
+    ):
+        raise PartnerOrderConflictError("El contenido no corresponde al subpedido.")
     expected_codes: Counter[str] = Counter()
     for link in package.items:
         expected_codes[order_items[link.order_item_id].seller_sku_snapshot] += (
@@ -434,45 +471,54 @@ def receive_seller_inbound_package(
         raise PartnerOrderValidationError(
             "Los productos escaneados no coinciden con el contenido esperado."
         )
-    if package.status == SellerInboundPackageStatus.RECEIVED_BY_ECUVEL:
-        from app.services.logistics_tracking import (
-            register_received_inbound_package,
-        )
-
+    replayed = package.status == SellerInboundPackageStatus.RECEIVED_BY_ECUVEL
+    if replayed and location.id != package.received_location_id:
+        raise PartnerOrderConflictError("La recepción original corresponde a otra ubicación.")
+    if not replayed and package.status != SellerInboundPackageStatus.READY_FOR_DROPOFF:
+        raise PartnerOrderConflictError("El paquete debe estar listo para Drop-off antes de recibirlo.")
+    if replayed and seller_order.status == SellerOrderStatus.COMPLETED:
+        return _result(package, order_items=order_items, replayed=True)
+    _require_fulfillable(session, seller_order)
+    with session.begin_nested():
+        if not replayed:
+            package.status = SellerInboundPackageStatus.RECEIVED_BY_ECUVEL
+            package.received_at = now or datetime.now(timezone.utc)
+            package.received_by_user_id = actor.id
+            package.received_location_id = location.id
+            session.flush()
         register_received_inbound_package(
-            session,
-            package_id=package.id,
-            location_id=package.received_location_id,
-            actor_user_id=actor.id,
-            now=package.received_at,
+            session, package_id=package.id, location_id=location.id,
+            actor_user_id=actor.id, now=package.received_at,
             idempotency_key=f"seller-reception:{package.id}",
         )
-        return _result(
-            package,
-            order_items=order_items,
-            replayed=True,
-        )
-    if package.status != SellerInboundPackageStatus.READY_FOR_DROPOFF:
-        raise PartnerOrderConflictError(
-            "El paquete debe estar listo para Drop-off antes de recibirlo."
-        )
-    package.status = SellerInboundPackageStatus.RECEIVED_BY_ECUVEL
-    package.received_at = now or datetime.now(timezone.utc)
-    package.received_by_user_id = actor.id
-    package.received_location_id = location.id
-    session.flush()
-    from app.services.logistics_tracking import register_received_inbound_package
+        _pick_received_lines(session, order_items, package.package_code, actor.id)
+    return _result(package, order_items=order_items, replayed=replayed)
 
-    register_received_inbound_package(
-        session,
-        package_id=package.id,
-        location_id=location.id,
-        actor_user_id=actor.id,
-        now=package.received_at,
-        idempotency_key=f"seller-reception:{package.id}",
-    )
-    return _result(
-        package,
-        order_items=order_items,
-        replayed=False,
-    )
+
+def _pick_received_lines(session, order_items, package_code, actor_id):
+    # Reservations are indivisible. Keep a split line encumbered until its last verified unit arrives.
+    reservations = session.scalars(
+        select(InventoryReservation).where(InventoryReservation.order_item_id.in_(order_items))
+        .order_by(InventoryReservation.balance_id, InventoryReservation.id).with_for_update()
+        .execution_options(populate_existing=True)
+    ).all()
+    complete_items = set()
+    for item in order_items.values():
+        received = sum(quantity for quantity, _ in received_allocations(session, item))
+        item_reservations = [r for r in reservations if r.order_item_id == item.id]
+        if (
+            received > item.quantity or sum(r.quantity for r in item_reservations) != item.quantity
+            or any(r.status != ReservationStatus.CONSUMED for r in item_reservations)
+        ):
+            raise PartnerOrderConflictError("La reserva pagada no coincide con las unidades del pedido.")
+        if received == item.quantity:
+            complete_items.add(item.id)
+    try:
+        for reservation in reservations:
+            if reservation.order_item_id in complete_items:
+                pick_inventory_reservation(
+                    session=session, reservation_id=reservation.id, actor_user_id=actor_id,
+                    notes=f"Recepción verificada {package_code}",
+                )
+    except InventoryServiceError as exc:
+        raise PartnerOrderConflictError(str(exc)) from exc

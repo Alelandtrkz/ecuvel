@@ -205,7 +205,7 @@ def require_receiving_location(
         ) from exc
     statement = select(WarehouseLocation).where(WarehouseLocation.id == parsed_id)
     if lock:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update(read=True).execution_options(populate_existing=True)
     location = session.scalar(statement)
     scope.require_point(location.warehouse_id if location else None)
     if (
@@ -560,6 +560,7 @@ def _ready_orders_for_buyer(
             select(Order)
             .where(
                 Order.buyer_id == buyer_id,
+                Order.pickup_warehouse_id == warehouse_id,
                 order_ready_for_pickup_predicate(),
             )
             .order_by(Order.created_at.desc(), Order.id.desc())
@@ -707,6 +708,7 @@ def get_admin_package_lookup(
                 and state.expected_destination
                 else state.current_warehouse.name
                 if state and state.current_warehouse
+                else "Entregado al comprador" if state and state.status == LogisticsPackageStatus.DELIVERED
                 else "Pendiente de recepción"
             ),
             (

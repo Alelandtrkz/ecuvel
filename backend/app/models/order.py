@@ -108,6 +108,12 @@ class Order(
         server_default="0.00",
     )
 
+    pickup_warehouse_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("warehouses.id", name="fk_orders_pickup_warehouse", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    pickup_warehouse: Mapped["Warehouse | None"] = relationship("Warehouse")
+
     buyer: Mapped["User"] = relationship(
         "User",
     )

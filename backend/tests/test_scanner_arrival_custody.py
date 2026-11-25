@@ -243,6 +243,7 @@ def test_demo_handover_uses_effective_permissions(app, session, role):
     before = domain_state(session)
     result = runner.invoke(args=[
         "handover-demo-order", "--order-number", ready.order_number, "--scan", ready.package_codes[0],
+        "--buyer-code", session.get(User, base.buyer_id).public_account_code,
     ])
     if role != StaffRole.OPERATIONS_SUPERVISOR:
         assert result.exit_code != 0 and isinstance(result.exception, AdminAuthorizationError), result.exception

@@ -1265,7 +1265,7 @@ def _lock_reservation(
     reservation = session.scalar(
         select(InventoryReservation)
         .where(InventoryReservation.id == reservation_id)
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
 
     if reservation is None:
@@ -1278,7 +1278,7 @@ def _lock_reservation(
         .where(
             InventoryBalance.id == reservation.balance_id
         )
-        .with_for_update()
+        .with_for_update().execution_options(populate_existing=True)
     )
 
     if balance is None:
@@ -1659,24 +1659,26 @@ def pick_inventory_reservation(
             "notes no puede superar 500 caracteres."
         )
 
-    reservation, balance = _lock_reservation(
-        session=session,
-        reservation_id=reservation_id,
-    )
-
     seller_order = session.scalar(
         select(SellerOrder)
         .join(OrderItem, OrderItem.seller_order_id == SellerOrder.id)
-        .where(OrderItem.id == reservation.order_item_id)
+        .join(InventoryReservation, InventoryReservation.order_item_id == OrderItem.id)
+        .where(InventoryReservation.id == reservation_id)
         .with_for_update(of=SellerOrder)
     )
+    if seller_order is None:
+        raise InventoryReservationNotFoundError(f"No existe la reserva {reservation_id}.")
     if (
-        seller_order is None
-        or seller_order.decision_status != SellerOrderDecisionStatus.APPROVED
+        seller_order.decision_status != SellerOrderDecisionStatus.APPROVED
     ):
         raise InvalidReservationTransitionError(
             "La tienda debe aprobar el pedido antes de iniciar el picking."
         )
+
+    reservation, balance = _lock_reservation(
+        session=session,
+        reservation_id=reservation_id,
+    )
 
     location = session.get(
         WarehouseLocation,

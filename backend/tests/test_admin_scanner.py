@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select
@@ -15,8 +14,6 @@ from app.models import (
     OrderItem,
     OrderPackage,
     SellerInboundPackage,
-    SellerInboundPackageItem,
-    SellerOrder,
     User,
     Warehouse,
     WarehouseLocation,
@@ -36,7 +33,6 @@ from app.services.logistics_tracking import (
 )
 from tests.factories import (
     create_catalog_and_stock,
-    create_order_items,
     create_ready_for_pickup_order,
 )
 
@@ -98,29 +94,9 @@ def _point(session, name: str) -> tuple[Warehouse, WarehouseLocation]:
 def _ready_inbound(session, *, quantity: int = 2):
     base = create_catalog_and_stock(session)
     staff = _staff_from_base(session, base)
-    order_id, order_number, item_ids = create_order_items(session, base, [quantity])
-    seller_order = session.scalar(
-        select(SellerOrder).where(SellerOrder.order_id == order_id)
-    )
-    package = SellerInboundPackage(
-        seller_order_id=seller_order.id,
-        package_code=f"PKG-{uuid.uuid4().hex[:10].upper()}",
-        barcode="placeholder",
-        status=SellerInboundPackageStatus.READY_FOR_DROPOFF,
-        ready_for_dropoff_at=datetime.now(timezone.utc),
-        ready_for_dropoff_by_user_id=staff.id,
-    )
-    package.barcode = package.package_code
-    session.add(package)
-    session.flush()
-    session.add(
-        SellerInboundPackageItem(
-            package_id=package.id,
-            order_item_id=item_ids[0],
-            quantity=quantity,
-        )
-    )
-    session.flush()
+    from tests.factories import create_ready_inbound_order
+    _, order_number, item_ids, ready = create_ready_inbound_order(session, base, [quantity])
+    package = session.get(SellerInboundPackage, ready.package_id)
     return base, staff, package, session.get(OrderItem, item_ids[0]), order_number
 
 

@@ -620,8 +620,8 @@ def partner_order_detail(seller_order_id):
             db.session,
             user_id=current_user.id,
             seller_order_id=seller_order_id,
-            buyer_pickup_point_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
-            buyer_pickup_point_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
+            buyer_pickup_point_name="Punto de retiro pendiente de confirmación",
+            buyer_pickup_point_address="",
             placeholder_image=url_for(
                 "static", filename="images/placeholders/product-placeholder.svg"
             ),

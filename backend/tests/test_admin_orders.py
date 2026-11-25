@@ -144,6 +144,10 @@ def _display_order(
     payment_status,
     package_status=None,
 ):
+    if package_status == PackageStatus.READY_FOR_PICKUP:
+        from tests.factories import create_ready_for_pickup_order
+        ready = create_ready_for_pickup_order(session, base, [1])
+        return session.get(Order, ready.order_id)
     now = datetime.now(timezone.utc)
     order = Order(
         order_number=f"ECV-STATE-{suffix}",

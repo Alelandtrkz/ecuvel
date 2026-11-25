@@ -81,6 +81,7 @@ from app.services.checkout import (
     CheckoutConfirmation,
     CheckoutServiceError,
     EmptyCheckoutError,
+    CheckoutWarehouseError,
     prepare_checkout,
     create_checkout_order,
 )
@@ -2193,7 +2194,7 @@ def checkout() -> str:
     buyer = current_user
     try:
         preview, confirmation = prepare_checkout(db.session, buyer)
-    except EmptyCheckoutError as exc:
+    except (EmptyCheckoutError, CheckoutWarehouseError) as exc:
         flash(str(exc), "error")
         return redirect(url_for("storefront.cart"))
 
@@ -2209,8 +2210,8 @@ def checkout() -> str:
         preview=preview,
         buyer=CheckoutBuyerViewModel(buyer.full_name, buyer.phone),
         checkout_token=token,
-        pickup_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
-        pickup_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
+        pickup_name=preview.pickup_point_name,
+        pickup_address=preview.pickup_point_address,
         order_hold_days=current_app.config["ECUVEL_ORDER_HOLD_DAYS"],
         pickup_is_free=current_app.config["ECUVEL_PICKUP_IS_FREE"],
         placeholder_image=url_for(
@@ -2515,8 +2516,8 @@ def orders() -> str:
         active_filter=active_filter,
         page=page,
         page_size=current_app.config["CUSTOMER_ORDERS_PAGE_SIZE"],
-        pickup_point_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
-        pickup_point_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
+        pickup_point_name="Punto de retiro pendiente de confirmación",
+        pickup_point_address="",
     )
     return render_template(
         "storefront/orders.html",
@@ -2539,8 +2540,8 @@ def order_detail(order_number: str) -> str:
         session=db.session,
         order_number=order_number,
         order_ids=_allowed_checkout_order_ids(),
-        pickup_point_name=current_app.config["ECUVEL_PICKUP_POINT_NAME"],
-        pickup_point_address=current_app.config["ECUVEL_PICKUP_POINT_ADDRESS"],
+        pickup_point_name="Punto de retiro pendiente de confirmación",
+        pickup_point_address="",
     )
     if detail is None:
         abort(404)

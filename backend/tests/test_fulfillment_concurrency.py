@@ -41,6 +41,7 @@ def test_concurrent_handover_is_idempotent(
 
     def operation(session):
         return handover_order_packages(
+            expected_buyer_id=base.buyer_id,
             session=session,
             order_number=ready.order_number,
             scanned_codes=ready.package_codes,

@@ -62,6 +62,7 @@ def app():
         application = create_app()
     finally:
         Config.RATELIMIT_ENABLED = previous_ratelimit_enabled
+    application.config["ECUVEL_PICKUP_WAREHOUSE_CODE"] = "TEST-PICKUP"
     application.config["TESTING"] = True
     application.config["WTF_CSRF_ENABLED"] = False
     application.config["RATELIMIT_ENABLED"] = False

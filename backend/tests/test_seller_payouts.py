@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from threading import Event
@@ -16,7 +15,7 @@ from app.models import (
     SellerPayoutItem, Store, StoreOnboarding, StoreBankAccountVersion,
 )
 from app.models.enums import (
-    OrderStatus, PaymentMethod, PaymentStatus, SellerOrderDecisionStatus,
+    PaymentStatus, SellerOrderDecisionStatus,
     SellerOrderStatus, SellerPayoutStatus, StoreOnboardingStage,
     StoreOnboardingStatus,
 )
@@ -71,26 +70,11 @@ def _bank_onboarding(session: Session, base):
     return version
 
 
-def _approved_payment(session: Session, order: Order, approved_at: datetime):
-    order.status = OrderStatus.FULFILLING
-    attempt = PaymentAttempt(
-        order_id=order.id, method=PaymentMethod.BANK_TRANSFER,
-        status=PaymentStatus.APPROVED, amount=order.grand_total,
-        currency=order.currency, idempotency_key=f"payout-{uuid.uuid4().hex}",
-        request_fingerprint=uuid.uuid4().hex.ljust(64, "0"),
-        expires_at=approved_at + timedelta(hours=1), approved_at=approved_at,
-    )
-    session.add(attempt)
-    session.flush()
-    return attempt
-
-
 def _delivered_order_for_base(session: Session, base):
-    ready = create_ready_for_pickup_order(session, base, [2])
+    ready = create_ready_for_pickup_order(session, base, [2], approved_at=DELIVERED_AT - timedelta(days=1))
     order = session.get(Order, ready.order_id)
     seller_order = session.scalar(select(SellerOrder).where(SellerOrder.order_id == order.id))
     seller_order.decision_status = SellerOrderDecisionStatus.APPROVED
-    _approved_payment(session, order, DELIVERED_AT - timedelta(days=1))
     handover_ready_order(session, base, ready)
     for package in session.scalars(
         select(OrderPackage).join(OrderPackage.order_item).where(

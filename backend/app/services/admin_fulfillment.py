@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.orm import Session, aliased, joinedload
 
+from app.services.order_custody import outbound_started
 from app.services.admin_operating_context import OperationalScope
 from app.models import (
     LogisticsPackageState,
@@ -746,6 +747,7 @@ def get_admin_fulfillment_detail(
             latest_transfer.received_at,
             latest_transfer.eta_at,
         )
+    repacked = session.scalar(select(outbound_started(package.id)))
     if state.is_deviated:
         next_title = "Corrección de ruta requerida"
         next_description = (
@@ -755,6 +757,8 @@ def get_admin_fulfillment_detail(
             else "Definir un traslado correctivo desde la ubicación actual."
         )
         next_tone = "danger"
+    elif repacked and state.status == LogisticsPackageStatus.AT_POINT:
+        next_title, next_description, next_tone = "Preparar entrega", "Continúa desde los paquetes del pedido.", "info"
     elif state.status == LogisticsPackageStatus.AT_POINT:
         next_title = "Asignar próximo traslado"
         next_description = "Selecciona un destino y un responsable ECUVEL activo."
@@ -789,7 +793,7 @@ def get_admin_fulfillment_detail(
         )
         custodian_name = state.custodian_user.full_name
         custodian_code = state.custodian_user.public_account_code
-        custodian_type = "Personal ECUVEL"
+        custodian_type = "Comprador" if state.status == LogisticsPackageStatus.DELIVERED else "Personal ECUVEL"
     else:
         custody_count = None
         custodian_name = (
@@ -840,7 +844,7 @@ def get_admin_fulfillment_detail(
             if option.value != str(state.current_warehouse_id)
         ),
         _staff_options(session) if scope.warehouse_ids is None else (),
-        state.status == LogisticsPackageStatus.AT_POINT and not state.is_deviated,
+        state.status == LogisticsPackageStatus.AT_POINT and not state.is_deviated and not repacked,
         state.is_deviated and state.current_warehouse_id is not None,
         bool(active and latest_transfer.status == LogisticsTransferStatus.ASSIGNED),
         bool(active and latest_transfer.status == LogisticsTransferStatus.ASSIGNED),

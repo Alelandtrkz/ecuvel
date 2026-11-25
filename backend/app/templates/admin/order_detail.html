@@ -4,7 +4,6 @@
 {% macro badge(status) -%}<span class="admin-status admin-status--{{ status.tone }}">{{ status.label }}</span>{%- endmacro %}
 
 {% block admin_content %}
-{% set handover = namespace(ready=false) %}{% for package in detail.packages %}{% if package.status.code == 'ready_for_pickup' %}{% set handover.ready = true %}{% endif %}{% endfor %}
 <div class="admin-page admin-order-detail">
   <header class="admin-detail-heading">
     <div>
@@ -14,9 +13,8 @@
     </div>
     <div class="admin-detail-actions">
       <a class="admin-button admin-button--secondary" href="{{ url_for('admin.inventory', q=detail.order_number) }}"><i data-lucide="warehouse" aria-hidden="true"></i>Ver paquetes en inventario</a>
-      {% if handover.ready %}<a class="admin-button" href="{{ url_for('admin.scanner_handover', buyer=detail.customer_code, order_number=detail.order_number) }}"><i data-lucide="user-check" aria-hidden="true"></i>Entregar con escáner</a>{% endif %}
+      {% if can_handover and 'scanner.dispatch_package' in admin_permissions %}<a class="admin-button" href="{{ url_for('admin.scanner_handover', buyer=detail.customer_code, order_number=detail.order_number) }}"><i data-lucide="user-check" aria-hidden="true"></i>Entregar con escáner</a>{% endif %}
       {% if detail.customer_email %}<a class="admin-button admin-button--secondary" href="mailto:{{ detail.customer_email }}"><i data-lucide="mail" aria-hidden="true"></i>Contactar cliente</a>{% endif %}
-      <button class="admin-button" type="button" disabled title="Impresión de etiquetas próximamente"><i data-lucide="printer" aria-hidden="true"></i>Imprimir etiquetas · Próx.</button>
       <button class="admin-icon-button" type="button" disabled title="Más acciones próximamente" aria-label="Más acciones próximamente"><i data-lucide="ellipsis" aria-hidden="true"></i></button>
     </div>
   </header>
@@ -73,6 +71,14 @@
 
       <section class="admin-card admin-detail-card">
         <div class="admin-card__heading"><div><p class="admin-eyebrow">ECUVEL → comprador</p><h2>Paquetes del pedido</h2></div></div>
+        <p>Destino de retiro: <strong>{{ detail.pickup_point_label }}</strong></p>
+        {% if pickup_locations and 'scanner.dispatch_package' in admin_permissions and detail.inbound_packages and not (detail.packages and detail.packages|selectattr('ready_at')|list|length == detail.packages|length) %}
+          <form method="post" action="{{ url_for('admin.order_prepare_pickup', order_number=detail.order_number) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Ubicación de retiro <select name="pickup_location_id" required>{% for location in pickup_locations %}<option value="{{ location.id }}">{{ location.name }} · {{ location.code }}</option>{% endfor %}</select></label>
+            <button class="admin-button" type="submit">Confirmar empaque y preparar para retiro</button>
+          </form>
+        {% endif %}
         {% if detail.packages %}
           <div class="admin-package-grid">
             {% for package in detail.packages %}
@@ -80,7 +86,7 @@
                 <header><strong>{{ package.package_code }}</strong>{{ badge(package.status) }}</header>
                 <p>{{ package.product_name }}{% if package.variant_title %} · {{ package.variant_title }}{% endif %}</p>
                 <dl><div><dt>Cantidad</dt><dd>{{ package.quantity }}</dd></div><div><dt>Ubicación</dt><dd>{{ package.location_code or 'Pendiente' }}</dd></div><div><dt>Código</dt><dd>{{ package.barcode }}</dd></div></dl>
-                <div class="admin-package-actions"><a href="{{ url_for('admin.scanner_package', code=package.package_code) }}">Consultar paquete</a>{% if package.status.code == 'ready_for_pickup' %}<a href="{{ url_for('admin.scanner_handover', buyer=detail.customer_code, order_number=detail.order_number) }}">Entregar</a>{% endif %}</div>
+                <div class="admin-package-actions"><a href="{{ url_for('admin.scanner_package', code=package.package_code) }}">Consultar paquete</a>{% if 'scanner.dispatch_package' in admin_permissions %}<a href="{{ url_for('admin.order_package_label', order_number=detail.order_number, package_code=package.package_code) }}">Imprimir etiqueta</a>{% endif %}{% if can_handover and 'scanner.dispatch_package' in admin_permissions %}<a href="{{ url_for('admin.scanner_handover', buyer=detail.customer_code, order_number=detail.order_number) }}">Entregar</a>{% endif %}</div>
               </article>
             {% endfor %}
           </div>

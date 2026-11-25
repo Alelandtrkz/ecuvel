@@ -788,12 +788,14 @@ def test_inbound_packages_support_split_quantities_and_reject_overallocation(
         session,
         user_id=owner.id,
         seller_order_id=seller_order.id,
+        request_id=uuid.uuid4(),
         allocations=((item_id, 1),),
     )
     second = create_partner_inbound_package(
         session,
         user_id=owner.id,
         seller_order_id=seller_order.id,
+        request_id=uuid.uuid4(),
         allocations=((item_id, 1),),
     )
     assert first.package_code != second.package_code
@@ -804,6 +806,7 @@ def test_inbound_packages_support_split_quantities_and_reject_overallocation(
             session,
             user_id=owner.id,
             seller_order_id=seller_order.id,
+            request_id=uuid.uuid4(),
             allocations=((item_id, 1),),
         )
 
@@ -870,6 +873,7 @@ def test_concurrent_inbound_package_codes_are_unique(
         session,
         user_id=owner_id,
         seller_order_id=seller_id,
+        request_id=uuid.uuid4(),
         allocations=((item_id, 1),),
     )
     results, errors = concurrent_runner(
@@ -896,12 +900,14 @@ def test_ready_and_ecuvel_receipt_drive_sla_and_logistics(session: Session):
         session,
         user_id=owner.id,
         seller_order_id=seller_order.id,
+        request_id=uuid.uuid4(),
         allocations=((item_id, 1),),
     )
     second = create_partner_inbound_package(
         session,
         user_id=owner.id,
         seller_order_id=seller_order.id,
+        request_id=uuid.uuid4(),
         allocations=((item_id, 1),),
     )
     for package in (first, second):

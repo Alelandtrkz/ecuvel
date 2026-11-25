@@ -539,6 +539,7 @@ class Config:
     CHECKOUT_DEMO_BUYER_EMAIL = os.getenv(
         "CHECKOUT_DEMO_BUYER_EMAIL", "buyer@ecuvel.local"
     )
+    ECUVEL_PICKUP_WAREHOUSE_CODE = os.getenv("ECUVEL_PICKUP_WAREHOUSE_CODE", "").strip()
     ECUVEL_PICKUP_POINT_NAME = os.getenv(
         "ECUVEL_PICKUP_POINT_NAME", "Punto de entrega Ecuvel"
     )

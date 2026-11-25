@@ -39,6 +39,7 @@ from app.services.admin_fulfillment import (
 from app.services.admin_scanner import (
     AdminScannerError,
     UnexpectedTransferArrival,
+    find_buyer_by_public_code,
     get_admin_customer_handover,
     get_admin_inbound_reception,
     get_admin_package_lookup,
@@ -133,7 +134,9 @@ from app.services.payment_proofs import (
     PaymentProofServiceError,
     review_payment_proof,
 )
-from app.services.barcodes import BarcodeRenderError, render_package_code128_svg
+from app.services.barcodes import BarcodeRenderError, render_package_code128_svg, render_outbound_code128_svg
+from app.models import Order, WarehouseLocation
+from app.models.enums import LocationType
 from app.services.logistics_tracking import (
     LogisticsTrackingError,
     LogisticsConflictError,
@@ -149,6 +152,7 @@ from app.services.logistics_tracking import (
 from app.services.fulfillment import (
     FulfillmentServiceError,
     handover_order_packages,
+    prepare_order_for_pickup,
 )
 from app.services.partner_orders import (
     PartnerOrderConflictError,
@@ -732,24 +736,21 @@ def scanner_handover_confirm():
             raise AdminScannerError(
                 "Confirma que verificaste físicamente la identidad del cliente."
             )
-        view = get_admin_customer_handover(
-            db.session,
-            buyer_code=buyer_code, scope=_scope(),
-            operating_point=get_admin_scanner_home(
-                db.session, warehouse_id=warehouse.id, scope=_scope()
-            ).operating_point,
-            order_number=order_number,
-        )
-        if view is None or view.selected_order is None:
+        buyer = find_buyer_by_public_code(db.session, buyer_code)
+        if buyer is None or not db.session.scalar(
+            select(Order.id).where(
+                Order.buyer_id == buyer.id, Order.order_number == order_number,
+                Order.pickup_warehouse_id == warehouse.id, _scope().order_clause(Order.id),
+            )
+        ):
             if _scope().warehouse_ids is not None:
                 raise AdminAuthorizationError()
-            raise AdminScannerError(
-                "El pedido no está listo para retirarse en este punto."
-            )
+            raise AdminScannerError("El pedido no corresponde al comprador y al punto indicados.")
         scanned_codes = _scanner_codes("scanned_codes", "scanned_codes_text")
         handover_order_packages(
             session=db.session,
-            order_number=view.selected_order.order_number,
+            order_number=order_number,
+            expected_buyer_id=buyer.id,
             scanned_codes=scanned_codes,
             actor_user_id=current_user.id,
             expected_warehouse_id=warehouse.id,
@@ -778,7 +779,7 @@ def scanner_handover_confirm():
         "admin.scanner_handover",
         buyer=buyer_code,
         result="handed-over",
-        completed_order=view.selected_order.order_number,
+        completed_order=order_number,
     )
 
 
@@ -1223,15 +1224,61 @@ def fulfillment_label(package_code: str):
     )
 
 
+@admin.post("/orders/<string:order_number>/prepare-pickup")
+@admin_permission_required("scanner.dispatch_package")
+def order_prepare_pickup(order_number):
+    try:
+        point = require_shared_operating_point(db.session, _inventory_warehouse_id(), lock=True)
+        prepare_order_for_pickup(
+            db.session, order_number=order_number, warehouse_id=point.id,
+            pickup_location_id=uuid.UUID(request.form.get("pickup_location_id", "")),
+            actor_user_id=current_user.id,
+        )
+        db.session.commit()
+    except (FulfillmentServiceError, AdminOperatingContextError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+    except Exception:
+        db.session.rollback()
+        raise
+    else:
+        flash("Paquetes preparados para retiro. Imprime las etiquetas de salida.", "success")
+    return redirect(url_for("admin.order_detail", order_number=order_number))
+
+
+@admin.get("/orders/<string:order_number>/packages/<string:package_code>/label")
+@admin_permission_required("scanner.dispatch_package")
+def order_package_label(order_number, package_code):
+    detail = get_admin_order_detail(db.session, scope=_scope(), order_number=order_number)
+    package = next((p for p in detail.packages if p.package_code == package_code), None) if detail else None
+    if package is None:
+        abort(404)
+    barcode = render_outbound_code128_svg(package.package_code)
+    return render_template(
+        "admin/fulfillment_label.html", detail=package, order_number=detail.order_number,
+        return_url=url_for("admin.order_detail", order_number=detail.order_number),
+        barcode_data=base64.b64encode(barcode).decode("ascii"),
+    )
+
+
 @admin.get("/orders/<string:order_number>")
 @admin_permission_required("orders.view_related")
 def order_detail(order_number: str):
     detail = get_admin_order_detail(db.session, scope=_scope(), order_number=order_number)
     if detail is None:
         abort(404)
+    at_destination = str(detail.pickup_warehouse_id) == _inventory_warehouse_id()
     return render_template(
         "admin/order_detail.html",
         detail=detail,
+        can_handover=detail.ready_for_handover and at_destination,
+        pickup_locations=db.session.scalars(
+            select(WarehouseLocation).where(
+                WarehouseLocation.warehouse_id == detail.pickup_warehouse_id,
+                WarehouseLocation.is_active.is_(True),
+                WarehouseLocation.location_type == LocationType.PICKUP_STAGING,
+            ).order_by(WarehouseLocation.code)
+        ).all() if at_destination else (),
         **_shell_context("orders"),
     )
 

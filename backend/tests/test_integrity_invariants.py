@@ -124,7 +124,7 @@ def test_package_state_timestamps_are_coherent(session_factory):
             session=session, order_number=packed_order
         )
         pack_order_package(
-            session=session,
+            session=session, actor_user_id=base.operator_id,
             package_code=packed_result.packages[0].package_code,
         )
 
@@ -154,6 +154,7 @@ def test_order_cannot_remain_partially_handed_over(session_factory):
     with pytest.raises(IncompletePackageScanError):
         with session_factory.begin() as session:
             handover_order_packages(
+                expected_buyer_id=base.buyer_id,
                 session=session,
                 actor_user_id=base.operator_id,
                 order_number=ready.order_number,

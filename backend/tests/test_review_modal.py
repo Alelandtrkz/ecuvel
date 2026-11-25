@@ -70,7 +70,13 @@ def _delivered_order(session):
     buyer = _prepare_buyer(session, base.buyer_id)
     ready = create_ready_for_pickup_order(session, base, [1])
     handover_ready_order(session, base, ready)
-    _add_payment_attempt(session, ready.order_id, status=PaymentStatus.APPROVED)
+    approved_count = session.scalar(
+        select(func.count(PaymentAttempt.id)).where(
+            PaymentAttempt.order_id == ready.order_id,
+            PaymentAttempt.status == PaymentStatus.APPROVED,
+        )
+    )
+    assert approved_count == 1
     session.commit()
     return base, buyer, ready
 

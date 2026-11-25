@@ -64,6 +64,7 @@ def test_incomplete_scan_rolls_back_entire_handover(session_factory):
     with pytest.raises(IncompletePackageScanError):
         with session_factory.begin() as session:
             handover_order_packages(
+                expected_buyer_id=base.buyer_id,
                 session=session,
                 actor_user_id=base.operator_id,
                 order_number=ready.order_number,
@@ -87,6 +88,7 @@ def test_foreign_package_scan_changes_no_order(session_factory):
     with pytest.raises(UnexpectedPackageScanError):
         with session_factory.begin() as session:
             handover_order_packages(
+                expected_buyer_id=base.buyer_id,
                 session=session,
                 actor_user_id=base.operator_id,
                 order_number=first.order_number,
@@ -107,6 +109,7 @@ def test_duplicate_package_scan_changes_nothing(session_factory):
     with pytest.raises(DuplicatePackageScanError):
         with session_factory.begin() as session:
             handover_order_packages(
+                expected_buyer_id=base.buyer_id,
                 session=session,
                 actor_user_id=base.operator_id,
                 order_number=ready.order_number,
@@ -129,7 +132,7 @@ def test_invalid_staging_location_rolls_back_package_transition(
             session=session, order_number=order_number
         )
         package_code = created.packages[0].package_code
-        pack_order_package(session=session, package_code=package_code)
+        pack_order_package(session=session, package_code=package_code, actor_user_id=base.operator_id)
         storage_code = session.get(
             WarehouseLocation, base.storage_location_id
         ).code

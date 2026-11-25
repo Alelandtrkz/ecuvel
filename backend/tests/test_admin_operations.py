@@ -5,12 +5,12 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.models import (
     Category,
     InventoryBalance,
     Order,
-    OrderItem,
     OrderPackage,
     PaymentAttempt,
     PaymentProof,
@@ -33,7 +33,6 @@ from app.models.enums import (
     PaymentProofStatus,
     PaymentStatus,
     ProductDraftStatus,
-    SellerCommissionType,
     SellerInboundPackageStatus,
     SellerOrderDecisionStatus,
     SellerOrderStatus,
@@ -159,57 +158,6 @@ def _seller_order(
     session.add(seller_order)
     session.flush()
     return seller_order
-
-
-def _order_item(session, *, seller_order: SellerOrder, offer_id, suffix: str) -> OrderItem:
-    item = OrderItem(
-        seller_order_id=seller_order.id,
-        offer_id=offer_id,
-        store_id_snapshot=seller_order.store_id,
-        quantity=1,
-        unit_price=Decimal("10.00"),
-        discount_amount=Decimal("0.00"),
-        tax_amount=Decimal("0.00"),
-        line_total=Decimal("10.00"),
-        currency="USD",
-        gross_line_amount=Decimal("10.00"),
-        product_name_snapshot=f"Producto {suffix}",
-        seller_name_snapshot="Tienda Admin",
-        seller_sku_snapshot=f"SKU-{suffix}-{_token()}",
-        variant_snapshot={},
-        commission_type_snapshot=SellerCommissionType.PERCENTAGE,
-        commission_rate_snapshot=Decimal("0.00"),
-        commission_amount_snapshot=Decimal("0.00"),
-    )
-    session.add(item)
-    session.flush()
-    return item
-
-
-def _outbound_package(
-    session,
-    *,
-    item: OrderItem,
-    status: PackageStatus,
-    now: datetime,
-) -> OrderPackage:
-    package = OrderPackage(
-        package_code=f"OUT-{_token()}",
-        barcode=f"BAR-{_token()}",
-        order_item_id=item.id,
-        quantity=item.quantity,
-        status=status,
-        packed_at=(now if status != PackageStatus.CREATED else None),
-        ready_at=(
-            now
-            if status in {PackageStatus.READY_FOR_PICKUP, PackageStatus.HANDED_OVER}
-            else None
-        ),
-        handed_over_at=(now if status == PackageStatus.HANDED_OVER else None),
-    )
-    session.add(package)
-    session.flush()
-    return package
 
 
 def test_admin_requires_active_ecuvel_staff(session, client):
@@ -503,85 +451,27 @@ def test_dashboard_workflow_alerts_stock_attention_and_activity(session):
     assert all(str(overdue.id) not in (item.public_reference or "") for item in page.activity)
 
 
-def test_ready_for_pickup_counts_only_complete_unique_orders(session):
-    now = datetime(2026, 8, 8, 15, 30, tzinfo=timezone.utc)
-    first_catalog = create_catalog_and_stock(session, stock=50)
-    second_catalog = create_catalog_and_stock(session, stock=50)
-    buyer = session.get(User, first_catalog.buyer_id)
-    first_store = session.get(Store, first_catalog.store_id)
-    second_store = session.get(Store, second_catalog.store_id)
+def test_ready_for_pickup_counts_only_complete_unique_orders(app, session, monkeypatch, tmp_path):
+    from tests.factories import create_ready_for_pickup_order
+    from tests.test_seller_custody_chain import point_with_staging, prepare, published_sale, ready_inbound, receive
 
-    complete = _order(session, buyer_id=buyer.id, created_at=now)
-    complete_seller = _seller_order(
-        session,
-        order=complete,
-        store=first_store,
-        status=SellerOrderStatus.READY_FOR_PICKUP,
-    )
-    complete_item = _order_item(
-        session,
-        seller_order=complete_seller,
-        offer_id=first_catalog.offer_id,
-        suffix="complete",
-    )
-    _outbound_package(
-        session,
-        item=complete_item,
-        status=PackageStatus.READY_FOR_PICKUP,
-        now=now,
-    )
-
-    partial = _order(session, buyer_id=buyer.id, created_at=now)
-    partial_seller = _seller_order(
-        session,
-        order=partial,
-        store=first_store,
-        status=SellerOrderStatus.PACKED,
-    )
-    for index, status in enumerate(
-        (
-            PackageStatus.READY_FOR_PICKUP,
-            PackageStatus.READY_FOR_PICKUP,
-            PackageStatus.PACKED,
-        )
-    ):
-        item = _order_item(
-            session,
-            seller_order=partial_seller,
-            offer_id=first_catalog.offer_id,
-            suffix=f"partial-{index}",
-        )
-        _outbound_package(session, item=item, status=status, now=now)
-
-    multi_store = _order(session, buyer_id=buyer.id, created_at=now)
-    for index, (store, offer_id) in enumerate(
-        (
-            (first_store, first_catalog.offer_id),
-            (second_store, second_catalog.offer_id),
-        )
-    ):
-        seller_order = _seller_order(
-            session,
-            order=multi_store,
-            store=store,
-            status=SellerOrderStatus.READY_FOR_PICKUP,
-        )
-        item = _order_item(
-            session,
-            seller_order=seller_order,
-            offer_id=offer_id,
-            suffix=f"multi-{index}",
-        )
-        _outbound_package(
-            session,
-            item=item,
-            status=PackageStatus.READY_FOR_PICKUP,
-            now=now,
-        )
-
-    session.flush()
-    page = get_admin_operations_page(session, now=now)
-    assert page.metrics.ready_for_pickup == 2
+    catalog = create_catalog_and_stock(session, stock=50)
+    create_ready_for_pickup_order(session, catalog, [1])
+    point, reception, staging = point_with_staging(session, "Destino")
+    monkeypatch.setitem(app.config, "ECUVEL_PICKUP_WAREHOUSE_CODE", point.code)
+    order, _, actor, owners = published_sale(session, tmp_path, shops=2)
+    for suborder in session.scalars(select(SellerOrder).where(SellerOrder.order_id == order.order_id)):
+        inbound = ready_inbound(session, owners[suborder.store_id], suborder)
+        receive(session, inbound, reception, actor)
+        assert get_admin_operations_page(session).metrics.ready_for_pickup == 1
+    from app.services.fulfillment import create_packages_for_order, pack_order_package, stage_order_package_for_pickup
+    first, _ = create_packages_for_order(session=session, order_number=order.order_number).packages
+    pack_order_package(session=session, package_code=first.package_code, actor_user_id=actor.id)
+    stage_order_package_for_pickup(session=session, package_code=first.package_code,
+                                  pickup_location_code=staging.code, actor_user_id=actor.id)
+    assert get_admin_operations_page(session).metrics.ready_for_pickup == 1
+    prepare(session, order, staging, actor)
+    assert get_admin_operations_page(session).metrics.ready_for_pickup == 2
 
 
 def test_critical_stock_aggregates_sellable_locations_by_offer(session):

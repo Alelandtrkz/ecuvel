@@ -10,7 +10,7 @@ from app.models import (
     LogisticsPackageState, LogisticsTransfer, OrderItem, OrderPackage, SellerInboundPackage, SellerInboundPackageItem,
     SellerOrder, StaffPointAssignment, Warehouse, WarehouseLocation,
 )
-from app.models.enums import LocationType, LogisticsTransferStatus, StaffRole
+from app.models.enums import LocationType, LogisticsPackageStatus, LogisticsTransferStatus, PackageStatus, StaffRole
 from app.services.admin_permissions import AdminAuthorizationError, user_has_permission
 
 
@@ -37,7 +37,18 @@ class OperationalScope:
             return true()
         state = LogisticsPackageState
         if self.carrier_id is None:
+            delivered_here = (
+                select(SellerInboundPackageItem.package_id)
+                .join(OrderPackage, OrderPackage.order_item_id == SellerInboundPackageItem.order_item_id)
+                .join(WarehouseLocation, WarehouseLocation.id == OrderPackage.pickup_location_id)
+                .where(
+                    SellerInboundPackageItem.package_id == state.seller_inbound_package_id,
+                    OrderPackage.status == PackageStatus.HANDED_OVER,
+                    WarehouseLocation.warehouse_id.in_(self.warehouse_ids),
+                ).correlate(state).exists()
+            )
             return or_(
+                and_(state.status == LogisticsPackageStatus.DELIVERED, delivered_here),
                 state.current_warehouse_id.in_(self.warehouse_ids),
                 state.expected_destination_warehouse_id.in_(self.warehouse_ids),
             )
@@ -216,7 +227,7 @@ def require_active_operating_point(
         Warehouse.seller_store_id.is_(None),
     )
     if lock:
-        statement = statement.with_for_update()
+        statement = statement.with_for_update(read=True).execution_options(populate_existing=True)
     warehouse = session.scalar(statement)
     if warehouse is None or not warehouse.is_active:
         raise AdminOperatingContextError(

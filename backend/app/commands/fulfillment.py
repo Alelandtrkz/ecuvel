@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from app.extensions import db
 from app.models import User
+from app.services.admin_scanner import find_buyer_by_public_code
 from app.services.fulfillment import (
     FulfillmentServiceError,
     create_packages_for_order,
@@ -176,6 +177,7 @@ def stage_demo_package(
 
 
 @click.command("handover-demo-order")
+@click.option("--buyer-code", required=True, help="Código escaneado del comprador identificado.")
 @click.option(
     "--order-number",
     required=True,
@@ -198,6 +200,7 @@ def stage_demo_package(
 )
 @with_appcontext
 def handover_demo_order(
+    buyer_code: str,
     order_number: str,
     scanned_codes: tuple[str, ...],
     notes: str | None,
@@ -219,7 +222,11 @@ def handover_demo_order(
                     "No existe el usuario de demostración."
                 )
 
+            buyer = find_buyer_by_public_code(session, buyer_code)
+            if buyer is None:
+                raise click.ClickException("No existe el comprador escaneado.")
             result = handover_order_packages(
+                expected_buyer_id=buyer.id,
                 session=session,
                 order_number=order_number,
                 scanned_codes=scanned_codes,

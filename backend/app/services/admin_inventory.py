@@ -9,6 +9,7 @@ from decimal import Decimal
 from sqlalchemy import String, and_, case, cast, exists, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, joinedload
 
+from app.services.order_custody import fully_staged_inbound
 from app.models import (
     InventoryBalance,
     InventoryMovement,
@@ -253,6 +254,7 @@ def _empty_metrics() -> AdminInventoryMetrics:
 
 def _physical_inbound_condition(warehouse_id: uuid.UUID):
     return (
+        ~fully_staged_inbound(LogisticsPackageState.seller_inbound_package_id),
         LogisticsPackageState.current_warehouse_id == warehouse_id,
         LogisticsPackageState.custodian_warehouse_id == warehouse_id,
         LogisticsPackageState.status.in_(PHYSICAL_STATUSES),

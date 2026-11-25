@@ -21,6 +21,7 @@ from app.models import (
     WarehouseLocation,
 )
 from app.models.enums import SellerCommissionType
+from app.services.checkout import CheckoutWarehouseError, resolve_checkout_pickup_point
 from app.services.inventory import (
     InventoryServiceError,
     consume_inventory_reservation,
@@ -413,6 +414,7 @@ def reserve_demo_stock(
                 order = Order(
                     order_number=order_number,
                     buyer_id=buyer.id,
+                    pickup_warehouse_id=resolve_checkout_pickup_point(session, lock=True).id,
                     currency="USD",
                     subtotal=subtotal,
                     discount_total=Decimal("0.00"),
@@ -519,7 +521,7 @@ def reserve_demo_stock(
                 ),
             )
 
-    except InventoryServiceError as exc:
+    except (InventoryServiceError, CheckoutWarehouseError) as exc:
         raise click.ClickException(str(exc)) from exc
 
     click.echo("Reserva procesada correctamente.")

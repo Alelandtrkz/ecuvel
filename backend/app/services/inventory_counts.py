@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.services.admin_operating_context import operational_scope
 from app.services.admin_permissions import AdminAuthorizationError, require_actor_permission
+from app.services.order_custody import fully_staged_inbound
 from app.models import (
     LogisticsPackageState,
     OrderPackage,
@@ -74,6 +75,7 @@ def _physical_inbound_statement(
             WarehouseLocation.id == LogisticsPackageState.current_location_id,
         )
         .where(
+            ~fully_staged_inbound(LogisticsPackageState.seller_inbound_package_id),
             LogisticsPackageState.current_warehouse_id == warehouse_id,
             LogisticsPackageState.custodian_warehouse_id == warehouse_id,
             LogisticsPackageState.status.in_(

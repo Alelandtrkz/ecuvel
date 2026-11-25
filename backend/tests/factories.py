@@ -4,6 +4,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from sqlalchemy import select
 
 from sqlalchemy.orm import Session
 
@@ -144,7 +148,7 @@ def create_catalog_and_stock(
         status=OfferStatus.ACTIVE,
     )
     warehouse = Warehouse(
-        code=f"WH-{token}",
+        code=f"WH-{token}" if session.scalar(select(Warehouse.id).where(Warehouse.code == "TEST-PICKUP")) else "TEST-PICKUP",
         name="Warehouse Test",
         address_line="Test address",
         city="Quito",
@@ -215,6 +219,7 @@ def create_order_items(
     base: BaseData,
     quantities: list[int],
     *,
+    pickup_warehouse_id: uuid.UUID | None = None,
     discount_total: Decimal = Decimal("0.00"),
     commission_rate: Decimal = Decimal("0.00"),
 ) -> tuple[uuid.UUID, str, tuple[uuid.UUID, ...]]:
@@ -222,6 +227,7 @@ def create_order_items(
     subtotal = Decimal(sum(quantities) * 10)
     order = Order(
         order_number=f"ORD-{token}",
+        pickup_warehouse_id=pickup_warehouse_id,
         buyer_id=base.buyer_id,
         currency="USD",
         subtotal=subtotal,
@@ -330,35 +336,70 @@ def pick_item_reservations(
         )
 
 
-def create_picked_order(
-    session: Session,
-    base: BaseData,
-    quantities: list[int],
-) -> tuple[uuid.UUID, str, tuple[uuid.UUID, ...]]:
-    order_id, order_number, item_ids = create_order_items(
-        session, base, quantities
-    )
+def create_ready_inbound_order(session: Session, base: BaseData, quantities, *, approved_at=None):
+    from app.models import PaymentAttempt, StoreMember
+    from app.models.enums import PaymentMethod, PaymentStatus
+    from app.services.partner_orders import approve_partner_order
+    from app.services.payment_proofs import review_payment_proof
+    from app.services.seller_inbound_packages import create_partner_inbound_package, mark_partner_inbound_package_ready
+    from tests.product_moderation_helpers import create_user
+    from tests.test_payment_proofs import _submit
+    from tests.test_product_publication import _enable_catalog_access
 
+    operator = session.get(User, base.operator_id)
+    operator.is_ecuvel_staff = True
+    owner = session.scalar(select(User).join(StoreMember).where(StoreMember.store_id == base.store_id))
+    if owner is None:
+        owner = create_user(session)
+        _enable_catalog_access(session, seller=owner, store=session.get(Store, base.store_id))
+    order_id, number, item_ids = create_order_items(session, base, quantities, pickup_warehouse_id=base.warehouse_id)
     for item_id in item_ids:
-        reservation_ids = reserve_item(session, base, item_id)
-        consume_item_reservations(session, reservation_ids)
-        pick_item_reservations(
-            session,
-            reservation_ids,
-            base.operator_id,
-        )
+        reserve_item(session, base, item_id)
+    attempt = PaymentAttempt(
+        order_id=order_id, method=PaymentMethod.BANK_TRANSFER, status=PaymentStatus.AWAITING_PROOF,
+        amount=session.get(Order, order_id).grand_total, currency="USD",
+        idempotency_key=f"checkout-{_token()}", request_fingerprint=uuid.uuid4().hex.ljust(64, "0"),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    session.add(attempt)
+    session.flush()
+    with TemporaryDirectory() as directory:
+        root = Path(directory)
+        proof = _submit(session, root, attempt, base.buyer_id, key=f"proof-{attempt.id}")
+        review_payment_proof(session=session, proof_id=proof.proof_id, decision="approve",
+                           reviewer_user_id=operator.id, storage_root=root, now=approved_at)
+    suborder = session.scalars(select(SellerOrder).where(SellerOrder.order_id == order_id)).one()
+    approve_partner_order(session, user_id=owner.id, seller_order_id=suborder.id)
+    package = create_partner_inbound_package(session, user_id=owner.id, seller_order_id=suborder.id)
+    ready = mark_partner_inbound_package_ready(
+        session, user_id=owner.id, seller_order_id=suborder.id, package_id=package.package_id,
+    )
+    return order_id, number, item_ids, ready
 
-    return order_id, order_number, item_ids
+
+def create_picked_order(session, base, quantities, *, approved_at=None):
+    from app.services.seller_inbound_packages import receive_seller_inbound_package
+
+    order_id, number, item_ids, package = create_ready_inbound_order(
+        session, base, quantities, approved_at=approved_at,
+    )
+    receive_seller_inbound_package(
+        session, package_code=package.package_code, actor_user_id=base.operator_id,
+        received_location_id=base.receiving_location_id,
+        verified_product_codes=[line.sku for line in package.items for _ in range(line.quantity)],
+    )
+    return order_id, number, item_ids
 
 
 def create_ready_for_pickup_order(
     session: Session,
     base: BaseData,
     quantities: list[int],
+    *, approved_at: datetime | None = None,
 ) -> ReadyOrderData:
     session.get(User, base.operator_id).is_ecuvel_staff = True
     order_id, order_number, item_ids = create_picked_order(
-        session, base, quantities
+        session, base, quantities, approved_at=approved_at
     )
     created = create_packages_for_order(
         session=session,
@@ -396,6 +437,7 @@ def handover_ready_order(
     ready: ReadyOrderData,
 ):
     return handover_order_packages(
+        expected_buyer_id=base.buyer_id,
         session=session,
         order_number=ready.order_number,
         scanned_codes=ready.package_codes,
